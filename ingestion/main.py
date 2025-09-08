@@ -117,7 +117,7 @@ def refresh_transcripts(cloud_event):
 @functions_framework.http
 def fetch_news(request):
     """Entry point for the news fetcher pipeline."""
-    # Note: news_fetcher does not need external clients passed in
+    # This now matches the simple pattern from your options_chain_fetcher.
     news_fetcher.run_pipeline()
     return "News fetcher pipeline started.", 202
 
