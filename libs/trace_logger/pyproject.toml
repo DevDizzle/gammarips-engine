@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trace_logger"
+version = "0.1.0"
+description = "GammaRips shared LLM trace logger — fire-and-forget BQ writer for llm_traces_v1"
+requires-python = ">=3.10"
+dependencies = [
+    "google-cloud-bigquery>=3.27",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trace_logger*"]

@@ -5,7 +5,7 @@
 # Virtual Environments
 # Ignore the virtual environment folder. Common names are .venv, venv, or env.
 # The trailing slash ensures we only match directories.
-.venv/
+.venv*/
 venv/
 env/
 
@@ -36,13 +36,29 @@ build/
 *.sublime-project
 *.sublime-workspace
 
-# Archive (legacy code, not public)
-_archive/
+# Archive (legacy code, not public).
+# Use `_archive/*` (not `_archive/`) so the directory itself isn't excluded —
+# that lets us re-include the consolidated 2026-04 research-report archive,
+# which is the audit trail cited by docs/research_reports/FINDINGS_LEDGER.md
+# and must stay in version control.
+_archive/*
+!_archive/research_reports_2026-04/
 
 # Cache dirs
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 
+# Claude Code — keep agents and rules, ignore local settings and plans
+.claude/settings.local.json
+.claude/plans/
+
 # Gemini config
 .gemini/prompts/
+
+# trace_logger vendor copies staged by service deploy.sh scripts
+**/_trace_logger_vendor/
+
+# dbt — incomplete/stale project, not in use. Ignore the whole directory.
+dbt/
+.user.yml

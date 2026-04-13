@@ -10,6 +10,8 @@ import json
 import logging
 import asyncio
 import re
+import time as _time
+from datetime import date as _date
 from typing import Optional
 
 import anthropic
@@ -19,28 +21,86 @@ from google.genai import types
 
 from config import AGENTS, SYSTEM_PROMPT
 
+try:
+    from trace_logger import TraceLogger, TraceRecord
+    _trace_logger = TraceLogger()
+except Exception:  # library unavailable — debate must still work
+    _trace_logger = None
+    TraceRecord = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
-async def call_agent(agent: dict, prompt: str, temperature: float = 0.7) -> str:
+def _emit_trace(
+    trace_ctx: Optional[dict],
+    model_provider: str,
+    model_id: str,
+    prompt: str,
+    response_text: Optional[str],
+    status: str,
+    t0: float,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    error: Optional[str] = None,
+) -> None:
+    """Fire-and-forget trace emit. Never raises."""
+    if _trace_logger is None or TraceRecord is None or trace_ctx is None:
+        return
+    try:
+        scan_date_str = trace_ctx.get("scan_date")
+        scan_date_obj = _date.fromisoformat(scan_date_str) if scan_date_str else _date.today()
+        _trace_logger.log(TraceRecord(
+            service="agent_arena",
+            call_site=f"{trace_ctx.get('call_site', 'unknown')}_{trace_ctx.get('agent_id', 'unknown')}",
+            run_id=trace_ctx.get("run_id", "unknown"),
+            scan_date=scan_date_obj,
+            ticker=None,  # debate calls are not ticker-scoped
+            model_provider=model_provider,
+            model_id=model_id,
+            prompt=prompt,
+            response_text=response_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=int((_time.monotonic() - t0) * 1000),
+            status=status,
+            error=error,
+            inputs_raw=f"{trace_ctx.get('call_site')}|{trace_ctx.get('agent_id')}",
+        ))
+    except Exception:
+        pass
+
+
+async def call_agent(
+    agent: dict,
+    prompt: str,
+    temperature: float = 0.7,
+    trace_ctx: Optional[dict] = None,
+) -> str:
     """
     Call a single agent's model API and return the response text.
     Routes to the correct provider based on agent config.
+
+    trace_ctx is an optional dict {scan_date, run_id, call_site, agent_id}
+    used by the trace_logger to emit one row per LLM call.
     """
     provider = agent["provider"]
     api_key = os.environ.get(agent["api_key_env"], "")
-    
+
+    # Ensure agent_id is populated in trace_ctx for provider fns
+    if trace_ctx is not None:
+        trace_ctx = {**trace_ctx, "agent_id": agent.get("id", "unknown")}
+
     if not api_key:
         logger.warning(f"No API key for {agent['id']} ({agent['api_key_env']}). Skipping.")
         return json.dumps([])
 
     try:
         if provider == "anthropic":
-            return await _call_anthropic(agent, api_key, prompt, temperature)
+            return await _call_anthropic(agent, api_key, prompt, temperature, trace_ctx)
         elif provider == "google":
-            return await _call_google(agent, api_key, prompt, temperature)
+            return await _call_google(agent, api_key, prompt, temperature, trace_ctx)
         elif provider in ("openai", "openai_compat"):
-            return await _call_openai_compat(agent, api_key, prompt, temperature)
+            return await _call_openai_compat(agent, api_key, prompt, temperature, trace_ctx)
         else:
             logger.error(f"Unknown provider: {provider}")
             return json.dumps([])
@@ -77,40 +137,63 @@ async def _call_with_id(agent: dict, prompt: str, temperature: float):
 # Provider-specific implementations
 # ============================================================
 
-async def _call_anthropic(agent: dict, api_key: str, prompt: str, temperature: float) -> str:
+async def _call_anthropic(
+    agent: dict, api_key: str, prompt: str, temperature: float,
+    trace_ctx: Optional[dict] = None,
+) -> str:
     """Call Anthropic's Messages API (Claude Sonnet 4)."""
     client = anthropic.AsyncAnthropic(api_key=api_key)
-    
-    message = await client.messages.create(
-        model=agent["model"],
-        max_tokens=2048,
-        temperature=temperature,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    
-    return message.content[0].text
+    _t0 = _time.monotonic()
+
+    try:
+        message = await client.messages.create(
+            model=agent["model"],
+            max_tokens=2048,
+            temperature=temperature,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}]
+        )
+    except Exception as e:
+        _emit_trace(trace_ctx, "anthropic", agent["model"], prompt, None,
+                    status="api_error", t0=_t0, error=str(e)[:500])
+        raise
+
+    text = message.content[0].text
+    _in = getattr(getattr(message, "usage", None), "input_tokens", None)
+    _out = getattr(getattr(message, "usage", None), "output_tokens", None)
+    _emit_trace(trace_ctx, "anthropic", agent["model"], prompt, text,
+                status="ok", t0=_t0, input_tokens=_in, output_tokens=_out)
+    return text
 
 
-async def _call_google(agent: dict, api_key: str, prompt: str, temperature: float) -> str:
+async def _call_google(
+    agent: dict, api_key: str, prompt: str, temperature: float,
+    trace_ctx: Optional[dict] = None,
+) -> str:
     """Call Google Gemini 3 Flash with thinking_level control."""
     client = genai.Client(api_key=api_key)
-    
+
     thinking_level = agent.get("thinking_level", "high")
-    
-    response = await asyncio.to_thread(
-        client.models.generate_content,
-        model=agent["model"],
-        contents=f"{SYSTEM_PROMPT}\n\n{prompt}",
-        config=types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=4096,
-            thinking_config=types.ThinkingConfig(
-                thinking_budget={"minimal": 128, "low": 1024, "medium": 4096, "high": 8192}.get(thinking_level, 8192)
-            ),
+    _t0 = _time.monotonic()
+
+    try:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=agent["model"],
+            contents=f"{SYSTEM_PROMPT}\n\n{prompt}",
+            config=types.GenerateContentConfig(
+                temperature=temperature,
+                max_output_tokens=4096,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget={"minimal": 128, "low": 1024, "medium": 4096, "high": 8192}.get(thinking_level, 8192)
+                ),
+            )
         )
-    )
-    
+    except Exception as e:
+        _emit_trace(trace_ctx, "google_gemini", agent["model"], prompt, None,
+                    status="api_error", t0=_t0, error=str(e)[:500])
+        raise
+
     # Extract only the text parts, skip thinking parts
     text_parts = []
     if response.candidates:
@@ -120,59 +203,87 @@ async def _call_google(agent: dict, api_key: str, prompt: str, temperature: floa
                 continue
             if hasattr(part, 'text') and part.text:
                 text_parts.append(part.text)
-    
+
     combined = "\n".join(text_parts)
     if not combined.strip():
         # Fallback to .text property
         combined = response.text or "[]"
-    
+
+    _um = getattr(response, "usage_metadata", None)
+    _in = getattr(_um, "prompt_token_count", None) if _um else None
+    _out = getattr(_um, "candidates_token_count", None) if _um else None
+    _emit_trace(trace_ctx, "google_gemini", agent["model"], prompt, combined,
+                status="ok", t0=_t0, input_tokens=_in, output_tokens=_out)
     return combined
 
 
-async def _call_openai_compat(agent: dict, api_key: str, prompt: str, temperature: float) -> str:
+async def _call_openai_compat(
+    agent: dict, api_key: str, prompt: str, temperature: float,
+    trace_ctx: Optional[dict] = None,
+) -> str:
     """
     Call OpenAI-compatible API (xAI/Grok, DeepSeek, OpenAI o3/GPT).
     Handles reasoning models (o3) that don't support temperature/system messages.
     """
     base_url = agent.get("base_url", "https://api.openai.com/v1")
-    
+
     client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
-    
+
     model = agent["model"]
     is_reasoning = model.startswith("o1") or model.startswith("o3") or model.startswith("o4")
-    
-    if is_reasoning:
-        # Reasoning models: no temperature, no system role, use max_completion_tokens
-        response = await client.chat.completions.create(
-            model=model,
-            max_completion_tokens=4096,
-            messages=[
-                {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{prompt}"},
-            ]
-        )
-    elif model.startswith("gpt-5"):
-        # GPT-5.x requires max_completion_tokens instead of max_tokens
-        response = await client.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            max_completion_tokens=2048,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
-        )
+    _t0 = _time.monotonic()
+
+    # Provider label: grok/deepseek/openai all ride this path — record which.
+    if "x.ai" in base_url:
+        provider_label = "xai"
+    elif "deepseek" in base_url:
+        provider_label = "deepseek"
     else:
-        response = await client.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            max_tokens=2048,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
-        )
-    
-    return response.choices[0].message.content
+        provider_label = "openai"
+
+    try:
+        if is_reasoning:
+            # Reasoning models: no temperature, no system role, use max_completion_tokens
+            response = await client.chat.completions.create(
+                model=model,
+                max_completion_tokens=4096,
+                messages=[
+                    {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{prompt}"},
+                ]
+            )
+        elif model.startswith("gpt-5"):
+            # GPT-5.x requires max_completion_tokens instead of max_tokens
+            response = await client.chat.completions.create(
+                model=model,
+                temperature=temperature,
+                max_completion_tokens=2048,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
+            )
+        else:
+            response = await client.chat.completions.create(
+                model=model,
+                temperature=temperature,
+                max_tokens=2048,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
+            )
+    except Exception as e:
+        _emit_trace(trace_ctx, provider_label, model, prompt, None,
+                    status="api_error", t0=_t0, error=str(e)[:500])
+        raise
+
+    text = response.choices[0].message.content
+    _usage = getattr(response, "usage", None)
+    _in = getattr(_usage, "prompt_tokens", None) if _usage else None
+    _out = getattr(_usage, "completion_tokens", None) if _usage else None
+    _emit_trace(trace_ctx, provider_label, model, prompt, text,
+                status="ok", t0=_t0, input_tokens=_in, output_tokens=_out)
+    return text
 
 
 # ============================================================

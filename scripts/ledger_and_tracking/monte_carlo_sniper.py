@@ -10,13 +10,10 @@ def run_monte_carlo():
     # Fetch the exact cohort to get empirical returns
     query = f"""
     SELECT realized_return_pct
-    FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
+    FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger_v3`
     WHERE is_skipped = FALSE
       AND realized_return_pct IS NOT NULL
-      AND VIX_at_entry <= 23.0
       AND premium_score >= 2
-      AND NOT (VIX_at_entry >= 18.0 AND direction = 'BULLISH')
-      AND NOT (VIX_at_entry < 18.0 AND direction = 'BEARISH')
     """
     
     try:

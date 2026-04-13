@@ -357,7 +357,10 @@ async def run_debate(signals: list[dict], dry_run: bool = False) -> dict:
         )
         full_prompt = build_system_prompt(agent) + "\n\n" + prompt
         logger.info(f"  Calling {agent['id']} ({agent['role_label']})...")
-        resp = await call_agent(agent, full_prompt, temperature=0.7)
+        resp = await call_agent(
+            agent, full_prompt, temperature=0.7,
+            trace_ctx={"scan_date": scan_date, "run_id": debate_id, "call_site": "round1_pick"},
+        )
         r1_responses[agent["id"]] = resp
         r1_parsed[agent["id"]] = parse_agent_response(resp)
         logger.info(f"  {agent['id']}: {len(r1_parsed[agent['id']])} picks")
@@ -387,7 +390,10 @@ async def run_debate(signals: list[dict], dry_run: bool = False) -> dict:
         )
         full_prompt = build_system_prompt(agent) + "\n\n" + prompt
         logger.info(f"  Calling {agent['id']} ({agent['role_label']})...")
-        resp = await call_agent(agent, full_prompt, temperature=0.7)
+        resp = await call_agent(
+            agent, full_prompt, temperature=0.7,
+            trace_ctx={"scan_date": scan_date, "run_id": debate_id, "call_site": "round2_attack"},
+        )
         r2_responses[agent["id"]] = resp
         r2_parsed[agent["id"]] = parse_agent_response(resp)
         logger.info(f"  {agent['id']}: {len(r2_parsed[agent['id']])} actions")
@@ -433,7 +439,10 @@ async def run_debate(signals: list[dict], dry_run: bool = False) -> dict:
         )
         full_prompt = build_system_prompt(agent) + "\n\n" + prompt
         logger.info(f"  Calling {agent['id']} ({agent['role_label']})...")
-        resp = await call_agent(agent, full_prompt, temperature=0.7)
+        resp = await call_agent(
+            agent, full_prompt, temperature=0.7,
+            trace_ctx={"scan_date": scan_date, "run_id": debate_id, "call_site": "round3_defend"},
+        )
         r3_responses[agent["id"]] = resp
         r3_parsed[agent["id"]] = parse_agent_response(resp)
         logger.info(f"  {agent['id']}: {len(r3_parsed[agent['id']])} defenses")
@@ -464,7 +473,10 @@ async def run_debate(signals: list[dict], dry_run: bool = False) -> dict:
         )
         full_prompt = build_system_prompt(agent) + "\n\n" + prompt
         logger.info(f"  Calling {agent['id']} ({agent['role_label']})...")
-        resp = await call_agent(agent, full_prompt, temperature=0.5)  # Lower temp for final
+        resp = await call_agent(
+            agent, full_prompt, temperature=0.5,  # Lower temp for final
+            trace_ctx={"scan_date": scan_date, "run_id": debate_id, "call_site": "round4_final"},
+        )
         r4_responses[agent["id"]] = resp
         r4_parsed[agent["id"]] = parse_agent_response(resp)
         logger.info(f"  {agent['id']}: {len(r4_parsed[agent['id']])} final picks")

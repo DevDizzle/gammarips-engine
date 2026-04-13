@@ -18,6 +18,13 @@ from google.cloud import bigquery, storage
 from google import genai
 from google.genai import types
 
+try:
+    from trace_logger import TraceLogger, TraceRecord
+    _trace_logger = TraceLogger()
+except Exception:  # library unavailable — trading must still work
+    _trace_logger = None
+    TraceRecord = None  # type: ignore
+
 app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
@@ -86,7 +93,14 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
 # STEP 2: Fetch & Analyze news (Gemini Grounded Search)
 # =====================================================================
 
-def fetch_and_analyze_news(ticker: str, direction: str, price_change_pct: float, flow_volume: float = 0) -> dict | None:
+def fetch_and_analyze_news(
+    ticker: str,
+    direction: str,
+    price_change_pct: float,
+    flow_volume: float = 0,
+    scan_date: str | None = None,
+    run_id: str | None = None,
+) -> dict | None:
     """
     Use Gemini with Google Search grounding to fetch and analyze
     recent news for a ticker in a single call.
@@ -96,7 +110,12 @@ def fetch_and_analyze_news(ticker: str, direction: str, price_change_pct: float,
     MAX_RETRIES = 3
     RETRY_CODES = {429, 499, 504}
 
+    # Trace context (safe defaults if caller didn't pass them)
+    _scan_date_iso = scan_date or date.today().isoformat()
+    _run_id = run_id or f"enrichment_{_scan_date_iso}"
+
     for attempt in range(MAX_RETRIES):
+      _t0 = _time.monotonic()
       try:
         client = genai.Client(
             vertexai=True,
@@ -221,11 +240,56 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
         except (ValueError, TypeError):
             result["reversal_probability"] = 0.3
 
+        # --- Trace log (fire-and-forget) ---
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _um = getattr(response, "usage_metadata", None)
+                _in = getattr(_um, "prompt_token_count", None) if _um else None
+                _out = getattr(_um, "candidates_token_count", None) if _um else None
+                _trace_logger.log(TraceRecord(
+                    service="enrichment",
+                    call_site="fetch_and_analyze_news",
+                    run_id=_run_id,
+                    scan_date=date.fromisoformat(_scan_date_iso),
+                    ticker=ticker,
+                    model_provider="vertex_gemini",
+                    model_id=MODEL_NAME,
+                    prompt=prompt,
+                    response_text=text,
+                    response_parsed=result,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="ok",
+                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                ))
+            except Exception:
+                pass
+
         return result
 
       except json.JSONDecodeError as e:
         logger.error(f"  {ticker}: Failed to parse grounded search JSON: {e}")
         logger.error(f"  {ticker}: Raw text: {text[:500]}")
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _trace_logger.log(TraceRecord(
+                    service="enrichment",
+                    call_site="fetch_and_analyze_news",
+                    run_id=_run_id,
+                    scan_date=date.fromisoformat(_scan_date_iso),
+                    ticker=ticker,
+                    model_provider="vertex_gemini",
+                    model_id=MODEL_NAME,
+                    prompt=prompt,
+                    response_text=text if 'text' in locals() else None,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="parse_error",
+                    error=str(e)[:500],
+                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                ))
+            except Exception:
+                pass
         return None
       except Exception as e:
         error_str = str(e)
@@ -237,6 +301,24 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
             _time.sleep(wait)
             continue
         logger.error(f"  {ticker}: Grounded search failed: {e}")
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _trace_logger.log(TraceRecord(
+                    service="enrichment",
+                    call_site="fetch_and_analyze_news",
+                    run_id=_run_id,
+                    scan_date=date.fromisoformat(_scan_date_iso),
+                    ticker=ticker,
+                    model_provider="vertex_gemini",
+                    model_id=MODEL_NAME,
+                    prompt=prompt if 'prompt' in locals() else None,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="api_error",
+                    error=error_str[:500],
+                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                ))
+            except Exception:
+                pass
         return None
 
 
@@ -254,6 +336,7 @@ def fetch_and_analyze_news_batch(
     bucket = gcs_client.bucket(GCS_BUCKET)
     results = {}
     today = date.today().isoformat()
+    _run_id = f"enrichment_{today}"
 
     def _process_one(signal):
         ticker = signal["ticker"]
@@ -265,7 +348,10 @@ def fetch_and_analyze_news_batch(
         else:
             flow_vol = float(signal.get("put_dollar_volume", 0) or 0)
 
-        analysis = fetch_and_analyze_news(ticker, direction, move_pct, flow_vol)
+        analysis = fetch_and_analyze_news(
+            ticker, direction, move_pct, flow_vol,
+            scan_date=today, run_id=_run_id,
+        )
 
         # Store result in GCS for audit trail
         if analysis:
@@ -364,6 +450,18 @@ def fetch_technicals_for_ticker(ticker: str, polygon_key: str) -> dict | None:
         high_52w = safe_float(df["high"].max())
         low_52w = safe_float(df["low"].min())
         
+        # New V4 Features
+        latest_low = safe_float(latest.get("low"))
+        latest_high = safe_float(latest.get("high"))
+        
+        if latest_high is not None and latest_low is not None and latest_high > latest_low:
+            close_loc = (close_price - latest_low) / (latest_high - latest_low)
+        else:
+            close_loc = 0.5
+            
+        dist_from_low = (close_price - low_52w) / low_52w if low_52w and low_52w > 0 else None
+        dist_from_high = (high_52w - close_price) / close_price if close_price and close_price > 0 and high_52w else None
+
         # Swing high/low detection (last 20 bars for near-term levels)
         recent = df.tail(20)
         recent_high = safe_float(recent["high"].max())
@@ -700,6 +798,10 @@ def write_enriched_signals(
             "resistance": tech.get("resistance"),
             "high_52w": tech.get("high_52w"),
             "low_52w": tech.get("low_52w"),
+            "close_loc": tech.get("close_loc"),
+            "dist_from_low": tech.get("dist_from_low"),
+            "dist_from_high": tech.get("dist_from_high"),
+            "stochd_14_3_3": tech.get("stochd_14_3_3"),
             # NEW: Risk/Reward
             "risk_reward_ratio": _calc_risk_reward(
                 sig.get("underlying_price", 0), sig.get("direction", ""),
@@ -753,7 +855,8 @@ def write_enriched_signals(
                             "call_vol_oi_ratio", "put_vol_oi_ratio", "recommended_mid_price", "recommended_spread_pct",
                             "contract_score", "price_change_pct", "underlying_price",
                             "recommended_delta", "recommended_gamma", "recommended_theta",
-                            "recommended_vega", "recommended_iv", "recommended_strike"]:
+                            "recommended_vega", "recommended_iv", "recommended_strike",
+                            "close_loc", "dist_from_low", "dist_from_high", "stochd_14_3_3"]:
             if row.get(float_field) is not None:
                 try:
                     row[float_field] = float(row[float_field])
@@ -763,7 +866,7 @@ def write_enriched_signals(
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
-        autodetect=True,
+        autodetect=False,
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
     )
 
@@ -861,6 +964,10 @@ def sync_to_firestore(signals: list[dict], technicals: dict, news_analysis: dict
             "resistance": tech.get("resistance"),
             "high_52w": tech.get("high_52w"),
             "low_52w": tech.get("low_52w"),
+            "close_loc": tech.get("close_loc"),
+            "dist_from_low": tech.get("dist_from_low"),
+            "dist_from_high": tech.get("dist_from_high"),
+            "stochd_14_3_3": tech.get("stochd_14_3_3"),
             # NEW: Risk/Reward
             "risk_reward_ratio": _calc_risk_reward(
                 sig.get("underlying_price", 0), sig.get("direction", ""),
@@ -949,17 +1056,17 @@ def enrichment_trigger():
     else:
         logger.warning("POLYGON_API_KEY is NOT set.")
 
-    # Step 1: Get today's high-score signals
-    signals, scan_date = get_signal_tickers(bq_client)
+    # Parse optional request parameters
+    req_body = {}
+    if request.method == "POST" and request.is_json:
+        req_body = request.get_json(silent=True) or {}
+    override_scan_date = req_body.get("scan_date") or request.args.get("scan_date")
+    force = req_body.get("force", False) or bool(request.args.get("force"))
+
+    # Step 1: Get high-score signals (for override date or latest)
+    signals, scan_date = get_signal_tickers(bq_client, scan_date=override_scan_date)
     if not signals:
         return jsonify({"status": "no_signals", "scan_date": scan_date}), 200
-
-    # Check for force flag (POST JSON body or query param)
-    force = False
-    if request.method == "POST" and request.is_json:
-        force = (request.get_json(silent=True) or {}).get("force", False)
-    elif request.args.get("force"):
-        force = True
 
     if not force:
         # Guard: skip if scan_date is stale (>3 calendar days old — covers 3-day weekends)

@@ -23,3 +23,5 @@ beautifulsoup4
 tweepy
 flask
 gunicorn
+dbt-core
+dbt-bigquery

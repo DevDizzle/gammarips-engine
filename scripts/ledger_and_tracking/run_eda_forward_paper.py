@@ -10,7 +10,7 @@ def run_eda():
     
     query = f"""
     SELECT *
-    FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
+    FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger_v3`
     """
     
     try:

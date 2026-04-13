@@ -1,11 +1,19 @@
 import os
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+import time as _time
+from datetime import date as _date, datetime, timedelta, timezone
 from flask import Flask, request, jsonify
 from google.cloud import bigquery, firestore
 from google import genai
 from google.genai import types
+
+try:
+    from trace_logger import TraceLogger, TraceRecord
+    _trace_logger = TraceLogger()
+except Exception:
+    _trace_logger = None
+    TraceRecord = None  # type: ignore
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +79,7 @@ class ReportResponse(BaseModel):
     headline: str = Field(description='A 2-3 sentence summary of the market split and key directional plays.')
     content: str = Field(description='The full markdown body of the report.')
 
-def generate_report_content(payload):
+def generate_report_content(payload, report_date: str | None = None):
     prompt = f"""
     You are GammaMolt, the AI CEO and quantitative editor for GammaRips.
     You are writing the 'Overnight Edge' daily report.
@@ -93,26 +101,107 @@ def generate_report_content(payload):
       - Best Contract Recommendations
       - Divergence Watch (if any signals stand out)
       - Summary / Bias
+
+    CRITICAL FORMATTING REQUIREMENT:
+    You MUST preserve all formatting by using explicit newline characters (`\n`) within the "content" string. 
+    Use `\n\n` to separate paragraphs and sections. 
+    Do NOT output the content as a single contiguous line of text.
     
     Ensure the JSON is strictly formatted and follows the required schema.
     """
     
-    response = ai_client.models.generate_content(
-        model='gemini-3-flash-preview',
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=ReportResponse,
-            temperature=0.4,
+    _t0 = _time.monotonic()
+    _model_id = 'gemini-3-flash-preview'
+    _scan_date_obj = None
+    if report_date:
+        try:
+            _scan_date_obj = _date.fromisoformat(report_date)
+        except Exception:
+            _scan_date_obj = _date.today()
+    else:
+        _scan_date_obj = _date.today()
+
+    try:
+        response = ai_client.models.generate_content(
+            model=_model_id,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ReportResponse,
+                temperature=0.4,
+            )
         )
-    )
-    
+    except Exception as e:
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _trace_logger.log(TraceRecord(
+                    service="report_generator",
+                    call_site="generate_report_content",
+                    run_id=f"report_{_scan_date_obj.isoformat()}",
+                    scan_date=_scan_date_obj,
+                    model_provider="vertex_gemini",
+                    model_id=_model_id,
+                    prompt=prompt,
+                    response_text=None,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="api_error",
+                    error=str(e)[:500],
+                ))
+            except Exception:
+                pass
+        raise
+
     try:
         if response.parsed:
-            return response.parsed.model_dump()
-        return json.loads(response.text)
+            parsed = response.parsed.model_dump()
+        else:
+            parsed = json.loads(response.text)
+
+        # --- Trace log (fire-and-forget) ---
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _um = getattr(response, "usage_metadata", None)
+                _in = getattr(_um, "prompt_token_count", None) if _um else None
+                _out = getattr(_um, "candidates_token_count", None) if _um else None
+                _trace_logger.log(TraceRecord(
+                    service="report_generator",
+                    call_site="generate_report_content",
+                    run_id=f"report_{_scan_date_obj.isoformat()}",
+                    scan_date=_scan_date_obj,
+                    model_provider="vertex_gemini",
+                    model_id=_model_id,
+                    prompt=prompt,
+                    response_text=getattr(response, "text", None),
+                    response_parsed=parsed,
+                    input_tokens=_in,
+                    output_tokens=_out,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="ok",
+                    inputs_raw=f"report|{_scan_date_obj.isoformat()}|{payload.get('total_signals', 0)}",
+                ))
+            except Exception:
+                pass
+
+        return parsed
     except Exception as e:
         logger.error(f"Failed to parse JSON response. Raw text: {response.text}")
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _trace_logger.log(TraceRecord(
+                    service="report_generator",
+                    call_site="generate_report_content",
+                    run_id=f"report_{_scan_date_obj.isoformat()}",
+                    scan_date=_scan_date_obj,
+                    model_provider="vertex_gemini",
+                    model_id=_model_id,
+                    prompt=prompt,
+                    response_text=getattr(response, "text", None),
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="parse_error",
+                    error=str(e)[:500],
+                ))
+            except Exception:
+                pass
         raise e
 
 @app.route("/", methods=["POST", "GET"])
@@ -165,7 +254,7 @@ def generate_report():
         return jsonify({"status": "error", "message": "Vertex AI Client not configured"}), 500
         
     try:
-        generated = generate_report_content(payload)
+        generated = generate_report_content(payload, report_date=report_date)
     except Exception as e:
         logger.error(f"Generation failed: {e}")
         return jsonify({"status": "error", "message": "Failed to generate content", "details": str(e)}), 500

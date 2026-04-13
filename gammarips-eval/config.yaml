@@ -1,0 +1,33 @@
+# gammarips-eval configuration
+# Controls which evaluators run on which service, pass thresholds, and the
+# judge model for LLM-as-judge evaluators.
+
+eval_version: v1.0.0
+judge_model: gemini-3-flash-preview
+max_spend_usd_per_run: 2.0
+
+# Which evaluators run against each service's traces.
+# Evaluator names must match entries in evaluators/__init__.py REGISTRY.
+service_evaluators:
+  enrichment:
+    - flow_intent_accuracy
+    - calibration
+  agent_arena:
+    - consensus_return_agreement
+    - calibration
+    - quality
+  report_generator:
+    - report_factuality
+    - quality
+    - safety
+
+# Pass thresholds per evaluator (score >= threshold => passed=true).
+thresholds:
+  flow_intent_accuracy: 0.5
+  consensus_return_agreement: 0.5
+  calibration: 0.5  # ECE <= 0.5 => pass (inverted)
+  report_factuality: 0.6
+  quality: 0.7
+  safety: 0.8
+  hallucination: 0.7
+  factual: 0.7

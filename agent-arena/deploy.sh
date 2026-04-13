@@ -8,6 +8,13 @@ SERVICE="agent-arena"
 
 echo "🏟️  Deploying Agent Arena to Cloud Run..."
 
+# Stage shared trace_logger lib into build context.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENDOR_DIR="${SCRIPT_DIR}/_trace_logger_vendor"
+rm -rf "${VENDOR_DIR}"
+cp -r "${SCRIPT_DIR}/../libs/trace_logger/." "${VENDOR_DIR}"
+trap 'rm -rf "${VENDOR_DIR}"' EXIT
+
 gcloud run deploy $SERVICE \
   --project=$PROJECT \
   --region=$REGION \
@@ -21,7 +28,7 @@ gcloud run deploy $SERVICE \
   --min-instances=0 \
   --max-instances=1 \
   --set-secrets="XAI_API_KEY=XAI_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,ARENA_GOOGLE_API_KEY=ARENA_GOOGLE_API_KEY:latest,HF_TOKEN=HF_TOKEN:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest" \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT"
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT,TRACE_LOGGING_ENABLED=true"
 
 echo "✅ Agent Arena deployed!"
 

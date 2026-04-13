@@ -1,0 +1,11 @@
+fastapi==0.115.8
+uvicorn[standard]==0.34.0
+google-cloud-bigquery==3.31.0
+google-cloud-firestore==2.20.1
+google-genai==1.22.0
+pydantic>=2.9.0
+pyyaml>=6.0
+# Note: vendored genai-eval-framework evaluators (hallucination/factual/safety/quality)
+# are dependency-light by design — they run without torch in the v1 deploy.
+# If you enable the NLI-based hallucination evaluator, add:
+#   torch>=2.0, transformers>=4.35, sentence-transformers>=2.2
