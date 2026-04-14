@@ -130,7 +130,7 @@ def fetch_and_analyze_news(
         # Google Search grounding tool
         search_tool = types.Tool(google_search=types.GoogleSearch())
 
-        prompt = f"""You are a senior institutional options flow analyst. Search for the latest news about {ticker} stock from the past 48 hours.
+        prompt = f"""You are a senior institutional options flow analyst. Search for the latest news about {ticker} stock from the past 24 hours. Use at most 2 Google Search queries total.
 
 CONTEXT:
 - Stock moved {price_change_pct:+.1f}% recently
@@ -322,6 +322,33 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
         return None
 
 
+def _load_cached_news(bucket, ticker: str, scan_date: str, max_age_hours: int = 12) -> dict | None:
+    """Return cached news analysis for ticker+scan_date if GCS blob is fresh.
+
+    Covers same-day retries AND V3→V4 dedupe (V3 writes the blob at 05:00,
+    V4 reads it at 05:30). Returns None on any miss/staleness/parse failure.
+    """
+    blob_path = f"{NEWS_OUTPUT_PREFIX}{ticker}_{scan_date}.json"
+    blob = bucket.blob(blob_path)
+    try:
+        if not blob.exists():
+            return None
+        blob.reload()
+        updated = blob.updated
+        if updated is not None:
+            age = datetime.now(timezone.utc) - updated
+            if age.total_seconds() > max_age_hours * 3600:
+                return None
+        payload = blob.download_as_text()
+        result = json.loads(payload)
+        if not isinstance(result, dict):
+            return None
+        return result
+    except Exception as e:
+        logger.warning(f"  {ticker}: news cache read failed ({e}); will regenerate")
+        return None
+
+
 def fetch_and_analyze_news_batch(
     signals: list[dict],
     gcs_client: storage.Client
@@ -348,12 +375,17 @@ def fetch_and_analyze_news_batch(
         else:
             flow_vol = float(signal.get("put_dollar_volume", 0) or 0)
 
+        cached = _load_cached_news(bucket, ticker, today)
+        if cached is not None:
+            logger.info(f"  {ticker}: cache hit — skipping grounded Gemini call")
+            return ticker, cached
+
         analysis = fetch_and_analyze_news(
             ticker, direction, move_pct, flow_vol,
             scan_date=today, run_id=_run_id,
         )
 
-        # Store result in GCS for audit trail
+        # Store result in GCS for audit trail + cache for downstream/retries
         if analysis:
             blob_path = f"{NEWS_OUTPUT_PREFIX}{ticker}_{today}.json"
             blob = bucket.blob(blob_path)
