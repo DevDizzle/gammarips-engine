@@ -53,8 +53,10 @@
 - ✅ Real-money-skip logging: deferred to Phase 5 (optional, only activated when publishing real-money track record).
 
 **Still blocking:**
-- **Phase 2 ship:** OpenClaw API contract (Evan to provide).
-- **Phase 5:** locate existing X auto-poster (task in Phase 5 audit).
+- **Phase 2 ship:** Evan creates WhatsApp group, OpenClaw discovers GROUP_JID, hooks enabled with HOOKS_TOKEN, all three secrets mounted via Secret Manager (`OPENCLAW_GATEWAY_URL`, `OPENCLAW_HOOKS_TOKEN`, `OPENCLAW_GROUP_JID`).
+- **Phase 5:** (resolved) X auto-poster located at `win-tracker/main.py:351-408`. GTM drafter will add new content types, not replace win-tracker's proven strong-win flow.
+
+**Phase 2 architecture simplified (v2.1):** OpenClaw's `/hooks/agent` endpoint handles group routing, so we dropped the planned Pub/Sub + separate `whatsapp-notifier` service. POSTs fire directly from the services that decide each event: `signal-notifier` (09:00 ET entry), `agent-arena` (09:15 ET verdict), new tiny `exit-reminder` service (15:50 ET day-3). `forward-paper-trader` remains untouched per audit rule #2.
 
 **Not blocking any phase:**
 - Disclaimer copy finalization (Evan should review the draft text in plan Section 6.2 step 3).

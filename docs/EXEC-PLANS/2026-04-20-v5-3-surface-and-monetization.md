@@ -227,45 +227,53 @@ Add section to `docs/TRADING-STRATEGY.md`:
 
 Intraday target/stop fills are NOT pushed at the moment of fill because the trader simulates them post-hoc; subscribers already armed their GTC orders at entry and will be notified by their broker, not by us. This is honest — the paywall value is the daily entry timing, not intraday event streaming.
 
-**Architecture (v2, audit-cleared):**
+**Architecture (v2.1 — OpenClaw provided a webhook endpoint; simpler than v2's Pub/Sub approach):**
+
+OpenClaw exposes `POST http://<gateway>:18789/hooks/agent` with `Authorization: Bearer <HOOKS_TOKEN>` and a JSON body containing `{message, name: "GammaRips", deliver: true, channel: "whatsapp", to: <GROUP_JID>}`. That single endpoint handles group routing for us, so we don't need a Pub/Sub + separate consumer service. Instead, each scheduled event POSTs directly, fire-and-forget.
 
 ```
 Stripe checkout → webapp Stripe webhook → Firestore users/{uid}.subscription = {tier: "paid", expires_at: TS, whatsapp_e164: "+1..."}
+  (only needed once we want per-user messaging or paywall inside the OpenClaw agent;
+   for v1 of Phase 2 we use a single shared private WhatsApp group, which is naturally
+   gated by who we invite — Stripe just controls who gets the invite.)
 
-09:00 ET signal-notifier/main.py (ALREADY computes today's pick):
-  ▶ WRITE Firestore todays_pick/{scan_date} = {ticker, direction, contract, strike, expiration,
-       mid_price, vol_oi, moneyness_pct, vix3m, effective_at: scan_date+1 10:00 ET}
-  ▶ PUBLISH Pub/Sub topic `gammarips-pick-decided` with {scan_date, ticker, direction}
+09:00 ET signal-notifier/main.py:
+  ▶ WRITE Firestore todays_pick/{scan_date}
   ▶ (existing) send operator email
+  ▶ NEW: POST OpenClaw /hooks/agent with today's entry message
+       (5s timeout, wrapped in try/except, logs failure — MUST NOT block email or raise)
 
-whatsapp-notifier (NEW Cloud Run service, subscribes to gammarips-pick-decided):
-  ▶ reads todays_pick/{scan_date}
-  ▶ loads Firestore users where subscription.tier == "paid" AND expires_at > now()
-  ▶ POSTs to OpenClaw per subscriber
-  ▶ all failure modes local — does NOT block notifier or trader
+09:15 ET arena-verdict service (NEW, Phase 4 Option C):
+  ▶ READ Firestore todays_pick/{scan_date}
+  ▶ run 3-agent debate (Claude + Grok + Gemini)
+  ▶ UPDATE todays_pick/{scan_date} with arena_verdict + vote_count + reasoning
+  ▶ POST OpenClaw /hooks/agent with verdict update ("🟢 TAKE 4/5" etc.)
 
-15:50 ET NEW scheduler: exit-reminder (can live in whatsapp-notifier):
-  ▶ query forward_paper_ledger for trades where exit_timestamp IS NULL AND scan_date = today - 3 trading days
-  ▶ fire one "close now" push per open position
-  ▶ forward-paper-trader itself then runs at 16:30 ET and writes the real ledger row
+15:50 ET exit-reminder (NEW tiny Cloud Run + scheduler):
+  ▶ QUERY forward_paper_ledger where exit_timestamp IS NULL AND scan_date <= today - 3 trading days
+  ▶ for each open position: POST OpenClaw /hooks/agent with "close FIX now"
 
-forward-paper-trader/main.py: UNCHANGED in this phase. No new imports, no Firestore users query,
-  no HTTP calls, no POLICY_VERSION touch.
+forward-paper-trader/main.py: UNCHANGED in this phase. No new imports, no Firestore query,
+  no outbound HTTP, no POLICY_VERSION touch. Audit rule #2 holds.
 ```
+
+**Secrets:** `OPENCLAW_HOOKS_TOKEN`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GROUP_JID` mounted from Secret Manager. Never in env plaintext.
+
+**Paywall mechanism (v2.1 — simpler than per-user messaging):**
+For the v1 launch, the paywall IS the WhatsApp group invitation. Stripe subscription success triggers a webhook that adds the user's phone number to an allowlist Firestore collection `whatsapp_allowlist`. Evan (or an OpenClaw automation) reads that allowlist and manually/automatically invites those numbers to the private group. Cancellation removes them. No per-message gating needed because the group itself is gated. This sidesteps the whole "identify which user sent a WhatsApp message" problem until we have a real reason to solve it.
 
 **Specific edits:**
 
 | Change | File | Purpose |
 |---|---|---|
-| Stripe webhook handler | `/home/user/gammarips-webapp/src/app/api/stripe/webhook/route.ts` (already exists) | Extend to write `subscription` field on success + cancellation |
-| **todays_pick writer** | `signal-notifier/main.py` | After the existing SELECT that finds the LIMIT-1 pick, write the Firestore doc `todays_pick/{scan_date}` **before** sending the operator email. Fail-closed: if doc write fails, skip email too. |
-| **Pub/Sub publish** | `signal-notifier/main.py` | Publish `gammarips-pick-decided` with `{scan_date, ticker}` after doc write. |
-| **New service** | `/home/user/gammarips-engine/whatsapp-notifier/` | Cloud Run, Pub/Sub-triggered; reads Firestore `todays_pick` + `users`; POSTs OpenClaw; logs every attempt to `libs/trace_logger`. |
-| **Exit-reminder cron** | `whatsapp-notifier/main.py` (second endpoint `/exit_reminder`) | Reads `forward_paper_ledger` for open positions on day-3; sends reminder push at 15:50 ET. |
-| **New scheduler jobs** | gcloud scheduler | (a) `whatsapp-notifier-entry` subscribing to Pub/Sub — no cron needed; (b) `whatsapp-notifier-exit-reminder` cron `50 15 * * 1-5` ET. |
-| **Forbid in-trader HTTP** | `.claude/rules/forward-paper-trader.md` | Add rule: "NEVER add synchronous outbound HTTP or user-notification calls to this service. All subscriber messaging goes through `whatsapp-notifier` via Pub/Sub." |
-| **Compliance disclaimer** | `whatsapp-notifier` | "Paper-trading performance only. Educational. Not investment advice." Appended to every push. |
-| **Secrets** | Secret Manager | `OPENCLAW_API_KEY`, `STRIPE_WEBHOOK_SECRET` mounted from Secret Manager — never env-var plaintext. |
+| Stripe webhook handler | `/home/user/gammarips-webapp/src/app/api/stripe/webhook/route.ts` (already exists) | On success, append user's WhatsApp number to Firestore `whatsapp_allowlist/{phone_e164}`. On cancellation, set `active: false`. |
+| **todays_pick writer** | `signal-notifier/main.py` (Phase 1.0 — already scheduled) | Writes `todays_pick/{scan_date}` Firestore doc before email send |
+| **OpenClaw entry POST** | `signal-notifier/main.py` (Phase 2) | After Firestore write + before/after email: non-blocking POST to `$OPENCLAW_GATEWAY_URL/hooks/agent` with Bearer auth. Timeout 5s. try/except wrapper. Log success/failure via `libs/trace_logger`. Never raises. |
+| **OpenClaw exit-reminder cron (new service)** | `exit-reminder/main.py` (tiny new Cloud Run, Python/Flask) | Single endpoint; queries `forward_paper_ledger` for open positions; POSTs one OpenClaw message per position. Deploys via `deploy.sh` + Cloud Scheduler `50 15 * * 1-5` ET. |
+| **OpenClaw arena-verdict POST** | `agent-arena/main.py` → modified to Option C (Phase 4) | After verdict decided, POST to same OpenClaw endpoint with verdict update |
+| **Forbid in-trader HTTP** | `.claude/rules/forward-paper-trader.md` | Add rule: "NEVER add synchronous outbound HTTP or user-notification calls to this service. Paper-trader is the ledger of record, nothing else. All subscriber messaging fires from `signal-notifier`, `agent-arena`, and `exit-reminder` only." |
+| **Compliance disclaimer** | OpenClaw message template in each caller | Every push includes: *"Paper-trading performance, educational only. Not investment advice."* Appended to message string. |
+| **Secrets** | Secret Manager | `OPENCLAW_HOOKS_TOKEN`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GROUP_JID`, `STRIPE_WEBHOOK_SECRET` — never env-var plaintext. |
 
 **Legal / disclaimer hygiene (v2.1 — no counsel at this scale, per Evan):**
 
@@ -510,11 +518,15 @@ Per CLAUDE.md's governance: any change that touches execution or gate logic requ
 - ✅ Real-money-skip logging: deferred to Phase 5 (only needed when publishing real-money track record)
 - ✅ Stripe subs: set up when we're ready to open paid tier; Phase 2 waits on this
 
+**Resolved 2026-04-20 (later in session):**
+- ✅ X poster located: `win-tracker/main.py:351-408` — Tweepy-based, fires on strong wins only. Keep as-is; new GTM drafter (Phase 5) adds auto-X posts for daily report summary, top-signals teaser, and arena verdict using same 4 X API creds.
+- ✅ OpenClaw API contract received: `POST /hooks/agent` with Bearer, JSON body `{message, name, deliver: true, channel: "whatsapp", to: <GROUP_JID>}`. Architecture simplified — no Pub/Sub, no `whatsapp-notifier` service. Direct POST from `signal-notifier`, `agent-arena`, and new tiny `exit-reminder` service.
+- ✅ Push vs pull decision: **Push** (Option A) — real-time delivery matters for V5.3's 09:00 → 10:00 ET window.
+
 **Still open:**
-1. **X auto-posting source:** is the current X poster in `win-tracker` or a separate service? (Task: audit before Phase 5.)
-2. **OpenClaw send-message API:** what's the exact POST surface + auth? (Shapes `whatsapp-notifier` before Phase 2.)
-3. **Beta subscribers:** who are the first 3–5 testers of the WhatsApp push when Phase 2 is ready? (Doesn't block Phase 1.0 or Phase 1.)
-4. **Disclaimer copy finalization:** confirm the disclaimer text in Section 6.2 step 3 matches what you're comfortable putting on every page and push.
+1. **Group creation (Evan action):** create the private WhatsApp group, add OpenClaw's linked number, get the GROUP_JID from OpenClaw, enable hooks config (`{"hooks": {"enabled": true, "token": "<secret>", "path": "/hooks"}}`) and share the `HOOKS_TOKEN` + `GATEWAY_URL` + `GROUP_JID` via Google Secret Manager (never in chat/plaintext).
+2. **Beta subscribers:** who are the first 3–5 testers of the WhatsApp push when Phase 2 is ready? Not blocking 1.0 or 1.
+3. **Disclaimer copy finalization:** confirm the disclaimer text in Section 6.2 step 3.
 
 ---
 
