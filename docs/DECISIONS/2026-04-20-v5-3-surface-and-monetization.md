@@ -1,9 +1,14 @@
 # Decision: V5.3 surface alignment + $29/mo WhatsApp monetization plan
 
 **Date:** 2026-04-20
-**Status:** Plan approved in principle, Phase 1.0 pending Evan sign-off on audit amendments
+**Status:** v2.1 — Evan approved v2 amendments + made 3 policy calls (compliance hygiene > counsel; arena Option C verdict debate; real-money-skip logging deferred). Phase 1.0 unblocked.
 **Authors:** Evan Parra + Claude (session 2026-04-20)
 **Supersedes:** informal webapp/MCP/arena state; the V3-era "premium_score" is no longer a tradeable concept under V5.3
+
+**Version log:**
+- **v1 (2026-04-20):** initial plan, 5 phases, counsel listed as Phase 2 blocker
+- **v2 (2026-04-20):** post-gammarips-review audit — 12 findings folded in (2 BLOCKERS, 4 HIGHs)
+- **v2.1 (2026-04-20):** Evan policy calls — drop counsel requirement, arena Option C (pre-entry verdict debate on today's V5.3 pick), real-money-skip logging deferred to Phase 5, notifier SQL gains deterministic tiebreaker
 
 ## Decision
 
@@ -11,7 +16,7 @@
 2. Introduce Firestore `todays_pick/{scan_date}` as the **single source of truth** for what GammaRips picked on a given day. Schema pinned in the EXEC-PLAN Phase 1.0 section.
 3. Move the WhatsApp push out of `forward-paper-trader/main.py` entirely. Push is fired by a new `whatsapp-notifier` service subscribed to Pub/Sub event `gammarips-pick-decided`, published by `signal-notifier` after it writes `todays_pick`.
 4. Paying $29/mo subscribers pay for **convenience** (automated push delivery before the 10:00 ET entry moment), NOT for timing advantage. Free users see the same pick on the webapp at the same moment. Strategy doc will be updated before Phase 1 ships.
-5. Agent arena output becomes **retrospective commentary** on closed trades (post-15:50 ET day-3), not pre-entry commentary. This prevents a silent paper-vs-real divergence from arena spooking operators off real-money trades while the paper ledger takes them anyway.
+5. **Agent arena repurposed as a pre-entry verdict debate (Option C, v2.1):** runs at 09:15 ET after `signal-notifier` writes `todays_pick`, with 3 agents answering TAKE / CAUTION / SKIP on today's deterministic pick. Output extends the `todays_pick` doc. Cost target ≤$60/mo. Paper ledger stays full-coverage as the control — `forward-paper-trader` takes every V5.3 pick regardless of arena verdict. Future marketing explicitly labels the filter used ("paper, full-coverage" vs "arena-filtered"). The audit-flagged paper-vs-real divergence is accepted as a transparency problem, not an engineering one.
 6. GTM content (X, Reddit) is **drafted by the engine, emailed to Evan, posted manually**. No Reddit automation. X auto-posting (if it currently exists in `win-tracker` or elsewhere) gets routed through the drafter for approval.
 
 ## Why
@@ -38,13 +43,22 @@
 | 11 | LOW | Phase 1 sequencing | Split out Phase 1.0 (schema + writer) as prerequisite to Phase 1 readers |
 | 12 | LOW | Simulator version protection | Phase 2 DoD bars any diff to `POLICY_VERSION`, `POLICY_GATE`, `LEDGER_TABLE`, record schema |
 
-## Open items requiring Evan
+## Open items requiring Evan (v2.1 — most closed out)
 
-Listed in plan Section 7. Blockers on execution of specific phases:
-- **Phase 1.0 start:** requires sign-off on audit amendments (this doc).
-- **Phase 2 ship:** requires legal/compliance confirmation and OpenClaw API contract.
-- **Phase 4 arena direction:** keep with post-close reshape or kill entirely.
-- **Phase 5 X-posting source:** locate existing auto-poster, decide route.
+**Resolved 2026-04-20:**
+- ✅ v2 audit amendments approved
+- ✅ Compliance counsel NOT required — legal basis: publisher exclusion under *SEC v. Lowe (1985)*; replaced with disclaimer hygiene checklist (plan Section 6.2). Escalate to counsel only if >500 subs + state RIA challenge, or cease-and-desist, or we begin publishing real-money track record, or we take custody of subscriber funds (we will not).
+- ✅ Arena: Option C (pre-entry verdict debate at 09:15 ET, 3 agents, ≤$60/mo). Paper-vs-real divergence accepted as a transparency problem, handled by always labeling marketing claims with the filter used.
+- ✅ Stripe subs: zero subs at launch; plan assumes Phase 2 waits until we are ready to open paid tier.
+- ✅ Real-money-skip logging: deferred to Phase 5 (optional, only activated when publishing real-money track record).
+
+**Still blocking:**
+- **Phase 2 ship:** OpenClaw API contract (Evan to provide).
+- **Phase 5:** locate existing X auto-poster (task in Phase 5 audit).
+
+**Not blocking any phase:**
+- Disclaimer copy finalization (Evan should review the draft text in plan Section 6.2 step 3).
+- Beta subscriber recruitment (pre-launch task before Phase 2 ships).
 
 ## What does NOT change
 

@@ -102,7 +102,23 @@ Key invariants:
 
 Priority order confirmed by user: webapp → paywall → MCP → arena → GTM.
 
-### Phase 1.0 — Pre-work: `todays_pick` schema + writer (0.5 day, BLOCKS Phase 1)
+### Phase 1.0 — Pre-work: `todays_pick` schema + deterministic notifier SQL + writer (0.5 day, BLOCKS Phase 1)
+
+**v2.1 addition — deterministic tiebreaker in `signal-notifier/main.py`.** The current `ORDER BY CASE WHEN direction='BULLISH' THEN call_dollar_volume ELSE put_dollar_volume END DESC` with `LIMIT 1` is **non-deterministic on ties** — if two rows have identical dollar volume to the cent, BigQuery picks arbitrarily. Replace with a fully-deterministic 5-key sort:
+
+```sql
+ORDER BY
+  CASE WHEN direction = 'BULLISH' THEN call_dollar_volume
+       ELSE put_dollar_volume END DESC,     -- primary: directional UOA
+  overnight_score DESC,                      -- higher scanner confidence
+  volume_oi_ratio DESC,                      -- fresher flow
+  recommended_spread_pct ASC,                -- tighter execution
+  ticker ASC                                 -- alphabetical — last-resort deterministic
+LIMIT 1
+```
+
+This lands together with the `todays_pick` writer in the same `signal-notifier` diff so the doc always reflects a deterministic pick.
+
 
 > **v2 amendment (audit #5, #11):** Before any reader (webapp banner, MCP tool, GTM drafter) touches Firestore `todays_pick/{scan_date}`, the **writer** must exist in `signal-notifier/main.py` and the schema must be pinned in this plan. This is the single source of truth for "what did GammaRips pick today."
 
@@ -251,11 +267,22 @@ forward-paper-trader/main.py: UNCHANGED in this phase. No new imports, no Firest
 | **Compliance disclaimer** | `whatsapp-notifier` | "Paper-trading performance only. Educational. Not investment advice." Appended to every push. |
 | **Secrets** | Secret Manager | `OPENCLAW_API_KEY`, `STRIPE_WEBHOOK_SECRET` mounted from Secret Manager — never env-var plaintext. |
 
-**Legal / compliance risks to clear BEFORE shipping:**
-1. **Are we selling "trading signals"?** Gray zone. Safer framing: we share our paper-trading ledger for educational purposes. Subscriber pays for **delivery convenience** — a push that reaches your phone before the 10:00 ET entry moment, so you don't have to sit at a screen. They pay for attention relief, not timing advantage (all data is public on the webapp at 09:00 ET simultaneously). Confirm framing with counsel.
-2. **WhatsApp Business API rules.** OpenClaw uses a private group. Ensure bulk-message rules are respected; avoid WhatsApp's spam classifiers.
-3. **Stripe + SaaS vs. financial-services handling.** Stripe's Acceptable Use for "investment and financial products" may require additional disclosures.
-4. **Real-money-vs-paper discipline (NEW, v2, audit finding #6):** Because `forward-paper-trader` runs the ledger regardless, and subscribers may discretionarily skip real-money trades, the paper-vs-real divergence must be tracked. `docs/TRADING-STRATEGY.md` will get a new section (Phase 2 pre-deploy) requiring: *"For the 30-day OOS validation window, operator logs every real-money skip to Firestore `real_money_skips/{scan_date}` with a reason. If the skip rate exceeds 20%, paper results become an unreliable proxy for real-world performance and we must pause marketing claims built on paper returns."*
+**Legal / disclaimer hygiene (v2.1 — no counsel at this scale, per Evan):**
+
+Legal basis: *SEC v. Lowe (1985)* + Investment Advisers Act §202(a)(11)(D) "publisher exclusion" protects bona fide publishers/newsletters as long as the content is (a) same for all subscribers (impersonal), (b) published on a regular schedule, (c) not customized to any subscriber's financial situation, and (d) the publisher does not take custody of subscriber funds. Our WhatsApp push and webapp meet all four. Counsel is not needed at pre-scale.
+
+Checklist (must all be true before Phase 2 ships):
+1. **Uniform content.** Every paid subscriber gets the identical push. No personalization beyond a `$user_name` greeting.
+2. **Scheduled, not event-responsive.** Push fires from notifier + exit-reminder cron. Never in response to "should I take this?" from a user — that would be personalized advice, which is outside the publisher exclusion.
+3. **Disclaimer on every push and every webapp page:** `"Paper-trading performance, educational content only. Not investment advice. You trade your own account; GammaRips does not manage your money. Past performance is not a guarantee of future results."`
+4. **No fund custody.** Stripe collects subscription only. GammaRips never receives customer trading capital. (Phase 2 DoD confirms.)
+5. **Stripe Acceptable Use review:** read [stripe.com/legal/restricted-businesses](https://stripe.com/legal/restricted-businesses) once before launch; "educational trading content" is accepted; "signal services" are accepted with proper disclosures. Not "investment advisers."
+6. **WhatsApp Business API rules:** OpenClaw is a private group (opt-in via Stripe-confirmed phone number). Bulk messaging rules respected.
+7. **Honest marketing:** only publish paper-trading stats; label them "paper-traded" every time; never imply real-money results we don't have data for.
+
+Escalate to counsel ONLY if any of: (a) >500 paid subs and a state-level RIA challenge appears, (b) cease-and-desist from any regulator, (c) we want to start publishing real-money track record as marketing, (d) we start managing subscriber funds (we won't).
+
+**Real-money-skip logging — deferred:** the original v2 plan proposed logging operator real-money skips during the 30-day OOS window. Evan confirmed no real-money trades to log at launch. This moves to Phase 5 as an optional Firestore collection `operator_trades/{scan_date}` with a single "Took it? Y/N + reason" control on the webapp, to be enabled WHEN we want to publish real-money track record (per the plan's existing track-record milestone: ≥30 closed V5.3 trades OR 60 days).
 
 **Definition of Done (Phase 2):**
 - Paying subscriber receives a WhatsApp entry push **within 10 seconds of 09:00:05 ET** (signal-notifier decision time), NOT tied to the trader's 16:30 ET batch run.
@@ -316,30 +343,43 @@ Agent Arena's role under V5.3 is the most ambiguous workstream.
 - LLM cost $150–250/mo
 - Webapp currently renders arena as "spectacle / education"
 
-**Two options:**
+**Three options (v2.1 — adds Option C per Evan's direction 2026-04-20):**
 
-**Option A — Reshape as freemium content (recommended, given user's freemium strategy):**
-- Keep arena running but **decouple** from critical-path scheduler (already done — it no longer races with enrichment)
-- Reduce to 2 agents (Claude + Grok) → ~60% cost savings
-- Change the debate question from "which single trade?" to "how risky is today's V5.3 pick?" — arena becomes a **risk-commentary layer** on top of the notifier's deterministic pick
-- Publish highlights to webapp + X ("Claude agrees, Grok dissents — here's why")
+**Option C — Verdict debate on today's deterministic pick (RECOMMENDED, Evan-selected):**
+- Runs **09:15 ET** Mon–Fri — after `signal-notifier` writes `todays_pick` at 09:00, before the 10:00 ET entry window.
+- Input: `todays_pick/{scan_date}` (the one V5.3 pick). Skip the day if `has_pick == false`.
+- Question: "Given the enriched signal data for today's pick (thesis, technicals, catalyst, VIX regime), should operator take this trade at 10:00 ET? Answer: TAKE / CAUTION / SKIP with one paragraph of reasoning."
+- Reduce to **3 agents** (Claude = Risk Manager, Grok = Momentum, Gemini = Contrarian). Drops LLM cost to ~$60/mo and runtime to <20s.
+- **One round** (each agent votes independently). No attack/defend/final — that cycle is redundant for a single-ticker Y/N decision.
+- Output: extends `todays_pick/{scan_date}` with `arena_verdict`, `arena_vote_count`, `arena_top_reasoning`, `arena_debate_ref`. (The full transcript still goes to `arena_debates/*` for the webapp "read the whole debate" affordance.)
+- **Cloud Scheduler:** new job `agent-arena-verdict` on `15 9 * * 1-5` ET. Delete the existing 06:00 ET arena-trigger (the 06:00 cron becomes useless since arena now needs the `todays_pick` doc).
+- Webapp + WhatsApp push render the verdict prominently.
+
+**Option A — Post-close retrospective commentary (from v2, deprecated by Option C):**
+- Same arena but runs at 16:30 ET Mon–Fri commenting on closed/in-progress trades. Avoids any pre-entry biasing. Lower product value (no real-time decision support). Retained as a fallback if Option C creates unacceptable paper-vs-real divergence during the OOS window.
 
 **Option B — Kill:**
-- Remove service, scheduler, and downstream tables after 90-day archive
-- Saves ~$200/mo + ~$40/mo Cloud Run
-- Rollback cost is a few engineering days if we ever want it back (git history preserved)
+- Remove service, scheduler, and downstream tables after 90-day archive. Saves ~$200/mo + Cloud Run. Rebuild cost is a few engineer days if needed.
 
-**Recommendation:** Option A. User's freemium thesis specifically calls out engagement ("thrill of picking winners"). Arena transparency into AI disagreement is exactly that content. But only if we can cut cost and change the question to something non-redundant with notifier.
+**Recommendation:** Option C. Rationale: the original audit finding #6 correctly identified that a pre-entry arena CAN bias real-money skips and cause paper-vs-real divergence. Evan is comfortable accepting that divergence IF we are transparent: the paper ledger stays full-coverage (takes every V5.3 pick regardless of arena verdict), and any future marketing claim makes the distinction explicit (`"paper: full-coverage +X%" vs "arena-filtered: took only TAKE-votes, +Y%"`). Option C preserves engagement, re-aligns arena with V5.3 product, and reduces cost.
 
-> **v2 amendment (audit #6):** Arena risk commentary is **published only AFTER 15:50 ET day-3 close**, never pre-entry. Showing "Claude says this is high risk" on the webapp banner at 09:00 ET could cause operators to discretionarily skip real-money trades — creating a paper-vs-real divergence that silently biases any future performance claim. Arena output is **retrospective commentary** for closed trades only.
+**Paper-vs-real divergence transparency rule (v2.1 requirement for Option C):**
+- `forward-paper-trader` keeps its existing policy: takes every V5.3 pick regardless of arena verdict. This is the **control.** No change to `POLICY_VERSION` or `POLICY_GATE`.
+- New column added to `forward_paper_ledger` schema: `arena_verdict` (nullable: "TAKE" / "CAUTION" / "SKIP" / NULL for days arena didn't run). Written by the trader as metadata only — does NOT affect the decision to paper-trade. (Non-breaking schema change; existing consumers ignore it.)
+- Any marketing output that cites paper performance MUST label it "paper (full-coverage)". If we later publish arena-filtered performance as a marketing claim, a separate column view is added (`is_arena_take_only`) — via SQL filter, not a second ledger.
 
-**Definition of Done (Phase 4):**
-- Arena cost drops to ≤$60/mo (2 agents, 2 rounds, or equivalent).
-- Arena output appears on the webapp's **closed-trades** pages ("Here's what the AIs said about this trade back on 2026-04-17") — never on the live daily-pick banner.
-- If kill: all `agent_arena_*` tables archived for 90 days then deleted; scheduler job removed; `docs/DECISIONS/` note records the reasoning.
-- Arena schedule moved OUT of 06:00 ET slot (set for Phase 4 to be decided; could run post-market at 16:30 ET Mon–Fri to debate each day's closed V5.3 pick).
+**Definition of Done (Phase 4 — Option C):**
+- Arena cost drops to ≤$60/mo (3 agents, 1 round).
+- `todays_pick/{scan_date}` is extended (not replaced) with `arena_verdict`, `arena_vote_count`, `arena_top_reasoning`, `arena_debate_ref`.
+- Scheduler job `agent-arena-verdict` cron `15 9 * * 1-5` ET. Old `agent-arena-trigger` (06:00 ET) is deleted.
+- Webapp banner shows verdict label + vote breakdown + "read the debate" link.
+- Paper ledger gains nullable `arena_verdict` metadata column. `forward-paper-trader` decision logic unchanged (takes every V5.3 pick — paper is the control).
+- Marketing/track-record surfaces that publish performance always label the filter used ("paper, full-coverage" vs "arena-filtered").
+- If we choose to kill instead: all `agent_arena_*` tables archived 90 days then deleted, scheduler removed, DECISIONS note written.
 
-**G-Stack review (Phase 4):** Required if we ever wire arena back into gate logic. Not required for Option A's retrospective commentary — but any change to timing (pre-entry vs post-close) needs a DECISIONS note.
+**G-Stack review (Phase 4):**
+- **Required** for Option C: arena verdict becomes a USER-FACING verdict on whether to trade. Audit must confirm: (a) paper ledger decision is NOT affected by arena, (b) arena output is clearly labeled as opinion not execution, (c) no new LLM call path is on the paper-trader's critical path, (d) the schema column `arena_verdict` is metadata-only.
+- Not required for Option A retrospective or Option B kill.
 
 ---
 
@@ -461,15 +501,20 @@ Per CLAUDE.md's governance: any change that touches execution or gate logic requ
 
 ---
 
-## 7. Open questions for Evan before execution
+## 7. Open questions for Evan before execution (v2.1 — updated 2026-04-20 after Evan sign-off)
 
-1. **Audit sign-off:** confirm the v2 amendments (Phase 1.0 writer, in-trader push banned, arena gated to post-close, strategy doc publication-timing section, realized-only GTM filter) align with your intent before Phase 1.0 work starts.
-2. **X auto-posting:** is the current X poster in `win-tracker` or elsewhere? Keep it auto (for closed-trade highlights only) or route through GTM drafter for operator approval?
-3. **Arena post-close reshape:** change the debate to run at 16:30 ET Mon–Fri, retrospectively commenting on the day's V5.3 trade (entry, current status, thesis)? Or kill entirely?
-4. **Beta subscribers:** do you have 3–5 people willing to pay $29 to test the WhatsApp push for 30 days before general launch?
-5. **Compliance counsel:** is there a lawyer on retainer, or one we need to engage before Phase 2 ships? The real-money-vs-paper discipline language needs legal sign-off.
-6. **OpenClaw contract:** what's the exact send-message API surface? (Shapes the `whatsapp-notifier` spec.)
-7. **Real-money-skip logging:** are you ok with the operator-discipline rule requiring you to log every skip to `real_money_skips/{scan_date}`? It's a small ongoing cost but it protects any future marketing claim.
+**Resolved this session:**
+- ✅ v2 audit amendments approved
+- ✅ Compliance counsel NOT required at this scale — replaced with disclaimer hygiene checklist (Section 6.2)
+- ✅ Arena repurpose: Option C (09:15 ET pre-entry verdict debate on today's V5.3 pick)
+- ✅ Real-money-skip logging: deferred to Phase 5 (only needed when publishing real-money track record)
+- ✅ Stripe subs: set up when we're ready to open paid tier; Phase 2 waits on this
+
+**Still open:**
+1. **X auto-posting source:** is the current X poster in `win-tracker` or a separate service? (Task: audit before Phase 5.)
+2. **OpenClaw send-message API:** what's the exact POST surface + auth? (Shapes `whatsapp-notifier` before Phase 2.)
+3. **Beta subscribers:** who are the first 3–5 testers of the WhatsApp push when Phase 2 is ready? (Doesn't block Phase 1.0 or Phase 1.)
+4. **Disclaimer copy finalization:** confirm the disclaimer text in Section 6.2 step 3 matches what you're comfortable putting on every page and push.
 
 ---
 
