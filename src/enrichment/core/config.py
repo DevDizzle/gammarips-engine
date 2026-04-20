@@ -5,7 +5,7 @@ Central configuration for all Enrichment services.
 import os
 
 # --- Global Project ---
-PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-lx6bb")
+PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "profit-scout-data")
 
