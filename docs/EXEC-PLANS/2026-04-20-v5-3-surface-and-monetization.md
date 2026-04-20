@@ -7,7 +7,8 @@
 **Change log:**
 - **v1 (2026-04-20):** initial draft
 - **v2 (2026-04-20):** post-review amendments — Phase 2 push moved out of forward-paper-trader (BLOCKER), `todays_pick` writer pinned to signal-notifier (HIGH), drift tripwire added (HIGH), arena commentary gated to post-market (HIGH), real-money-vs-paper discipline rule proposed for TRADING-STRATEGY.md (HIGH), Secret Manager mandate added to all phases (LOW), sequencing within Week 1 spelled out (LOW).
-- **v2.2 (2026-04-20, later):** **execution order swapped — Phase 3 (MCP refresh) ships BEFORE Phase 2 (WhatsApp paywall).** Rationale: Evan probed whether $29/mo was justifiable when the webapp reveals the same info simultaneously. Honest answer is the chat-with-agent feature (Phase 3 `get_todays_pick`, `get_open_position`, win-rate) is the real moat — push alone prices at $5–10/mo, push + agent-chat with live Polygon data prices at $29–49/mo. Launching paid without the agent chat would feel thin. Numbering unchanged (references to "Phase 3" across doc remain stable); only execution order shifts. Also added model-cost note for the OpenClaw chat agent (see Phase 3). Pricing and freemium-gating decisions deferred pending competitive research (in-flight as of this edit).
+- **v2.2 (2026-04-20, later):** **execution order swapped — Phase 3 (MCP refresh) ships BEFORE Phase 2 (WhatsApp paywall).** Rationale: Evan probed whether $29/mo was justifiable when the webapp reveals the same info simultaneously. Honest answer is the chat-with-agent feature (Phase 3 `get_todays_pick`, `get_open_position`, win-rate) is the real moat — push alone prices at $5–10/mo, push + agent-chat with live Polygon data prices at $29–49/mo.
+- **v2.3 (2026-04-20, later still):** pricing + freemium gating research landed. **Pricing moves from intuition $29 to a two-tier $19 Starter / $39 Pro** (research showed $29 undersells by ~4x vs peers and sits at the low edge of the prosumer anchor zone). **Freemium gating strategy pinned** (Section 6.4): daily pick + signals + report stay fully free; arena full transcript, debrief pages, and full performance ledger get soft-gated; AI chat, live open-position tracker, personal watchlist, trade journal, alert rules, CSV export get hard-gated behind subscription. Phase 3 expanded to include paid-tier webapp features (AI chat wiring + live position page) as MVP; watchlist/journal/alerts deferred to post-launch iteration.
 
 ---
 
@@ -318,9 +319,11 @@ Escalate to counsel ONLY if any of: (a) >500 paid subs and a state-level RIA cha
 
 ---
 
-### Phase 3 — MCP refresh (2–3 days)
+### Phase 3 — MCP refresh + paid-tier webapp MVP (5–7 days, now ships BEFORE Phase 2)
 
-**Goal:** MCP tools are V5.3-correct and support both (a) the eventual paid chat-agent UX and (b) any public agent that queries GammaRips data.
+**Goal:** the MCP tools are V5.3-correct and support the paid chat-agent UX. **Scope expanded in v2.3** to include the paid-tier webapp features that make $39/mo defensible — the AI chat and the live open-position tracker. Watchlist, trade journal, alert rules, CSV export are deferred to post-launch iteration.
+
+This phase is now the longest and most important. The paywall does not launch (Phase 2) until this is in place and tested end-to-end with at least one beta user.
 
 From MCP Explore report — fix/add matrix:
 
@@ -364,10 +367,44 @@ Also supported: OpenClaw's **setup-token** path reuses Evan's existing Claude Pr
 
 Decision: default to **Haiku 4.5 via Anthropic API** with prompt caching on the system prompt + MCP tool descriptions. Revisit after first month of real usage data.
 
+**v2.3 additions — paid-tier webapp MVP (land with Phase 3, before paywall):**
+
+**1. AI chat widget on the webapp** (in addition to the WhatsApp chat in Phase 2):
+- New route `/chat` — logged-in + subscribed users can ask the GammaRips agent questions in a browser chat UI.
+- Same MCP tool set (get_todays_pick, get_open_position, get_position_history, get_win_rate_summary, get_signal_detail, web_search).
+- Default model: **Claude Haiku 4.5** with prompt caching on system prompt + MCP tool descriptions. At 50 questions/user/month ≈ $0.10/user model cost — well under $39 ARPU.
+- Firestore: `chat_sessions/{uid}/{session_id}/{turn_id}` for persistence (optional for v1; ephemeral sessions acceptable).
+
+**2. Live open-position tracker** (`/positions`) — the most differentiated paid feature:
+- Reads `forward_paper_ledger` where `exit_timestamp IS NULL AND scan_date >= today - 4 trading days`.
+- For each open position: fetches live Polygon options snapshot (mid price on the specific contract).
+- Displays: ticker, contract, entry_price, current_mid, unrealized_return_pct, days_held, days_until_timeout, stop_price, target_price.
+- Auto-refreshes every 30s while market is open (09:30–16:00 ET).
+- Requires login + `subscription.tier ∈ ("starter", "pro")` in Firestore users doc.
+
+**3. Subscription gating helpers** in `src/lib/auth.ts`:
+- `getSubscriptionTier(uid) → "free" | "starter" | "pro"` read from `users/{uid}.subscription`.
+- `<RequireSubscription tier="pro">...</RequireSubscription>` component that short-circuits to upgrade CTA for non-pro users.
+- Middleware on `/chat`, `/positions` routes.
+
+**4. Soft-gating UX (lower-urgency, can ship post-launch-week-1):**
+- Arena page (`/arena`) — `backdrop-filter: blur(6px)` on round-by-round transcript past 2 read-throughs/day (localStorage counter). Overlay CTA "Unlock full debate (Pro) →".
+- Debrief pages (`/signals/[ticker]/debrief`) — time-delay gate: paid users see immediately, free users see after 48h.
+
+**Deferred to post-launch iteration (Phase 3b, not blocking paywall):**
+- Personal watchlist page
+- Trade journal (user-entered real-money fills vs paper)
+- Alert rules per ticker
+- CSV export
+- Email digest tier differentiation (daily for paid vs weekly for free)
+
 **Definition of Done (Phase 3):**
-- All 3 fixes deployed; old `score >= 6` gate eliminated everywhere
-- 5 new tools pass an integration test from a real chat agent ("What's today's pick?" → returns correct ticker or "no pick today")
-- Auth middleware enforces Firestore-backed API key for protected tools
+- ✅ All 3 MCP fixes deployed; old `score >= 6` gate eliminated everywhere
+- ✅ 5 new MCP tools pass an integration test via `mcporter call gammarips.<tool>` from a dev OpenClaw instance
+- ✅ Auth middleware enforces Firestore-backed subscription check for protected tools and webapp routes
+- ✅ Webapp `/chat` renders a working chat UI for Pro users; asks "what's today's pick?" and gets a correct answer through the MCP
+- ✅ Webapp `/positions` renders live unrealized P&L for any open V5.3 paper position, refreshing every 30s during market hours
+- ✅ End-to-end beta test: one real user (Evan or a friend) uses the chat + positions for one full trading week; no crashes, answers are accurate, UX doesn't feel broken
 
 **G-Stack review (Phase 3):** **REQUIRED.** `get_todays_pick` must mirror signal-notifier gates exactly. Any drift = data mismatch between email, WhatsApp push, webapp banner, and chatbot answer. gammarips-review must audit the SQL.
 
@@ -508,22 +545,98 @@ Every push, every MCP call, every draft should be traceable:
 
 ---
 
-## 5. Timeline (v2.2 — Phase 3 before Phase 2)
+### 4.4. Pricing (v2.3)
 
-Assuming Evan is the sole developer and Claude assists. Execution order is now **1.0 → 1 → 3 → 2 → 4 → 5**. The paid tier does not launch until the chat-with-agent moat (Phase 3) is live — pushing a notification alone does not justify $29/mo.
+Decided after competitive research across ~25 comparable products (Unusual Whales $48, Cheddar Standard $45, Cheddar Pro $99, OptionStrat Live $40, Benzinga Basic $37, FinChat Plus $29, Koyfin Plus $39, Discord signal groups $50–200, etc.). Key findings:
+
+- **No direct competitor under $100/mo bundles what we're proposing** (curated daily pick + phone push + private community + AI chat agent). Feature-count-equivalent mix would cost ~$128 across three providers.
+- **Prosumer price anchor** is **$39–49** (where users in this space have already been trained to say yes). $29 sits at the bottom edge of that zone and signals "hobbyist Substack" more than "serious research tool."
+- **Industry norm is Free / Core / Pro** three-tier, ~$19 / $39 / $79.
+- **7-day free trial** is the industry standard for this price point.
+
+Adopted structure:
+
+| Tier | Price | What's included | Target persona |
+|---|---|---|---|
+| **Free** | $0 | Full gammarips.com: today's V5.3 pick, full signals list, daily report, per-ticker deep dive, arena headline verdict + preview, win-rate summary stat | Browsers, newsletter readers, funnel top |
+| **Starter** | **$19/mo** | Everything in Free + WhatsApp push of entry/exit + private WhatsApp group (no AI chat) | Price-sensitive retail who wants convenience |
+| **Pro** | **$39/mo** | Everything in Starter **+ AI chat agent** (ask about today's pick, your open position with live Polygon prices, 30-day win rate, historical ledger queries) + personal watchlist + trade journal (post-launch) | Active retail with $5k–50k account — the core persona |
+| **Pro Annual** | **$399/yr** | Same as Pro, priced at ~$33/mo effective | Committed subscribers |
+
+**Launch tactics (from research):**
+- **Founder pricing:** first 500 Pro subscribers lock in **$29/mo for life** (captures Evan's original intuition as a founder perk, rewards early believers, signals urgency without compromising future ARPU).
+- **7-day free trial** on Pro. Free trial on Starter optional (maybe skip — low friction anyway).
+- **No price raises in the first 6 months** of paid launch. Moving $29 → $39 later would churn early cohorts; starting at $39 with $29 founder lock-in is the cleaner path.
+- **Grandfathering policy:** any future price increase applies only to new subscribers; active subs keep their price point.
+
+**The AI chat is the moat that earns the $39 anchor.** Starter is a ladder rung — it catches users who object to $39 but want the push, and funnels them toward Pro on the next billing cycle when they realize they want the chat. Do NOT ship Starter on day one if the chat agent isn't live (Phase 3) — shipping only Starter at $19 locks in the wrong anchor.
+
+---
+
+### 4.5. Freemium gating (v2.3)
+
+Content/feature-level decisions, informed by the Explore-agent report 2026-04-20. Rule of thumb: **gate features, not information.** Information is acquisition; features are paid.
+
+**Keep fully free (acquisition surface):**
+- Today's V5.3 pick (ticker, direction, contract, strike, DTE, mid, gate-evidence chips) — this is the publisher-exclusion-protected content and the funnel-top trust signal.
+- Full daily report text (editorial narrative, themes, counts).
+- Full signals list (`/signals`) with all bullish/bearish signals browsable.
+- Full per-ticker deep dive (`/signals/[ticker]`) with thesis, engine flags, flow breakdown, recommended contract, technicals, news.
+- FAQ, methodology docs, all disclaimers.
+- Past daily-pick archive (date, ticker, result summary) — public track record is marketing.
+- Win-rate hero stat ("Last 30 days: 6/10 hits, +X% avg, paper trading") — summary only.
+- Arena headline verdict (TAKE / CAUTION / SKIP + vote count + first sentence of each agent's reasoning). Builds engagement.
+
+**Soft-gate (preview / blur / time-delay):**
+- **Arena full debate transcript** — blur past 2–3 read-throughs per day via localStorage counter, overlay CTA "Unlock full debate (Pro) →"
+- **Per-trade debrief pages** — paid users see immediately after close; free users see 48h later.
+- **Full performance ledger** — summary stat free; row-level entry/exit times + per-trade P&L = Pro.
+
+**Hard-gate (requires login + active subscription):**
+- **AI chat agent** (WhatsApp group + webapp chat widget) — the Pro moat.
+- **Live open-position tracker** (webapp `/positions`) — real-time Polygon prices on your open V5.3 paper position.
+- **Personal watchlist** — save tickers, get notified when they appear in the next scan.
+- **Trade journal** — log your own real-money entries/exits vs paper-trader.
+- **Alert rules per ticker** — "notify me when AAPL appears with score > 6."
+- **CSV export** — full historical ledger / signals / debates.
+- **Daily email digest** (free tier limited to weekly).
+
+**What NOT to gate (legal / trust floor):**
+Ticker + direction of the daily pick, recommended contract spec, disclaimers, methodology, FAQ, past-pick archive with dates and outcomes. Gating these breaks SEC *Lowe* publisher exclusion and also kills the "see everything, trust us" thesis.
+
+**Psychological posture:** soft blur + read-through counter > hard paywall. Contextual CTAs ("See your open position live →") > generic "Upgrade now" buttons. Social proof on the paywall ("X paying subscribers"). Avoid aggressive / spammy copy.
+
+---
+
+## 5. Timeline (v2.3 — Phase 3 expanded + pricing landed)
+
+Assuming Evan is the sole developer and Claude assists. Execution order is **1.0 → 1 → 3 → 2 → 4 → 5**. Phase 3 now owns both the MCP refresh AND the paid-tier webapp features (AI chat + live positions), which is the longest stretch of the plan.
 
 ```
-Week 1 (Apr 21–25):  Phase 1.0 ✅ DONE, Phase 1 ✅ DONE, start Phase 3 (MCP fixes + new tools)
-Week 2 (Apr 28–May 2): Finish Phase 3 (auth, get_todays_pick, get_open_position, win-rate,
-                       freemium_preview) + integrate with OpenClaw via mcporter skill.
-                       Soft test of agent chat in a dev WhatsApp group.
-Week 3 (May 5–9):    Phase 2 (Stripe webhook → whatsapp_allowlist, OpenClaw direct-POST from
-                       signal-notifier + exit-reminder cron, OpenClaw plugin for per-sender
-                       paywall enforcement). Requires Evan's OpenClaw group + secrets.
-Week 4 (May 12–16):  Phase 4 arena Option C (verdict debate at 09:15 ET). Phase 5 GTM drafter
-                       kickoff in parallel.
-Week 5+:             Soft launch paid tier with 5–10 beta subscribers now that the chat moat
-                       is in place. Iterate on pricing + gating based on feedback.
+Week 1 (Apr 21–25):  ✅ Phase 1.0 DONE, ✅ Phase 1 DONE.
+                     Start Phase 3a: MCP tool fixes (score>=6 bug, direction casing).
+
+Week 2 (Apr 28–May 2): Phase 3a cont.: new MCP tools (get_todays_pick, get_open_position,
+                       get_position_history, get_win_rate_summary, get_freemium_preview).
+                       Deploy MCP auth middleware. Test via mcporter from dev OpenClaw.
+
+Week 3 (May 5–9):    Phase 3b: webapp /chat + /positions. Stripe tier SKUs configured for
+                     Starter ($19) / Pro ($39) / Pro Annual ($399) / Founder ($29 lifetime
+                     lock for first 500). Subscription helpers + auth-gated routes.
+                     Soft-gating: arena blur + debrief time-delay.
+
+Week 4 (May 12–16):  Phase 2: Stripe webhook wiring, OpenClaw group creation, hooks_token
+                     secret mount, OpenClaw paywall plugin (senderId check),
+                     signal-notifier + agent-arena + new exit-reminder OpenClaw POSTs.
+                     End-to-end beta with Evan + 1-2 friends.
+
+Week 5 (May 19–23):  Soft-launch Pro tier publicly at $39/mo. Founder pricing $29/mo locked
+                     for first 500 subscribers. 7-day free trial. Phase 4 arena Option C
+                     (verdict at 09:15 ET, 3 agents) ships alongside.
+
+Week 6+:             Phase 5 GTM drafter; Phase 3b iteration 2 (watchlist, journal, alerts,
+                     CSV export, email digest tier); iterate on pricing + gating from real
+                     usage data.
 ```
 
 Track record milestone for marketing claims: end of May (≥30 closed V5.3 trades).

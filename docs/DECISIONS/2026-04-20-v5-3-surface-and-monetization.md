@@ -9,6 +9,11 @@
 - **v1 (2026-04-20):** initial plan, 5 phases, counsel listed as Phase 2 blocker
 - **v2 (2026-04-20):** post-gammarips-review audit — 12 findings folded in (2 BLOCKERS, 4 HIGHs)
 - **v2.1 (2026-04-20):** Evan policy calls — drop counsel requirement, arena Option C (pre-entry verdict debate on today's V5.3 pick), real-money-skip logging deferred to Phase 5, notifier SQL gains deterministic tiebreaker
+- **v2.2 (2026-04-20):** Phase 3 (MCP refresh) reordered AHEAD of Phase 2 (WhatsApp paywall) — chat-with-agent is the moat that justifies paid pricing; push alone doesn't. Chat agent model pinned: Claude Haiku 4.5 with prompt caching.
+- **v2.3 (2026-04-20):** pricing + freemium gating research landed.
+  - **Pricing adopted: Free / Starter $19 / Pro $39 / Pro Annual $399.** $29 intuition undersold by ~4x on comparable-feature count. Founder pricing $29/mo lifetime lock for first 500 Pro subs captures original anchor while the published rate reflects the bundle's true value.
+  - **Freemium gating: gate features, not information.** Daily pick + signals + report + methodology stay fully free (publisher-exclusion-protected + funnel). Arena full transcript + debrief pages + full performance ledger get soft-gated. AI chat + live position tracker + watchlist + journal + alerts get hard-gated.
+  - **Phase 3 scope expanded** to include the paid webapp MVP (AI chat widget + live open-position page), which must ship before the $39 Pro tier launches. Watchlist, trade journal, alerts deferred to post-launch iteration.
 
 ## Decision
 
