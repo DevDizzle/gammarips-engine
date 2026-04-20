@@ -40,7 +40,7 @@ dbt/
 
 ### The freeze rule (read twice)
 
-Per `CLAUDE.md` and `docs/DECISIONS/2026-04-08-ledger-benchmarking-and-fmp-retirement.md`, the V3.1 forward-paper gate is **frozen for a 4–6 week post-war accumulation period** starting 2026-04-08. During the freeze:
+**Note (2026-04-16):** V3 has been retired. V4 is the sole active pipeline. The freeze constraints below are historical — V4 has no gates to freeze. The dbt layer should be extended to cover V4 tables (`forward_paper_ledger_v4_hold2`, `overnight_signals_enriched_v4`). Original freeze context:
 
 - The `fct_paper_trades` table is **reporting-only**. Do not rank gates, search filters, or select winners on it.
 - Pre-war (≤ 2026-04-08) and post-war cohorts must be compared epoch-by-epoch at the revisit point. Do not mix them.

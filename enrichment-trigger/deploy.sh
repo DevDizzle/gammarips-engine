@@ -16,9 +16,9 @@ gcloud run deploy enrichment-trigger \
   --source=. \
   --allow-unauthenticated \
   --memory=1Gi \
-  --timeout=1800 \
+  --timeout=3600 \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,GCS_BUCKET=profit-scout-data,TRACE_LOGGING_ENABLED=false" \
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,GCS_BUCKET=profit-scout-data,TRACE_LOGGING_ENABLED=true,MIN_ENRICHMENT_SCORE=1" \
   --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest"

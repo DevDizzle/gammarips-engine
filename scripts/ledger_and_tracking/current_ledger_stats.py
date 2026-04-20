@@ -15,7 +15,7 @@ import pandas as pd
 from google.cloud import bigquery
 
 PROJECT_ID = "profitscout-fida8"
-LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_v3_hold2"
+LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 
 
 def fmt_pct(x) -> str:

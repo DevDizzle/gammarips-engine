@@ -18,11 +18,11 @@ market did the next day. Every after-the-fact analysis requires refetching
 from Firestore JSON blobs and manually joining to `signal_performance`.
 This is not sustainable as the stack grows.
 
-At the same time, the V3.1 gate is **frozen for accumulation** per
-`2026-04-08-ledger-benchmarking-and-fmp-retirement.md`. No automated
-promotion gates, A/B tests, or CI blocking eval are welcome in this
-window — the trading path must remain untouched. Any eval system has to
-be strictly additive and strictly non-blocking.
+At the time of writing, the V3.1 gate was frozen for accumulation per
+`docs/archive/2026-04-08-ledger-benchmarking-and-fmp-retirement.md`. V3 has
+since been retired (2026-04-16) and V4 is the sole active pipeline. The
+eval system's monitoring-only, non-gating posture remains correct regardless
+of which trading pipeline is active.
 
 ## Decision
 

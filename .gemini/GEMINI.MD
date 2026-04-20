@@ -40,17 +40,17 @@ Before making meaningful changes, read:
 3. `docs/ARCHITECTURE.md` — system map and data flow
 4. `docs/DATA-CONTRACTS.md` — BQ schemas
 
-Deeper context (read when relevant): `docs/DECISIONS/` (decision trail), `docs/EVAL-SYSTEM.md`, `docs/TESTING.md`, `docs/research_reports/INTELLIGENCE_BRIEF.md`, `docs/research_reports/FINDINGS_LEDGER.md`, `docs/EXEC-PLANS/v3-reset.md`.
+Deeper context (read when relevant): `docs/DECISIONS/` (decision trail), `docs/EVAL-SYSTEM.md`, `docs/TESTING.md`, `docs/research_reports/INTELLIGENCE_BRIEF.md`, `docs/research_reports/FINDINGS_LEDGER.md`.
 
 ## Current policy (summary)
-The V3.1 gate is **frozen** for accumulation. Current live state, regime context, and constraints are in `NEXT_SESSION_PROMPT.md` — always read it before acting. The source of truth for execution policy is `docs/TRADING-STRATEGY.md` + `forward-paper-trader/main.py`.
+**V5.3 "Target 80" is the only active strategy** (adopted 2026-04-17, V4 retired same day, V3 retired 2026-04-16). One signal per day or none. Entry 10:00 ET day-1, −60% option stop, +80% option target, 3-day hold, exit 15:50 ET day-3. Stop wins over target on ambiguous bars (conservative). The trader has no filters; signal-quality gates live in `enrichment-trigger` (`overnight_score >= 1 AND spread <= 10% AND directional UOA > $500K`) and `signal-notifier` (`V/OI > 2`, `moneyness 5-15% OTM`, `VIX <= VIX3M`, `LIMIT 1`). The one-page operator view is `CHEAT-SHEET.md`. Service/table context: `docs/GLOSSARY.md`. Source of truth for execution policy: `docs/TRADING-STRATEGY.md` + `forward-paper-trader/main.py` + `docs/DECISIONS/2026-04-17-v5-3-target-80.md`.
 
 ## Ground rules
 - NEVER hardcode API keys or secrets in source.
-- NEVER mix V2 and V3 forward-ledger cohorts.
-- NEVER reintroduce VIX gating without an explicit documented decision in `docs/DECISIONS/`.
+- NEVER create separate V-numbered tables or services. There is one pipeline with canonical names.
+- NEVER add execution gates to the trader. Signal-quality gates live in `enrichment-trigger` and `signal-notifier`, not in `forward-paper-trader`. Phase 2 feature discovery is the only path to new gates.
 - ALWAYS update `docs/TRADING-STRATEGY.md` and add a `docs/DECISIONS/` note when changing execution policy.
-- Treat `_archive/` and `docs/research_reports/_archive/` as historical, not authoritative.
+- Treat `_archive/`, `docs/archive/`, and `docs/research_reports/_archive/` as historical, not authoritative.
 - Prefer archival over deletion when cleaning old artifacts.
 - Do not trust historical `PROMPT-*` docs or old research summaries as current spec.
 - When touching ledger logic, keep cohort/version metadata explicit.
@@ -59,8 +59,8 @@ The V3.1 gate is **frozen** for accumulation. Current live state, regime context
 ## Repo map
 | Directory | Purpose |
 |---|---|
-| `forward-paper-trader/` | Production paper-trading + IV cache (Cloud Run, two endpoints). See `docs/ARCHITECTURE.md`. |
-| `enrichment-trigger/` | Enrichment pipeline (instrumented via `libs/trace_logger`) |
+| `forward-paper-trader/` | Production paper-trading (no trader-side filters, writes to `forward_paper_ledger`). Cloud Run, two endpoints. |
+| `enrichment-trigger/` | Enrichment pipeline (score>=1, spread<=10%, UOA>$500K, writes to `overnight_signals_enriched`). Instrumented via `libs/trace_logger`. |
 | `agent-arena/` | Multi-model debate / signal ranking (instrumented) |
 | `overnight-report-generator/` | Gemini editorial synthesis (instrumented) |
 | `gammarips-eval/` | LLM eval service — monitoring-only, non-gating. See `docs/EVAL-SYSTEM.md`. |

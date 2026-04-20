@@ -24,21 +24,33 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 nyse = mcal.get_calendar("NYSE")
 est = pytz.timezone("America/New_York")
 
-# Config block for Forward Validation Regime (V3.1 — Liquidity Quality Gate)
-# See docs/DECISIONS/2026-04-07-v3-1-liquidity-quality-gate.md
+# Config block for V5.3 — Target 80
+# See docs/DECISIONS/2026-04-17-v5-3-target-80.md and CHEAT-SHEET.md
 #
-# This is the locked production config. The 2-day hold variant is canonical;
-# the 3-day shadow table was deleted on 2026-04-08 after concluding both
-# variants were statistically tied. Do not re-introduce a hold_days knob without
-# a fresh decision note.
-MIN_PREMIUM_SCORE = 2
-MIN_RECOMMENDED_VOLUME = 100
-MIN_RECOMMENDED_OI = 50
-MIN_RECOMMENDED_OI_FALLBACK = 250  # Deep-OI fallback when daily volume is light
-HOLD_DAYS = 2
-POLICY_VERSION = "V3_1_LIQUIDITY_QUALITY"
-POLICY_GATE = "PREMIUM_GTE_2__VOL_GE_100_AND_OI_GE_50__OR__OI_GE_250"
-LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_v3_hold2"
+# V5.3 philosophy: one rule set, one position, pre-defined exits.
+#   Entry   : 10:00 ET on day-1 (first trading day after scan_date)
+#   Stop    : -60% on option premium (wide stop absorbs IV crush)
+#   Target  : +80% on option premium (Deep Research 2026-04-17 recommended
+#             asymmetric profit-taking to beat theta/IV crush on stagnant trades)
+#   Hold    : 3 trading days
+#   Exit    : 15:50 ET on day-3 at market (or earlier if stop/target fires)
+#
+# Exit precedence when stop and target hit in the same bar: STOP wins
+# (conservative — we can't know intrabar sequencing, so assume worst case).
+#
+# The trader has NO filters beyond what enrichment applies. Signal quality
+# gates (V/OI, moneyness, VIX <= VIX3M) live in signal-notifier and
+# enrichment-trigger, not here. This service simulates and ledgers every
+# enriched signal so we retain the full-coverage research dataset.
+MAX_SPREAD_PCT = 0.10
+HOLD_DAYS = 3
+STOP_PCT = 0.60    # -60% on option premium
+TARGET_PCT = 0.80  # +80% on option premium
+ENTRY_HHMM = "10:00"  # 10:00 ET on day-1
+EXIT_HHMM = "15:50"   # 15:50 ET on day-3
+POLICY_VERSION = "V5_3_TARGET_80"
+POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
+LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 
 def get_next_trading_day(base_date: date) -> date:
     end_date = base_date + timedelta(days=7)
@@ -186,12 +198,19 @@ def get_regime_context(target_date: date):
         return None, None, None
 
 def run_forward_paper_trading(target_date: date = None):
-    """Simulate the V3.1 forward paper trading policy for a given scan_date.
+    """V5.3 forward paper trading — Target 80.
 
-    Locked production config:
-      - 2-day hold window
-      - V3.1 quality gate (premium_score>=2 AND ((vol>=100 AND oi>=50) OR oi>=250))
-      - Writes to forward_paper_ledger_v3_hold2
+    Execution policy (frozen; change only with a new decision doc):
+      - Entry:  10:00 ET on D+1 (first trading day after scan_date)
+      - Stop:   -60% on option premium
+      - Target: +80% on option premium
+      - Hold:   3 trading days; exit at 15:50 ET on day-3 if neither fires
+      - Ambiguous bar: STOP wins over TARGET (conservative)
+      - Writes to forward_paper_ledger with policy_version=V5_3_TARGET_80
+
+    The trader applies NO additional gates. Signal quality filters live
+    upstream in enrichment-trigger (spread <= 10%, UOA > $500K, V/OI > 2,
+    moneyness 5-15%) and in signal-notifier (VIX <= VIX3M, LIMIT 1).
 
     No knobs are exposed at the HTTP layer. To change any of this, edit the
     constants at the top of this file and write a decision note.
@@ -200,16 +219,16 @@ def run_forward_paper_trading(target_date: date = None):
         # Default to today if not provided
         target_date = datetime.now(est).date()
 
-    logger.info(f"Running Forward Paper Trading for signals generated on {target_date} (hold_days={HOLD_DAYS}, ledger={LEDGER_TABLE})")
+    logger.info(f"Running V5.3 Forward Paper Trading for signals generated on {target_date} "
+                f"(entry={ENTRY_HHMM} ET day-1, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "
+                f"hold_days={HOLD_DAYS}, exit={EXIT_HHMM} ET day-{HOLD_DAYS}, ledger={LEDGER_TABLE})")
     
     client = bigquery.Client(project=PROJECT_ID)
     
     # 1. Fetch Eligible Signals
-    # V3.1 Quality Gate: premium_score >= 2 AND
-    #   ( (vol >= 100 AND oi >= 50)  OR  oi >= 250 )
-    # Rationale: both metrics must clear a floor (eliminates oi-anemic vol-spike junk
-    # like CAR oi=1, EA oi=0), with a deep-oi fallback for contracts that have a real
-    # book even if today's volume is modest. See docs/DECISIONS/2026-04-07-v3-1-liquidity-quality-gate.md
+    # V5.3: no trader-side gates. All signal quality filtering is upstream
+    # (enrichment-trigger + signal-notifier). Everything in the enriched table
+    # gets simulated and ledgered. See docs/DECISIONS/2026-04-17-v5-3-target-80.md
     query = f"""
     SELECT
         ticker, scan_date, direction, recommended_contract, recommended_strike,
@@ -217,11 +236,6 @@ def run_forward_paper_trading(target_date: date = None):
         recommended_spread_pct, is_premium_signal, premium_score
     FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
     WHERE DATE(scan_date) = "{target_date}"
-      AND premium_score >= {MIN_PREMIUM_SCORE}
-      AND (
-            (recommended_volume >= {MIN_RECOMMENDED_VOLUME} AND recommended_oi >= {MIN_RECOMMENDED_OI})
-            OR recommended_oi >= {MIN_RECOMMENDED_OI_FALLBACK}
-      )
       AND recommended_strike IS NOT NULL
       AND recommended_expiration IS NOT NULL
     """
@@ -262,10 +276,11 @@ def run_forward_paper_trading(target_date: date = None):
     # Without this guard, the exit-fallback path at the bottom of the simulation
     # loop will use a partial intraday bar from "today" as a phantom TIMEOUT exit,
     # producing data that looks like a closed trade but represents an open position.
-    timeout_day_check = get_nth_next_trading_day(entry_day, HOLD_DAYS)
+    # V5.3: exit_day = entry_day + (HOLD_DAYS - 1) trading days.
+    timeout_day_check = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
     today_et = datetime.now(est).date()
     if timeout_day_check >= today_et:
-        msg = (f"Timeout day {timeout_day_check} for hold_days={HOLD_DAYS} is today or "
+        msg = (f"Exit day {timeout_day_check} for hold_days={HOLD_DAYS} is today or "
                f"in the future. Hold window has not fully closed; refusing to simulate.")
         logger.warning(msg)
         return False, msg
@@ -290,10 +305,7 @@ def run_forward_paper_trading(target_date: date = None):
         if row.get("is_duplicate", False):
             is_skipped = True
             skip_reason = "DEDUP_TICKER_DATE_SKIP"
-        # Premium Score check
-        elif row.get("premium_score", 0) < MIN_PREMIUM_SCORE:
-            is_skipped = True
-            skip_reason = "LOW_PREMIUM_SCORE_SKIP"
+        # V5.3: no trader-side gates — all enriched signals trade
 
         record = {
             "scan_date": row["scan_date"].date() if isinstance(row["scan_date"], datetime) else row["scan_date"],
@@ -339,20 +351,22 @@ def run_forward_paper_trading(target_date: date = None):
             exp_date = row["recommended_expiration"].date() if isinstance(row["recommended_expiration"], pd.Timestamp) or isinstance(row["recommended_expiration"], datetime) else row["recommended_expiration"]
             opt_ticker = build_polygon_ticker(row["ticker"], exp_date, row["direction"], float(row["recommended_strike"]))
             
-            timeout_day = get_nth_next_trading_day(entry_day, HOLD_DAYS)
-            
-            bars = fetch_minute_bars(opt_ticker, entry_day, timeout_day)
+            # V5.3: entry 10:00 ET day-1, hold 3 trading days, exit 15:50 ET day-3.
+            # HOLD_DAYS is the number of trading days held inclusive of entry_day.
+            # day-1 == entry_day, day-3 == get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+            exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+
+            bars = fetch_minute_bars(opt_ticker, entry_day, exit_day)
             time.sleep(0.2)
-            
-            entry_dt = datetime.combine(entry_day, datetime.strptime("15:00", "%H:%M").time())
+
+            entry_dt = datetime.combine(entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time())
             entry_ts_ms = int(est.localize(entry_dt).timestamp() * 1000)
-            timeout_dt = datetime.combine(timeout_day, datetime.strptime("15:59", "%H:%M").time())
+            timeout_dt = datetime.combine(exit_day, datetime.strptime(EXIT_HHMM, "%H:%M").time())
             timeout_ts_ms = int(est.localize(timeout_dt).timestamp() * 1000)
-            
-            # Find the entry bar. Many liquid options don't print in every minute,
-            # especially in the 15:00-16:00 close hour. Prefer a bar at-or-after 15:00,
-            # but fall back to the most recent bar before 15:00 as a price proxy
-            # rather than throwing the whole trade away. Only mark INVALID_LIQUIDITY
+
+            # Find the entry bar. Prefer a bar at-or-after 10:00 ET, but fall
+            # back to the most recent bar before 10:00 as a price proxy rather
+            # than throwing the whole trade away. Only mark INVALID_LIQUIDITY
             # when entry_day genuinely has zero printed bars.
             entry_day_bars = [b for b in bars
                               if datetime.fromtimestamp(b["t"]/1000, tz=est).date() == entry_day]
@@ -368,10 +382,11 @@ def run_forward_paper_trading(target_date: date = None):
             if not entry_bar or entry_bar.get("v", 0) == 0:
                 record["exit_reason"] = "INVALID_LIQUIDITY"
             else:
-                base_entry = entry_bar["c"] * 1.02 # 2% Base Slippage
-                target = base_entry * 1.40
-                stop = base_entry * 0.75
-                
+                base_entry = entry_bar["c"] * 1.02  # 2% Base Slippage
+                # V5.3: -60% option stop AND +80% option target.
+                stop = base_entry * (1.0 - STOP_PCT)
+                target = base_entry * (1.0 + TARGET_PCT)
+
                 record["entry_timestamp"] = datetime.fromtimestamp(entry_bar["t"]/1000, tz=est).isoformat()
                 record["entry_price"] = base_entry
                 record["target_price"] = target
@@ -384,7 +399,7 @@ def run_forward_paper_trading(target_date: date = None):
                 spy_bars_for_trade: list = []
                 try:
                     stock_bars_for_trade = fetch_minute_bars(
-                        row["ticker"], entry_day, timeout_day
+                        row["ticker"], entry_day, exit_day
                     )
                     time.sleep(0.1)
                     price = bctx.find_price_at_or_after(
@@ -395,7 +410,7 @@ def run_forward_paper_trading(target_date: date = None):
                     logger.warning(f"underlying_entry_price fetch failed for {row['ticker']}: {e}")
 
                 try:
-                    spy_bars_for_trade = bctx.get_spy_bars_cached(entry_day, timeout_day)
+                    spy_bars_for_trade = bctx.get_spy_bars_cached(entry_day, exit_day)
                     record["spy_entry_price"] = bctx.find_price_at_or_after(
                         spy_bars_for_trade, entry_bar["t"]
                     )
@@ -415,12 +430,15 @@ def run_forward_paper_trading(target_date: date = None):
                 exit_reason = "TIMEOUT"
                 exit_price = None
                 exit_ts = None
-                
-                # Track the most recent bar at-or-before timeout_ts_ms while we walk
-                # forward. If a bar past the timeout boundary fires the TIMEOUT exit,
-                # we want to use the last in-window print as the exit price (closest
-                # available proxy for the actual close at timeout_dt), not the first
-                # post-timeout print (which may be hours or days later for thin contracts).
+
+                # V5.3 bar walk: three exits in precedence order.
+                #   TIMEOUT — first bar at-or-after 15:50 ET on exit_day
+                #   STOP    — option low pierces -60% threshold
+                #   TARGET  — option high pierces +80% threshold
+                # If stop and target hit on the same bar, STOP wins (we can't
+                # know intrabar sequencing; assume worst case). Track the most
+                # recent bar at-or-before timeout_ts_ms so that on TIMEOUT we
+                # price off the last in-window print.
                 last_in_window_bar = None
                 for j in range(entry_idx + 1, len(bars)):
                     b = bars[j]
@@ -428,24 +446,20 @@ def run_forward_paper_trading(target_date: date = None):
 
                     if b_ts >= timeout_ts_ms:
                         exit_reason = "TIMEOUT"
-                        # Prefer the last bar at-or-before the timeout boundary; only
-                        # fall back to this post-timeout bar if no in-window bar exists.
                         timeout_bar = last_in_window_bar if last_in_window_bar is not None else b
                         exit_price = timeout_bar["c"]
                         exit_ts = timeout_bar["t"]
                         break
 
-                    if b["l"] <= stop and b["h"] >= target:
+                    hit_stop = b["l"] <= stop
+                    hit_target = b["h"] >= target
+                    if hit_stop:
+                        # STOP takes precedence over TARGET on ambiguous bars.
                         exit_reason = "STOP"
                         exit_price = stop
                         exit_ts = b_ts
                         break
-                    elif b["l"] <= stop:
-                        exit_reason = "STOP"
-                        exit_price = stop
-                        exit_ts = b_ts
-                        break
-                    elif b["h"] >= target:
+                    if hit_target:
                         exit_reason = "TARGET"
                         exit_price = target
                         exit_ts = b_ts
@@ -558,23 +572,24 @@ def get_previous_trading_day(base_date: date) -> date:
     return valid_dates[-1] if valid_dates else None
 
 def get_canonical_scan_date(today: date = None) -> date:
-    """Return the most recent scan_date whose 2-day hold window has fully closed
+    """Return the most recent scan_date whose V5.3 hold window has fully closed
     before `today`.
 
-    A signal scanned on date X enters at next_trading_day(X) and times out at
-    nth_next_trading_day(entry, HOLD_DAYS). For the trade to be safely simulated,
-    the timeout day must be strictly before `today`. The math works out to:
-    walk back (HOLD_DAYS + 2) trading days from today.
+    A signal scanned on date X enters at next_trading_day(X) (= day-1) and
+    times out at nth_next_trading_day(entry, HOLD_DAYS - 1) (= day-N). For the
+    trade to be safely simulated, the timeout day must be strictly before
+    `today`. We walk back (HOLD_DAYS + 1) trading days from today: 1 for the
+    entry-day lag, and HOLD_DAYS - 1 for the span from day-1 to day-N, plus 1
+    for the "strictly before today" guard.
 
     This is the function the daily cron uses when no explicit target_date is
-    provided — it ensures the cron processes signals whose hold windows have just
-    closed (yesterday or earlier), instead of trying to simulate trades that are
-    still open.
+    provided.
     """
     if today is None:
         today = datetime.now(est).date()
     d = today
-    for _ in range(HOLD_DAYS + 2):
+    # HOLD_DAYS=3: walk back 4 trading days (entry + 2 more hold days + 1 buffer)
+    for _ in range(HOLD_DAYS + 1):
         d = get_previous_trading_day(d)
     return d
 
@@ -705,7 +720,7 @@ def trigger_paper_trading():
         if target_date_str:
             target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
         else:
-            # Default: process the most recent scan_date whose 2-day hold window
+            # Default: process the most recent scan_date whose 3-day hold window
             # has fully closed before today.
             target_date = get_canonical_scan_date()
 

@@ -1,8 +1,24 @@
 # Intelligence Brief — GammaRips Signal Research
 
-> **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`.
+> **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`. Operator cheat: `../../CHEAT-SHEET.md`.
 
-## 2026-04-08 update — instrumentation pivot and the first three-way-positive
+## 2026-04-17 update — V5.3 Target 80 deployed; V4 retired; cohort scan confirms exit-policy failure
+
+Session produced three outcomes:
+
+1. **Cohort scan on `signals_labeled_v1` (N=1,563 tradable)** found the 40%/−25% bracket has EV **−4.26%** per trade after fees. Zero of ~35 feature cohorts passed the train-bootstrap-positive AND test-positive gate. **The hedge-flag alpha claim (28/30 live-ledger trades) does NOT replicate** — train EV +0.38% crosses zero; test EV −12.00%. Full report: `2026-04-17-cohort-scan-labeled-v1.md`. Memory updated.
+
+2. **Deep Research pass** modeled EV +1.8% to +3.2% per trade after applying: `V/OI > 2` (new positioning, not unwinding), moneyness 5–15% OTM (whale-leverage sweet spot), `VIX <= VIX3M` regime gate (skip day on backwardation), underlying-based stop (deferred to Phase 2 for mobile-executability), asymmetric +80% target (adopted).
+
+3. **V5.3 "Target 80" deployed.** Entry 10:00 ET day-1, −60% option stop, +80% option target, 3-day hold, 15:50 ET day-3 exit; STOP wins on ambiguous bars. All three services redeployed 2026-04-17. Policy rows tagged `V5_3_TARGET_80`; V4 legacy rows preserved. See `docs/DECISIONS/2026-04-17-v5-3-target-80.md` and `CHEAT-SHEET.md`.
+
+Phase 2 backlog: sweep/block classification, aggressor side, GEX, trailing stop. All deferred until V5.3 accumulates 4+ weeks of paper + real P&L evidence.
+
+## 2026-04-16 update — V3 retired, V4 is sole active strategy
+
+V3 was retired on 2026-04-16. V4 ("whale following") is now the only active pipeline. V3 services are paused; V3 data is preserved for historical reference. See `docs/DECISIONS/2026-04-16-v3-doc-archival.md`. All research posture is now oriented around V4 data collection (target N >= 500) and Phase 2 feature importance discovery.
+
+## 2026-04-08 update — instrumentation pivot and the first three-way-positive (historical)
 
 The research posture changed fundamentally on 2026-04-08. A session that started out as "run H1 (underlying relabel) with an SPY benchmark" produced three results that together reframed the entire problem:
 
@@ -10,9 +26,7 @@ The research posture changed fundamentally on 2026-04-08. A session that started
 2. **The V3.1 gate produces a fundamentally different cohort.** On the 29 real V3.1 trades the trader actually executed between 2026-02-19 and 2026-03-20, the cohort-wide numbers flip sign on every axis: option +2.91%, stock 1× +0.36%, SPY +0.01%, **directional alpha vs SPY +0.35%**. SPY floor is essentially zero, which means unlike the earlier bearish-VIX-20-25 subset from the labeled cohort (which turned out to be pure market beta), the V3.1-gate result is not SPY-drift capture. This is the **first three-way-positive (option, stock, alpha) in the entire research series**. Sample size is 29, CI still includes zero, and this is not validation — it is the first cohort-level result that is not contradictory. Full report: `BENCHMARKING_VALIDATION_V1.md`.
 3. **The decision was to stop searching and start instrumenting.** The repeated filter-search → top-1 candidate → OOS collapse loop (most recently `filt_rrr`) is a methodological dead end on a single-regime 31-day dataset. We will not resolve it by ranking more candidates. Instead, `forward_paper_ledger_v3_hold2` was extended with 10 benchmarking columns that write inline on every trade (`underlying_return`, `spy_return_over_window`, `hv_20d_entry`, `VIX_at_entry`, `vix_5d_delta_entry`, `iv_rank_entry`, `iv_percentile_entry`, plus entry/exit prices for both underlying and SPY). The FMP dependency was retired (legacy endpoint deprecation); VIX now comes from FRED, SPY from Polygon. A daily Polygon IVR cache job was deployed (`polygon-iv-cache-daily` Cloud Scheduler → `/cache_iv` endpoint on `forward-paper-trader`, writes to `polygon_iv_history`). The existing 29 ledger rows were backfilled. Full context: `docs/DECISIONS/2026-04-08-ledger-benchmarking-and-fmp-retirement.md`.
 
-**Also on 2026-04-08: the war ended.** The Iran-shock ceasefire is a genuine regime boundary. By the next pickup session in ~4-6 weeks, the ledger should have ~50-60 total trades — roughly half pre-war, half post-war — the first two-regime dataset we will have ever had. The entire strategy posture until the pickup is: **V3.1 gate frozen, no filter searches permitted, let the ledger accumulate self-benchmarked post-war data, revisit at N≥100 with pre-committed hypotheses**. See `NEXT_SESSION_PROMPT.md` for the decision tree and the four pre-committed tests.
-
-**New hypothesis added to the open list below: H9 — Does the V3.1 gate's three-way-positive expectancy survive the war → post-war regime transition?**
+**Also on 2026-04-08: the war ended.** The Iran-shock ceasefire is a genuine regime boundary. **Note (2026-04-16):** V3 has been retired. V4 is now collecting the post-war data. The V3 pre-committed hypotheses (H9, epoch split) are superseded by V4's broader data collection approach — feature importance will be run on V4 data at N >= 500.
 
 ## Where we are
 
@@ -62,11 +76,11 @@ These are the live experiments. See `STRATEGY_PLAYBOOK.md` for the full mechanic
 ## Hard constraints
 
 - **The Feb–Apr 2026 dataset is regime-confounded.** Do not draw signal-quality conclusions from it alone. Do not deploy any strategy backtested only on this 6-week window.
-- **Do not modify `forward-paper-trader/main.py`** until a hypothesis is validated end-to-end with bootstrap CIs and cross-regime evidence.
-- **Stop the bleed.** The production trader writes systematically losing rows to `forward_paper_ledger_v3_hold2`. Either pause the trader or remove the `premium_score >= 2 AND is_tradeable` filter without replacement before the next cron run, so the dataset doesn't keep accumulating known-anti-edge ledger rows.
+- **V4 is the active pipeline.** Do not add execution gates. Premium flags are features, not gates.
+- **Do not run ML until N >= 500.** Feature importance on small samples is noise.
 - **Multiple-comparison risk.** Any new filter or feature search MUST end with a bootstrap CI + walk-forward halving check. The `filt_rrr` autopsy in `FINDINGS_LEDGER.md` is the canonical example of why.
 - **Label-leakage discipline.** Never include outcome columns as features. Full list in `.claude/agents/gammarips-researcher.md`.
-- **Single source of truth.** All new analysis reads from `signals_labeled_v1` (BigQuery) or the cached pickles, never from the live ledger. New reports are deterministic and overwrite cleanly.
+- **Single source of truth.** Analysis reads from `forward_paper_ledger` and `overnight_signals_enriched`. Historical research uses `signals_labeled_v1` (frozen).
 
 ## What you'll find in the rest of this directory
 

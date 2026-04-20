@@ -11,10 +11,7 @@ Core scoring and overnight signal generation.
 Scanner-facing package / service wrapper for market-wide overnight options flow scanning.
 
 ### `enrichment-trigger/`
-Enrichment service for news, technicals, and AI-generated context. V3 pipeline — reads from `overnight_signals` with `overnight_score >= 6`, writes to `overnight_signals_enriched`.
-
-### `enrichment-trigger-v4/`
-V4 parallel enrichment service. Independent Cloud Run deployment. Reads from `overnight_signals` with relaxed filters (`overnight_score >= 1`, `recommended_spread_pct <= 0.10`, directional UOA > $500K), writes to `overnight_signals_enriched_v4`. Cloud Scheduler `enrichment-trigger-v4-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime. See `docs/DECISIONS/2026-04-12-v4-fresh-start.md`.
+Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 1`, `recommended_spread_pct <= 0.10`, directional UOA > $500K. Writes to `overnight_signals_enriched`. Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime.
 
 ### `overnight-report-generator/`
 Daily report generation for the overnight signal set.
@@ -23,14 +20,11 @@ Daily report generation for the overnight signal set.
 Multi-model debate / consensus service for ranking or adjudicating signal quality.
 
 ### `forward-paper-trader/`
-Cloud Run service responsible for executing the V3.1 forward paper-trading policy and maintaining the IV-history cache. Single container, two endpoints:
+Cloud Run service for forward paper-trading and IV cache maintenance. Single container, two endpoints:
 
-- **`POST /`** — daily trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Pulls eligible signals from `overnight_signals_enriched`, applies the V3.1 gate, simulates the `+40% / −25% / 2-day` bracket against Polygon minute bars for each option, and writes one row per signal (executed or skipped) to `forward_paper_ledger_v3_hold2`.
-- **`POST /cache_iv`** — daily IV cache refresh (Cloud Scheduler `polygon-iv-cache-daily`, 16:30 ET Mon-Fri). Pulls the trailing-30-day watchlist from `overnight_signals_enriched`, fetches each underlying's options chain via Polygon, computes the ATM ~30-DTE implied volatility, and appends one row per ticker to `polygon_iv_history`.
-- **`benchmark_context.py`** — non-blocking helper module imported by `main.py`. Hosts: the FRED VIX CSV fetcher (cached in-process), the Polygon options-chain fetcher, the ATM IV extractor, the HV-20d compute from Polygon daily bars, the SPY minute-bar cache, price-at-timestamp locators, and the BigQuery query that computes `iv_rank_entry` / `iv_percentile_entry` at trade time from `polygon_iv_history`. Every function returns `None` on any failure — the benchmarking layer cannot block a trade from being written.
-
-### `forward-paper-trader-v4/`
-V4 parallel paper-trading service. Independent Cloud Run deployment. Reads from `overnight_signals_enriched_v4` with **no trader-side filters** (all enriched signals execute), simulates the same `+40% / −25% / 2-day` bracket, writes to `forward_paper_ledger_v4_hold2`. Cloud Scheduler `forward-paper-trader-v4-trigger` fires at 16:30 ET Mon-Fri. A companion scheduler job `polygon-iv-cache-v4-daily` hits `POST /cache_iv` on this service at 16:30 ET Mon-Fri, writing to the shared `polygon_iv_history` table. See `docs/DECISIONS/2026-04-12-v4-fresh-start.md`.
+- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V5.3 Target 80** policy (`10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit`; STOP wins on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V5_3_TARGET_80`. No trader-side filters — signal-quality gates live in `enrichment-trigger` and `signal-notifier`.
+- **`POST /cache_iv`** — daily IV cache refresh (Cloud Scheduler `polygon-iv-cache-daily`, 16:30 ET Mon-Fri). Pulls trailing-30-day watchlist, fetches each underlying's options chain via Polygon, computes ATM ~30-DTE IV, appends to `polygon_iv_history`.
+- **`benchmark_context.py`** — non-blocking helper module. Hosts: FRED VIX CSV fetcher, Polygon options-chain fetcher, ATM IV extractor, HV-20d compute, SPY minute-bar cache, price-at-timestamp locators, and BigQuery IV rank query. Every function returns `None` on failure — benchmarking cannot block a trade.
 
 ### `win-tracker/`
 Tracks realized performance after the trade window and closes the loop on execution outcomes.
@@ -46,31 +40,24 @@ Shared Python package (local path install, vendored into each service's build co
 
 ## Data flow
 
-### V3 pipeline (live control)
 1. Overnight scanner produces signal candidates in `overnight_signals`.
-2. `enrichment-trigger` enriches signals scoring `overnight_score >= 6`, writes to `overnight_signals_enriched`.
+2. `enrichment-trigger` enriches signals with `overnight_score >= 1`, `recommended_spread_pct <= 0.10`, and directional UOA > $500K. Writes to `overnight_signals_enriched`. ~70 tickers/day.
 3. Optional report/arena layers add synthesis.
-4. `forward-paper-trader` applies the V3.1 gate (`premium_score >= 2`, vol/oi floor), simulates bracket execution, and writes to `forward_paper_ledger_v3_hold2`.
-5. Win tracker measures post-entry outcomes.
+4. `signal-notifier` layers V5.3 quality gates (`volume_oi_ratio > 2`, `moneyness_pct` 5–15%, `VIX <= VIX3M`), ranks by directional UOA $vol, and emails **at most one** signal per day.
+5. `forward-paper-trader` simulates the **V5.3 Target 80** policy on all enriched signals (no trader-side filters), writes to `forward_paper_ledger`.
+6. Win tracker measures post-entry stock-level outcomes (3-day peak) into `signal_performance`.
+7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until V5.3 has 4+ weeks of paper + real P&L evidence.
 
-### V4 pipeline (parallel data collection, deployed 2026-04-12)
-1. Same upstream `overnight_signals` table (shared scanner).
-2. `enrichment-trigger-v4` enriches signals scoring `overnight_score >= 1` with `recommended_spread_pct <= 0.10` and directional UOA > $500K, writes to `overnight_signals_enriched_v4`. ~70 tickers/day.
-3. `forward-paper-trader-v4` trades **all** enriched signals (no trader-side filters), simulates the same `+40% / −25% / 2-day` bracket, writes to `forward_paper_ledger_v4_hold2`.
-4. After 30 days (target N >= 500), tree-based feature importance (XGBoost/SHAP) discovers empirical thresholds for a future V5 gate.
-
-V3 and V4 are completely independent Cloud Run services with separate scheduler jobs, enriched tables, and ledger tables. They share only the upstream `overnight_signals` table and the `polygon_iv_history` IV cache.
-
-**Parallel daily jobs:** `polygon-iv-cache-daily` (V3) and `polygon-iv-cache-v4-daily` (V4) both hit their respective service's `POST /cache_iv` at 16:30 ET Mon-Fri, snapshotting ATM 30-DTE IV into the shared `polygon_iv_history` table. This cache is read by `benchmark_context.fetch_iv_rank_from_bq` at trade time to populate `iv_rank_entry` / `iv_percentile_entry` on both ledgers.
+**IV cache:** `polygon-iv-cache-daily` hits `POST /cache_iv` at 16:30 ET Mon-Fri, snapshotting ATM 30-DTE IV into `polygon_iv_history`. Read by `benchmark_context.fetch_iv_rank_from_bq` at trade time.
 
 ## External data dependencies
 
 | Dependency | Used by | Purpose |
 |---|---|---|
-| **Polygon** | `forward-paper-trader`, `forward-paper-trader-v4` (both endpoints), `src/enrichment/core/clients/polygon_client.py` | Option minute bars, option chain snapshots, stock minute + daily bars, stock snapshots. Secret: `POLYGON_API_KEY`. |
+| **Polygon** | `forward-paper-trader`, `forward-paper-trader` (both endpoints), `src/enrichment/core/clients/polygon_client.py` | Option minute bars, option chain snapshots, stock minute + daily bars, stock snapshots. Secret: `POLYGON_API_KEY`. |
 | **FRED** (`fredgraph.csv?id=VIXCLS`) | `forward-paper-trader` (`get_regime_context`) | Daily VIX close for `VIX_at_entry` + `vix_5d_delta_entry`. No API key required. Switched from FMP on 2026-04-08. |
 | **FMP** | `enrichment-trigger`, `win-tracker`, `overnight-report-generator` (still) | News, fundamentals, historical quotes. **No longer used by `forward-paper-trader`** — mount removed from `forward-paper-trader/deploy.sh` on 2026-04-08 after FMP's legacy historical-price endpoint was retired. |
-| **BigQuery** | All services | Canonical storage for `overnight_signals_enriched`, `overnight_signals_enriched_v4`, `forward_paper_ledger_v3_hold2`, `forward_paper_ledger_v4_hold2`, `polygon_iv_history`, `signals_labeled_v1`, etc. |
+| **BigQuery** | All services | Canonical storage for `overnight_signals_enriched`, `forward_paper_ledger`, `polygon_iv_history`, `signals_labeled_v1`, etc. |
 | **GCS** | `overnight-scanner` | Ticker universe file (`overnight-universe.txt`). |
 
 ## Current architecture truth

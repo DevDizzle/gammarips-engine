@@ -7,12 +7,15 @@ Reads today's overnight_signals where score >= 6,
 then triggers news + technicals enrichment for those tickers only.
 """
 
+import io
 import json
 import logging
+import math
 import os
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
+import requests
 from flask import Flask, Request, jsonify, request
 from google.cloud import bigquery, storage
 from google import genai
@@ -35,7 +38,7 @@ PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
 DATASET = os.getenv("DATASET", "profit_scout")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "profit-scout-data")
 SIGNALS_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals"
-MIN_SCORE = int(os.getenv("MIN_ENRICHMENT_SCORE", "6"))
+MIN_SCORE = int(os.getenv("MIN_ENRICHMENT_SCORE", "1"))
 
 # Polygon
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip()
@@ -57,6 +60,134 @@ MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
 NEWS_OUTPUT_PREFIX = "overnight-enrichment/news/"
 TECHNICALS_OUTPUT_PREFIX = "overnight-enrichment/technicals/"
 ENRICHED_SIGNALS_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals_enriched"
+
+
+# =====================================================================
+# V5.2 feature helpers (VIX3M regime, focal-strike V/OI, moneyness)
+# =====================================================================
+
+# Cache both values for the lifetime of a single Cloud Run invocation.
+_VIX3M_CACHE: dict = {"value": "unset", "as_of": None}
+
+
+def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
+    """Return the VIX3M (3-month VIX) close on or before `scan_date`.
+
+    Primary source: FRED series ``VXVCLS`` (CBOE S&P 500 3-Month Volatility
+    Index), fetched as a free CSV with no auth. Cached in-process so we hit
+    FRED at most once per invocation.
+
+    On failure returns None. signal-notifier is expected to fail-closed (skip
+    the signal) when this value is NULL, so a missing VIX3M never silently
+    weakens the regime gate.
+    """
+    cached = _VIX3M_CACHE.get("value")
+    if cached != "unset":
+        return cached
+
+    def _parse(text: str) -> float | None:
+        rows = [ln.split(",") for ln in text.strip().splitlines()[1:]]
+        try:
+            target = datetime.strptime(scan_date, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+        best: tuple[date, float] | None = None
+        for r in rows:
+            if len(r) < 2:
+                continue
+            dstr, vstr = r[0].strip(), r[1].strip()
+            if not dstr or vstr in ("", "."):
+                continue
+            try:
+                d = datetime.strptime(dstr, "%Y-%m-%d").date()
+                v = float(vstr)
+            except ValueError:
+                continue
+            if d <= target and (best is None or d > best[0]):
+                best = (d, v)
+        return best[1] if best else None
+
+    try:
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXVCLS"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        val = _parse(resp.text)
+        _VIX3M_CACHE["value"] = val
+        _VIX3M_CACHE["as_of"] = scan_date
+        if val is None:
+            logger.warning(f"VIX3M: FRED VXVCLS returned no usable rows on/before {scan_date}")
+        else:
+            logger.info(f"VIX3M: {val:.2f} on/before {scan_date} (FRED VXVCLS)")
+        return val
+    except Exception as e:
+        logger.warning(f"VIX3M: FRED fetch failed: {e}. Storing NULL.")
+        _VIX3M_CACHE["value"] = None
+        _VIX3M_CACHE["as_of"] = scan_date
+        return None
+
+
+def fetch_underlying_close(ticker: str, scan_date: str, polygon_key: str) -> float | None:
+    """Return the daily close for `ticker` on `scan_date` via Polygon.
+
+    Used to compute ``moneyness_pct`` when the caller does not already have a
+    reliable underlying price at signal time. Returns None on any failure or
+    if the ticker did not trade that day.
+    """
+    if not polygon_key:
+        return None
+    try:
+        url = f"https://api.polygon.io/v1/open-close/{ticker}/{scan_date}"
+        params = {"adjusted": "true", "apiKey": polygon_key}
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json() or {}
+        close = data.get("close")
+        if close is None:
+            return None
+        return float(close)
+    except Exception as e:
+        logger.warning(f"  {ticker}: underlying close fetch failed for {scan_date}: {e}")
+        return None
+
+
+def compute_v5_2_features(sig: dict, scan_date: str, polygon_key: str) -> dict:
+    """Compute V5.2 post-enrichment features for a single signal.
+
+    Returns a dict with ``volume_oi_ratio`` and ``moneyness_pct``. Both are
+    None on insufficient input; signal-notifier treats NULL as fail-closed.
+    """
+    vol = sig.get("recommended_volume")
+    oi = sig.get("recommended_oi")
+    try:
+        vol_f = float(vol) if vol is not None else None
+        oi_f = float(oi) if oi is not None else None
+    except (TypeError, ValueError):
+        vol_f, oi_f = None, None
+    vol_oi = (vol_f / oi_f) if (vol_f is not None and oi_f is not None and oi_f > 0) else None
+
+    strike = sig.get("recommended_strike")
+    underlying_px = sig.get("underlying_price")
+    try:
+        strike_f = float(strike) if strike is not None else None
+        px_f = float(underlying_px) if underlying_px is not None else None
+    except (TypeError, ValueError):
+        strike_f, px_f = None, None
+
+    if px_f is None or px_f <= 0:
+        # Fallback: fetch the scan_date daily close from Polygon.
+        px_f = fetch_underlying_close(sig.get("ticker", ""), scan_date, polygon_key)
+
+    if strike_f is not None and px_f is not None and px_f > 0:
+        moneyness = abs(strike_f - px_f) / px_f
+    else:
+        moneyness = None
+
+    return {
+        "volume_oi_ratio": round(vol_oi, 4) if vol_oi is not None else None,
+        "moneyness_pct": round(moneyness, 4) if moneyness is not None else None,
+    }
 
 
 # =====================================================================
@@ -82,10 +213,15 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     FROM `{SIGNALS_TABLE}`
     WHERE scan_date = '{scan_date}'
       AND overnight_score >= {MIN_SCORE}
+      AND recommended_spread_pct <= 0.10
+      AND (
+        (direction = 'BULLISH' AND call_uoa_depth > 500000)
+        OR (direction = 'BEARISH' AND put_uoa_depth > 500000)
+      )
     ORDER BY overnight_score DESC
     """
     rows = list(bq_client.query(query).result())
-    logger.info(f"Found {len(rows)} signals with score >= {MIN_SCORE} for {scan_date}")
+    logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, spread<=10%%, UOA>$500K) for {scan_date}")
     return [dict(r) for r in rows], scan_date
 
 
@@ -325,8 +461,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
 def _load_cached_news(bucket, ticker: str, scan_date: str, max_age_hours: int = 12) -> dict | None:
     """Return cached news analysis for ticker+scan_date if GCS blob is fresh.
 
-    Covers same-day retries AND V3→V4 dedupe (V3 writes the blob at 05:00,
-    V4 reads it at 05:30). Returns None on any miss/staleness/parse failure.
+    Covers same-day retries. Returns None on any miss/staleness/parse failure.
     """
     blob_path = f"{NEWS_OUTPUT_PREFIX}{ticker}_{scan_date}.json"
     blob = bucket.blob(blob_path)
@@ -756,13 +891,18 @@ def write_enriched_signals(
 ):
     """Merge signals + technicals + news into enriched table."""
     rows = []
+    # V5.2: fetch VIX3M once per invocation, applied to every row this run.
+    vix3m_val = fetch_vix3m_for_scan_date(scan_date)
     for sig in signals:
         ticker = sig["ticker"]
         tech = technicals.get(ticker, {}) or {}
         news = news_analysis.get(ticker, {}) or {}
-        
+
         # Compute derived risk fields
         risk = compute_risk_fields(sig, tech, news)
+
+        # V5.2 features: V/OI at focal strike, moneyness, VIX3M regime context
+        v5_2 = compute_v5_2_features(sig, scan_date, POLYGON_API_KEY)
         
         if news:
             logger.info(f"  {ticker}: catalyst={news.get('catalyst_score')} intent={risk['flow_intent']} mr_risk={risk['mean_reversion_risk']} quality={risk['enrichment_quality_score']}")
@@ -839,8 +979,13 @@ def write_enriched_signals(
                 sig.get("underlying_price", 0), sig.get("direction", ""),
                 tech.get("support"), tech.get("resistance")
             ),
+            # V5.2 features — used by signal-notifier to rank + filter the
+            # daily shortlist. NULL-safe: signal-notifier fails closed.
+            "volume_oi_ratio": v5_2["volume_oi_ratio"],
+            "moneyness_pct": v5_2["moneyness_pct"],
+            "vix3m_at_enrich": float(vix3m_val) if vix3m_val is not None else None,
         }
-        
+
         # Premium signal scoring
         premium_input = {
             "flow_intent": risk["flow_intent"],
@@ -888,12 +1033,26 @@ def write_enriched_signals(
                             "contract_score", "price_change_pct", "underlying_price",
                             "recommended_delta", "recommended_gamma", "recommended_theta",
                             "recommended_vega", "recommended_iv", "recommended_strike",
-                            "close_loc", "dist_from_low", "dist_from_high", "stochd_14_3_3"]:
+                            "close_loc", "dist_from_low", "dist_from_high", "stochd_14_3_3",
+                            # V5.2 additions
+                            "volume_oi_ratio", "moneyness_pct", "vix3m_at_enrich"]:
             if row.get(float_field) is not None:
                 try:
                     row[float_field] = float(row[float_field])
                 except (ValueError, TypeError):
                     row[float_field] = None
+
+    # V5.2: ensure new columns exist on the enriched table (idempotent).
+    # ALTER TABLE ... ADD COLUMN IF NOT EXISTS is a no-op on subsequent runs.
+    try:
+        bq_client.query(f"""
+            ALTER TABLE `{ENRICHED_SIGNALS_TABLE}`
+            ADD COLUMN IF NOT EXISTS volume_oi_ratio FLOAT64,
+            ADD COLUMN IF NOT EXISTS moneyness_pct FLOAT64,
+            ADD COLUMN IF NOT EXISTS vix3m_at_enrich FLOAT64
+        """).result()
+    except Exception as e:
+        logger.warning(f"V5.2 schema ensure failed (will still attempt load): {e}")
 
     job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
@@ -902,7 +1061,6 @@ def write_enriched_signals(
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
     )
 
-    import io
     jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
     job = bq_client.load_table_from_file(
         io.BytesIO(jsonl.encode("utf-8")),
@@ -1136,7 +1294,7 @@ def enrichment_trigger():
     # Step 5: Write enriched signals to BigQuery
     write_enriched_signals(bq_client, signals, technicals, news_results, scan_date)
 
-    # Step 6: Sync to Firestore
+    # Step 6: Sync to Firestore (powers the webapp signals + summaries views).
     sync_to_firestore(signals, technicals, news_results, scan_date)
 
     # === OBSERVABILITY SUMMARY ===

@@ -20,9 +20,7 @@ GammaRips Engine is the active backend and research workspace for overnight opti
 ```bash
 # Deploy a service (run from the service directory)
 cd forward-paper-trader && bash deploy.sh
-cd forward-paper-trader-v4 && bash deploy.sh
 cd enrichment-trigger && bash deploy.sh
-cd enrichment-trigger-v4 && bash deploy.sh
 cd agent-arena && bash deploy.sh
 
 # Ledger health check (read-only, safe to run anytime)
@@ -34,7 +32,7 @@ gcloud scheduler jobs list --project=profitscout-fida8 --location=us-central1
 # Cloud Run logs
 gcloud run services logs read forward-paper-trader --project=profitscout-fida8 --region=us-central1 --limit=50
 
-# Manual paper-trader trigger (dry run for a specific date)
+# Manual V4 paper-trader trigger (dry run for a specific date)
 curl -X POST https://forward-paper-trader-406581297632.us-central1.run.app/ \
   -H "Content-Type: application/json" -d '{"target_date": "2026-04-15"}'
 
@@ -49,17 +47,17 @@ Before making meaningful changes, read:
 3. `docs/ARCHITECTURE.md` — system map and data flow
 4. `docs/DATA-CONTRACTS.md` — BQ schemas
 
-Deeper context (read when relevant): `docs/DECISIONS/` (decision trail), `docs/EVAL-SYSTEM.md`, `docs/TESTING.md`, `docs/research_reports/INTELLIGENCE_BRIEF.md`, `docs/research_reports/FINDINGS_LEDGER.md`, `docs/EXEC-PLANS/v3-reset.md`.
+Deeper context (read when relevant): `docs/DECISIONS/` (decision trail), `docs/EVAL-SYSTEM.md`, `docs/TESTING.md`, `docs/research_reports/INTELLIGENCE_BRIEF.md`, `docs/research_reports/FINDINGS_LEDGER.md`.
 
 ## Current policy (summary)
-Two parallel pipelines are live. **V3.1** gate is **frozen** for accumulation (live control). **V4** runs alongside with no trader-side filters, collecting broad execution data for tree-based feature discovery (deployed 2026-04-12). Current live state, regime context, and constraints are in `NEXT_SESSION_PROMPT.md` — always read it before acting. The source of truth for execution policy is `docs/TRADING-STRATEGY.md` + the respective `main.py` in each trader service.
+**V5.3 "Target 80" is the only active strategy** (adopted 2026-04-17, V4 retired same day, V3 retired 2026-04-16). One signal per day or none. Entry 10:00 ET day-1, −60% option stop, +80% option target, 3-day hold, exit 15:50 ET day-3. Stop wins over target on ambiguous bars (conservative). The trader has no filters; signal-quality gates live in `enrichment-trigger` (`overnight_score >= 1 AND spread <= 10% AND directional UOA > $500K`) and `signal-notifier` (`V/OI > 2`, `moneyness 5-15% OTM`, `VIX <= VIX3M`, `LIMIT 1`). The one-page operator view is [`CHEAT-SHEET.md`](CHEAT-SHEET.md). Service/table context: [`docs/GLOSSARY.md`](docs/GLOSSARY.md). Source of truth for execution policy: `docs/TRADING-STRATEGY.md` + `forward-paper-trader/main.py` + `docs/DECISIONS/2026-04-17-v5-3-target-80.md`.
 
 ## Ground rules
 - NEVER hardcode API keys or secrets in source.
-- NEVER mix V2, V3, and V4 forward-ledger cohorts.
-- NEVER reintroduce VIX gating without an explicit documented decision in `docs/DECISIONS/`.
+- NEVER create separate V-numbered tables or services. There is one pipeline with canonical names.
+- NEVER add execution gates to the trader. Signal-quality gates live in `enrichment-trigger` and `signal-notifier`, not in `forward-paper-trader`. Phase 2 feature discovery is the only path to new gates.
 - ALWAYS update `docs/TRADING-STRATEGY.md` and add a `docs/DECISIONS/` note when changing execution policy.
-- Treat `_archive/` and `docs/research_reports/_archive/` as historical, not authoritative.
+- Treat `_archive/`, `docs/archive/`, and `docs/research_reports/_archive/` as historical, not authoritative.
 - Prefer archival over deletion when cleaning old artifacts.
 - Prefer Edit over Write. Do not create new docs unless a plan calls for it.
 - Do not trust historical `PROMPT-*` docs or old research summaries as current spec.
@@ -75,10 +73,8 @@ Three project-specific subagents in `.claude/agents/`:
 ## Repo map
 | Directory | Purpose |
 |---|---|
-| `forward-paper-trader/` | V3 production paper-trading + IV cache (Cloud Run, two endpoints). See `docs/ARCHITECTURE.md` for details. |
-| `forward-paper-trader-v4/` | V4 parallel paper-trading (no trader-side filters, writes to `forward_paper_ledger_v4_hold2`). Deployed 2026-04-12. |
-| `enrichment-trigger/` | V3 enrichment pipeline (instrumented via `libs/trace_logger`) |
-| `enrichment-trigger-v4/` | V4 parallel enrichment (score>=1, spread<=10%, UOA>$500K, writes to `overnight_signals_enriched_v4`). Deployed 2026-04-12. |
+| `forward-paper-trader/` | Production paper-trading (no trader-side filters, writes to `forward_paper_ledger`). Cloud Run, two endpoints. |
+| `enrichment-trigger/` | Enrichment pipeline (score>=1, spread<=10%, UOA>$500K, writes to `overnight_signals_enriched`). Instrumented via `libs/trace_logger`. |
 | `agent-arena/` | Multi-model debate / signal ranking (instrumented) |
 | `overnight-report-generator/` | Gemini editorial synthesis (instrumented) |
 | `gammarips-eval/` | LLM eval service — monitoring-only, non-gating. See `docs/EVAL-SYSTEM.md`. |
