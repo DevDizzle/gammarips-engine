@@ -9,6 +9,12 @@
 - **v2 (2026-04-20):** post-review amendments — Phase 2 push moved out of forward-paper-trader (BLOCKER), `todays_pick` writer pinned to signal-notifier (HIGH), drift tripwire added (HIGH), arena commentary gated to post-market (HIGH), real-money-vs-paper discipline rule proposed for TRADING-STRATEGY.md (HIGH), Secret Manager mandate added to all phases (LOW), sequencing within Week 1 spelled out (LOW).
 - **v2.2 (2026-04-20, later):** **execution order swapped — Phase 3 (MCP refresh) ships BEFORE Phase 2 (WhatsApp paywall).** Rationale: Evan probed whether $29/mo was justifiable when the webapp reveals the same info simultaneously. Honest answer is the chat-with-agent feature (Phase 3 `get_todays_pick`, `get_open_position`, win-rate) is the real moat — push alone prices at $5–10/mo, push + agent-chat with live Polygon data prices at $29–49/mo.
 - **v2.3 (2026-04-20, later still):** pricing + freemium gating research landed. **Pricing moves from intuition $29 to a two-tier $19 Starter / $39 Pro** (research showed $29 undersells by ~4x vs peers and sits at the low edge of the prosumer anchor zone). **Freemium gating strategy pinned** (Section 6.4): daily pick + signals + report stay fully free; arena full transcript, debrief pages, and full performance ledger get soft-gated; AI chat, live open-position tracker, personal watchlist, trade journal, alert rules, CSV export get hard-gated behind subscription. Phase 3 expanded to include paid-tier webapp features (AI chat wiring + live position page) as MVP; watchlist/journal/alerts deferred to post-launch iteration.
+- **v2.4 (2026-04-20, end of day):** Evan clarified the chat UX — **AI chat lives only in the private WhatsApp group, not on the webapp**. Behavior: agent stays silent by default, responds only when `@mention`ed; other subscribers see every chat turn, which amortizes cost and builds community (one ask → everyone benefits). Consequences:
+    - Phase 3b webapp `/chat` widget is **dropped entirely**.
+    - Phase 3b webapp `/positions` is **deferred to post-launch iteration** — subscribers can just ask the agent "what's my open position?" via WhatsApp, which reads `get_open_position` from MCP. No duplicated webapp surface at launch.
+    - **Phase 2 (OpenClaw wiring) is now the single launch blocker** for the paid tier. Phase 2 scope expands to include the @mention-aware chat agent, its system prompt, and compliance guardrails.
+    - ✅ Phase 3a (MCP tool refresh) remains the prerequisite — the OpenClaw agent needs those tools via `mcporter`.
+    - Revised execution order: 1.0 → 1 → 3a → 2 → 4 → (post-launch) 3b → 5.
 
 ---
 
@@ -220,7 +226,7 @@ Add section to `docs/TRADING-STRATEGY.md`:
 
 ---
 
-### Phase 2 — WhatsApp paywall (3–5 days, touches trading surface)
+### Phase 2 — WhatsApp paywall + @mention chat agent (v2.4, now the launch blocker)
 
 > ⚠️ **v2 amendment (BLOCKERS #1, #2):** Audit flagged that `forward-paper-trader/main.py` is a **batch simulator that runs 16:30 ET Mon–Fri**, not a live-at-10:00-ET service. Wiring the push inside the trader means the ping fires hours late — a product-killing defect. The push must come from the service that fires **at the decision time** for each event.
 >
@@ -285,6 +291,53 @@ This is a ~100-line TypeScript plugin living in Evan's OpenClaw install, NOT a s
 | **Forbid in-trader HTTP** | `.claude/rules/forward-paper-trader.md` | Add rule: "NEVER add synchronous outbound HTTP or user-notification calls to this service. Paper-trader is the ledger of record, nothing else. All subscriber messaging fires from `signal-notifier`, `agent-arena`, and `exit-reminder` only." |
 | **Compliance disclaimer** | OpenClaw message template in each caller | Every push includes: *"Paper-trading performance, educational only. Not investment advice."* Appended to message string. |
 | **Secrets** | Secret Manager | `OPENCLAW_HOOKS_TOKEN`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GROUP_JID`, `STRIPE_WEBHOOK_SECRET` — never env-var plaintext. |
+
+**Phase 2 addition (v2.4) — @mention-triggered agent in the WhatsApp group:**
+
+This is the main paid differentiator. Lives entirely inside OpenClaw; the webapp has no chat surface. Design:
+
+| Aspect | Decision |
+|---|---|
+| **Trigger** | Agent responds only when the message contains an `@mention` of its configured handle (e.g. `@GammaRips`). Silent otherwise — human-to-human chat flows undisturbed. |
+| **Identity gate** | OpenClaw plugin (`openclaw/plugin-sdk`, ~100 LOC) checks `senderId` (phone_e164) against Firestore `whatsapp_allowlist`. If not active-paid, short-circuit with a paywall note + Stripe checkout link instead of invoking the agent. |
+| **MCP tool access** | Agent uses the bundled `mcporter` skill to call our Cloud Run MCP at `https://gammarips-mcp-406581297632.us-central1.run.app/sse`. Phase 3a tools (`get_todays_pick`, `get_open_position`, `get_position_history`, `get_win_rate_summary`, `get_signal_detail`, `get_enriched_signal_schema`, `get_freemium_preview`, `get_daily_report`, `web_search`) are all available. |
+| **Model** | Claude Haiku 4.5 with Anthropic prompt caching on system prompt + MCP tool descriptions (see §4 above for model-cost lever). |
+| **Visibility** | All chat turns are visible to every member of the paid group. This is by design — one user's question + agent answer benefits the whole community and amortizes the per-message cost. |
+| **Context window** | Stateless per-turn — agent does NOT maintain conversational memory across messages in v1. If a user asks a follow-up, they must re-include needed context. Revisit after first month of usage data. |
+
+**Compliance guardrails on the agent's system prompt (v2.4 requirement):**
+
+To stay inside the SEC *Lowe* publisher exclusion, the @mention-triggered agent must produce **impersonal content** — explanations of the engine's output, the methodology, and public data — not personalized investment advice. The system prompt explicitly instructs:
+
+```
+You are GammaMolt, the AI concierge for GammaRips. Paid members ask you about
+GammaRips' daily V5.3 pick, the engine's methodology, historical paper-trading
+performance, and flow data. You have MCP tools to read the canonical pick, live
+open paper positions, realized trade history, and the enriched signals table.
+
+You DO answer:
+  - "What did GammaRips pick today and why did it clear the V5.3 gates?"
+  - "What's the current unrealized P&L on the engine's open paper trade?"
+  - "How has the engine done over the last 30 days?"
+  - "Walk me through the enriched data for FIX / any ticker."
+  - "What's in the daily report?"
+
+You DO NOT answer:
+  - Anything that depends on the user's personal account, capital, tax, or risk
+    tolerance ("should I size 2 contracts?", "is this safe for my IRA?").
+  - Personalized trade recommendations ("take this one", "skip that one").
+  - Any instruction that implies fiduciary or advisory role.
+
+When asked an out-of-scope question, respond:
+  "I can walk you through the engine's methodology and current data, but I'm
+   not your advisor and can't give personalized trade guidance. Ask your
+   broker, a licensed CFP, or use the public gammarips.com methodology docs."
+
+Every response ends with: "Paper-trading performance, educational only.
+Not investment advice."
+```
+
+Log every agent response to Firestore `chat_log/{group_id}/{turn_id}` with `senderId`, `prompt`, `response`, `mcp_tools_called`, `model`, `timestamp`. Audit trail for both compliance and product-iteration signal.
 
 **Legal / disclaimer hygiene (v2.1 — no counsel at this scale, per Evan):**
 
@@ -367,44 +420,31 @@ Also supported: OpenClaw's **setup-token** path reuses Evan's existing Claude Pr
 
 Decision: default to **Haiku 4.5 via Anthropic API** with prompt caching on the system prompt + MCP tool descriptions. Revisit after first month of real usage data.
 
-**v2.3 additions — paid-tier webapp MVP (land with Phase 3, before paywall):**
+**v2.4 amendment — chat is WhatsApp-only, not webapp.** The former Phase 3b `/chat` widget is DROPPED. The former `/positions` webapp page is DEMOTED to post-launch iteration. The paid moat lives entirely in OpenClaw (spec in Phase 2 above).
 
-**1. AI chat widget on the webapp** (in addition to the WhatsApp chat in Phase 2):
-- New route `/chat` — logged-in + subscribed users can ask the GammaRips agent questions in a browser chat UI.
-- Same MCP tool set (get_todays_pick, get_open_position, get_position_history, get_win_rate_summary, get_signal_detail, web_search).
-- Default model: **Claude Haiku 4.5** with prompt caching on system prompt + MCP tool descriptions. At 50 questions/user/month ≈ $0.10/user model cost — well under $39 ARPU.
-- Firestore: `chat_sessions/{uid}/{session_id}/{turn_id}` for persistence (optional for v1; ephemeral sessions acceptable).
-
-**2. Live open-position tracker** (`/positions`) — the most differentiated paid feature:
-- Reads `forward_paper_ledger` where `exit_timestamp IS NULL AND scan_date >= today - 4 trading days`.
-- For each open position: fetches live Polygon options snapshot (mid price on the specific contract).
-- Displays: ticker, contract, entry_price, current_mid, unrealized_return_pct, days_held, days_until_timeout, stop_price, target_price.
-- Auto-refreshes every 30s while market is open (09:30–16:00 ET).
-- Requires login + `subscription.tier ∈ ("starter", "pro")` in Firestore users doc.
-
-**3. Subscription gating helpers** in `src/lib/auth.ts`:
-- `getSubscriptionTier(uid) → "free" | "starter" | "pro"` read from `users/{uid}.subscription`.
-- `<RequireSubscription tier="pro">...</RequireSubscription>` component that short-circuits to upgrade CTA for non-pro users.
-- Middleware on `/chat`, `/positions` routes.
-
-**4. Soft-gating UX (lower-urgency, can ship post-launch-week-1):**
-- Arena page (`/arena`) — `backdrop-filter: blur(6px)` on round-by-round transcript past 2 read-throughs/day (localStorage counter). Overlay CTA "Unlock full debate (Pro) →".
+**Remaining Phase 3b scope (soft-gating UX; not launch-blocking):**
+- Arena page (`/arena`) — `backdrop-filter: blur(6px)` on round-by-round transcript past 2 read-throughs/day (localStorage counter). Overlay CTA "Unlock full debate (Pro) →". Headline verdict stays free for funnel.
 - Debrief pages (`/signals/[ticker]/debrief`) — time-delay gate: paid users see immediately, free users see after 48h.
 
-**Deferred to post-launch iteration (Phase 3b, not blocking paywall):**
-- Personal watchlist page
-- Trade journal (user-entered real-money fills vs paper)
-- Alert rules per ticker
-- CSV export
-- Email digest tier differentiation (daily for paid vs weekly for free)
+**Post-launch iteration (Phase 3c, ships after paid tier is live and we have real usage signal):**
+- Webapp `/positions` live tracker (richer second surface for open positions; v1 is "ask the agent in WhatsApp").
+- Personal watchlist page.
+- Trade journal (user-entered real-money fills vs paper).
+- Alert rules per ticker.
+- CSV export.
+- Email digest tier differentiation (daily for paid vs weekly for free).
 
-**Definition of Done (Phase 3):**
-- ✅ All 3 MCP fixes deployed; old `score >= 6` gate eliminated everywhere
-- ✅ 5 new MCP tools pass an integration test via `mcporter call gammarips.<tool>` from a dev OpenClaw instance
-- ✅ Auth middleware enforces Firestore-backed subscription check for protected tools and webapp routes
-- ✅ Webapp `/chat` renders a working chat UI for Pro users; asks "what's today's pick?" and gets a correct answer through the MCP
-- ✅ Webapp `/positions` renders live unrealized P&L for any open V5.3 paper position, refreshing every 30s during market hours
-- ✅ End-to-end beta test: one real user (Evan or a friend) uses the chat + positions for one full trading week; no crashes, answers are accurate, UX doesn't feel broken
+**Definition of Done (Phase 3a — MCP tools only, completed 2026-04-20):**
+- ✅ `get_enriched_signals` description corrected (stale "score >= 6" claim removed).
+- ✅ `get_win_rate_summary` direction casing normalized via `UPPER()`.
+- ✅ 5 new MCP tools deployed (`get_todays_pick`, `get_freemium_preview`, `get_open_position`, `get_position_history`, `get_enriched_signal_schema`).
+- ✅ Live verified via `/rpc` JSON-RPC smoke tests; `get_todays_pick` returns FIX BULLISH + full payload; all tools reachable by name.
+- Deployment: `gammarips-mcp-00021-9tp` with `POLYGON_API_KEY` mounted.
+
+**Definition of Done (Phase 3b — soft-gating, ships with or shortly after Phase 2):**
+- Arena full-transcript blur + unlock CTA in production; read-through counter works cross-session via localStorage.
+- Debrief pages: paid users see immediately, free users see after 48h (Firestore `signal_debriefs/{scan_date}_{ticker}.published_at` vs `users/{uid}.subscription.tier`).
+- No regression on acquisition funnel (free users still reach daily pick + report + signals list without friction).
 
 **G-Stack review (Phase 3):** **REQUIRED.** `get_todays_pick` must mirror signal-notifier gates exactly. Any drift = data mismatch between email, WhatsApp push, webapp banner, and chatbot answer. gammarips-review must audit the SQL.
 
@@ -560,7 +600,7 @@ Adopted structure:
 |---|---|---|---|
 | **Free** | $0 | Full gammarips.com: today's V5.3 pick, full signals list, daily report, per-ticker deep dive, arena headline verdict + preview, win-rate summary stat | Browsers, newsletter readers, funnel top |
 | **Starter** | **$19/mo** | Everything in Free + WhatsApp push of entry/exit + private WhatsApp group (no AI chat) | Price-sensitive retail who wants convenience |
-| **Pro** | **$39/mo** | Everything in Starter **+ AI chat agent** (ask about today's pick, your open position with live Polygon prices, 30-day win rate, historical ledger queries) + personal watchlist + trade journal (post-launch) | Active retail with $5k–50k account — the core persona |
+| **Pro** | **$39/mo** | Everything in Starter **+ @mention-able AI chat agent inside the WhatsApp group** (ask about today's pick, your open position with live Polygon prices, 30-day win rate, historical ledger queries). Agent only replies when tagged — group chat stays human-first. Post-launch iteration adds webapp `/positions`, personal watchlist, trade journal. | Active retail with $5k–50k account — the core persona |
 | **Pro Annual** | **$399/yr** | Same as Pro, priced at ~$33/mo effective | Committed subscribers |
 
 **Launch tactics (from research):**
@@ -592,9 +632,9 @@ Content/feature-level decisions, informed by the Explore-agent report 2026-04-20
 - **Per-trade debrief pages** — paid users see immediately after close; free users see 48h later.
 - **Full performance ledger** — summary stat free; row-level entry/exit times + per-trade P&L = Pro.
 
-**Hard-gate (requires login + active subscription):**
-- **AI chat agent** (WhatsApp group + webapp chat widget) — the Pro moat.
-- **Live open-position tracker** (webapp `/positions`) — real-time Polygon prices on your open V5.3 paper position.
+**Hard-gate (requires subscription; WhatsApp group invite or webapp login):**
+- **@mention-able AI chat agent INSIDE the private WhatsApp group** — the Pro moat. No webapp chat surface. Group is shared among all paid subscribers; one question benefits everyone.
+- **Live open-position tracker** — v1 is "ask the agent in WhatsApp, it calls `get_open_position`" (no new UI). v2 post-launch adds a webapp `/positions` page as a richer second surface.
 - **Personal watchlist** — save tickers, get notified when they appear in the next scan.
 - **Trade journal** — log your own real-money entries/exits vs paper-trader.
 - **Alert rules per ticker** — "notify me when AAPL appears with score > 6."
@@ -608,35 +648,38 @@ Ticker + direction of the daily pick, recommended contract spec, disclaimers, me
 
 ---
 
-## 5. Timeline (v2.3 — Phase 3 expanded + pricing landed)
+## 5. Timeline (v2.4 — chat is WhatsApp-only, Phase 2 is the launch blocker)
 
-Assuming Evan is the sole developer and Claude assists. Execution order is **1.0 → 1 → 3 → 2 → 4 → 5**. Phase 3 now owns both the MCP refresh AND the paid-tier webapp features (AI chat + live positions), which is the longest stretch of the plan.
+Assuming Evan is the sole developer and Claude assists. Execution order is **1.0 → 1 → 3a → 2 → 4 → (post-launch) 3b → 5**.
 
 ```
-Week 1 (Apr 21–25):  ✅ Phase 1.0 DONE, ✅ Phase 1 DONE.
-                     Start Phase 3a: MCP tool fixes (score>=6 bug, direction casing).
+✅ Week 1 (Apr 20):  Phase 1.0 DONE (notifier todays_pick writer + tiebreaker).
+                     Phase 1 DONE (webapp TODAY'S PICK banner + V3 premium UI removed).
+                     Phase 3a DONE (MCP: 5 new tools + 2 fixes, live at gammarips-mcp-00021-9tp).
 
-Week 2 (Apr 28–May 2): Phase 3a cont.: new MCP tools (get_todays_pick, get_open_position,
-                       get_position_history, get_win_rate_summary, get_freemium_preview).
-                       Deploy MCP auth middleware. Test via mcporter from dev OpenClaw.
+Week 2 (Apr 21–25):  Evan prerequisites for Phase 2 — create private WhatsApp group with
+                     OpenClaw's linked number, get GROUP_JID, enable hooks config, mount
+                     OPENCLAW_GATEWAY_URL / OPENCLAW_HOOKS_TOKEN / OPENCLAW_GROUP_JID
+                     to Secret Manager. No code work blocks on Claude side.
 
-Week 3 (May 5–9):    Phase 3b: webapp /chat + /positions. Stripe tier SKUs configured for
-                     Starter ($19) / Pro ($39) / Pro Annual ($399) / Founder ($29 lifetime
-                     lock for first 500). Subscription helpers + auth-gated routes.
-                     Soft-gating: arena blur + debrief time-delay.
+Week 3 (Apr 28–May 2): Phase 2 start — OpenClaw direct-POST wiring from signal-notifier
+                       (09:00 ET entry message) + new exit-reminder service (15:50 ET
+                       day-3). OpenClaw paywall plugin (senderId vs whatsapp_allowlist).
+                       mcporter skill registered against our MCP.
 
-Week 4 (May 12–16):  Phase 2: Stripe webhook wiring, OpenClaw group creation, hooks_token
-                     secret mount, OpenClaw paywall plugin (senderId check),
-                     signal-notifier + agent-arena + new exit-reminder OpenClaw POSTs.
-                     End-to-end beta with Evan + 1-2 friends.
+Week 4 (May 5–9):    Phase 2 cont. — @mention agent system prompt + compliance guardrails.
+                       Stripe tier SKUs: Starter $19, Pro $39, Pro Annual $399, Founder
+                       $29 lifetime lock for first 500. Stripe webhook → Firestore
+                       whatsapp_allowlist. End-to-end beta with Evan + 1-2 friends.
+                       Phase 3b soft-gating (arena blur, debrief delay) ships in parallel.
 
-Week 5 (May 19–23):  Soft-launch Pro tier publicly at $39/mo. Founder pricing $29/mo locked
-                     for first 500 subscribers. 7-day free trial. Phase 4 arena Option C
-                     (verdict at 09:15 ET, 3 agents) ships alongside.
+Week 5 (May 12–16):  Phase 4 arena Option C (pre-entry verdict debate at 09:15 ET, 3 agents,
+                       extends todays_pick doc with arena_verdict field). Soft-launch Pro
+                       tier publicly at $39/mo with 7-day free trial.
 
-Week 6+:             Phase 5 GTM drafter; Phase 3b iteration 2 (watchlist, journal, alerts,
-                     CSV export, email digest tier); iterate on pricing + gating from real
-                     usage data.
+Week 6+:             Phase 5 GTM drafter; Phase 3c iteration (webapp /positions, watchlist,
+                     journal, alerts, CSV, email digest tier); iterate on pricing + gating
+                     from real usage signal.
 ```
 
 Track record milestone for marketing claims: end of May (≥30 closed V5.3 trades).

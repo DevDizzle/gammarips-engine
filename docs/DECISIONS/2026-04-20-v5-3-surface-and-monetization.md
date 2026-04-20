@@ -14,6 +14,12 @@
   - **Pricing adopted: Free / Starter $19 / Pro $39 / Pro Annual $399.** $29 intuition undersold by ~4x on comparable-feature count. Founder pricing $29/mo lifetime lock for first 500 Pro subs captures original anchor while the published rate reflects the bundle's true value.
   - **Freemium gating: gate features, not information.** Daily pick + signals + report + methodology stay fully free (publisher-exclusion-protected + funnel). Arena full transcript + debrief pages + full performance ledger get soft-gated. AI chat + live position tracker + watchlist + journal + alerts get hard-gated.
   - **Phase 3 scope expanded** to include the paid webapp MVP (AI chat widget + live open-position page), which must ship before the $39 Pro tier launches. Watchlist, trade journal, alerts deferred to post-launch iteration.
+- **v2.4 (2026-04-20, end of day):** AI chat architecture clarified and simplified.
+  - **Chat lives only inside the private WhatsApp group, not on the webapp.** Agent responds only when `@mention`ed; other subscribers see every turn (one ask → everyone benefits, cost amortized). Dropped webapp `/chat` widget entirely; demoted webapp `/positions` to post-launch.
+  - **Phase 2 (OpenClaw wiring) is now the single launch blocker** for the paid tier. Phase 2 scope expands to include the @mention-triggered agent + compliance system prompt + mcporter wiring against our MCP.
+  - **Compliance guardrails pinned** in the agent's system prompt: responds about methodology + current engine data + the engine's own positions; refuses personalized trade sizing / account-specific advice. Every response carries the paper-trading disclaimer. Every turn logged to Firestore `chat_log` for audit.
+  - Execution order: 1.0 → 1 → 3a → 2 → 4 → (post-launch) 3b → 5.
+  - Phase 3a MCP tools are ALL shipped and verified (`gammarips-mcp-00021-9tp`).
 
 ## Decision
 
