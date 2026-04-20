@@ -345,6 +345,26 @@ Not investment advice."
 
 Log every agent response to Firestore `chat_log/{group_id}/{turn_id}` with `senderId`, `prompt`, `response`, `mcp_tools_called`, `model`, `timestamp`. Audit trail for both compliance and product-iteration signal.
 
+**Additional system-prompt patterns (v2.6, from MCP chat-readiness audit 2026-04-20 `/docs/EXEC-PLANS/2026-04-20-mcp-chat-readiness.md`):**
+
+These four patterns MUST be included in the system prompt before launch — simulated chat turns revealed all four as sources of embarrassing or misleading answers:
+
+1. **Two performance numbers exist — disambiguate.** `get_win_rate_summary` reads `signal_performance` (enriched-signals outcome table, ~30/day, 3-day forward returns, typical 80%+ win rate). `get_position_history` reads `forward_paper_ledger` (V5.3 realized bracket trades, one pick/day, −60/+80 bracket). These are different universes. Always name the source. Never average them. For "how has the engine done" questions, either ask the user which they mean OR quote both with labels.
+
+2. **Batch simulator, no live P&L.** Never pair `todays_pick` with a live Polygon quote to fabricate an unrealized P&L. Use the three-piece framing from `get_open_position`: pending pick / awaiting_simulation / most_recent_closed_trade. Parrot the `explanation` string — don't re-assemble.
+
+3. **Impersonal framing.** When a user says "my trade," "my position," or "should I," reframe as "the engine's trade" or "the V5.3 paper-trader's position." No per-user ledger exists; everyone in the group sees the same paper trades. If the question can't be answered without personalizing, invoke the refusal template.
+
+4. **Don't fabricate methodology internals.** When asked "why X over Y?" for two tickers that both cleared enrichment, you do NOT have a field that encodes the signal-notifier's final tiebreak. State plainly: "the ranking is deterministic from the code; I don't have a single field in this tool response that encodes the final tiebreak." Point to the public methodology docs on gammarips.com.
+
+**Tool-selection examples to include in the system prompt:**
+
+- "What did GammaRips pick today?" → `get_todays_pick()` only.
+- "How's the engine doing?" → BOTH `get_win_rate_summary(days=30)` AND `get_position_history(days=30, limit=10)`, labeled.
+- "What's my status?" / "What trade am I in?" → `get_open_position()` only; parrot `explanation`.
+- "Compare today's pick to last week's." → `list_todays_picks(days=7)` then narrow with `get_todays_pick(scan_date=...)` if needed.
+- "Top bullish signals today." → `get_enriched_signals(direction="bull")` (direction-filter bug fixed 2026-04-20, `gammarips-mcp-00023-q8p`).
+
 **Legal / disclaimer hygiene (v2.1 — no counsel at this scale, per Evan):**
 
 Legal basis: *SEC v. Lowe (1985)* + Investment Advisers Act §202(a)(11)(D) "publisher exclusion" protects bona fide publishers/newsletters as long as the content is (a) same for all subscribers (impersonal), (b) published on a regular schedule, (c) not customized to any subscriber's financial situation, and (d) the publisher does not take custody of subscriber funds. Our WhatsApp push and webapp meet all four. Counsel is not needed at pre-scale.
