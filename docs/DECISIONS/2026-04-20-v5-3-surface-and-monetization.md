@@ -58,6 +58,8 @@
 
 **Phase 2 architecture simplified (v2.1):** OpenClaw's `/hooks/agent` endpoint handles group routing, so we dropped the planned Pub/Sub + separate `whatsapp-notifier` service. POSTs fire directly from the services that decide each event: `signal-notifier` (09:00 ET entry), `agent-arena` (09:15 ET verdict), new tiny `exit-reminder` service (15:50 ET day-3). `forward-paper-trader` remains untouched per audit rule #2.
 
+**Phase 3 MCP integration path (v2.1 — from OpenClaw research 2026-04-20):** OpenClaw is self-hosted MIT TS + Baileys + `pi-agent-core`. It doesn't natively host MCP clients, but ships a `mcporter` skill that shells out to HTTP/stdio MCP servers. Our Cloud Run MCP at `https://gammarips-mcp-406581297632.us-central1.run.app/sse` is consumed via `mcporter call gammarips.<tool>`. The per-message paywall becomes an OpenClaw plugin keyed on the inbound `senderId` (phone E.164) checked against Firestore `whatsapp_allowlist` — ~100 LOC in Evan's OpenClaw install, not a new Cloud Run service. Claude chat can ride Evan's Claude Pro/Code subscription via OpenClaw's setup-token path, dropping Phase 3 per-message cost to near-zero subject to the subscription's rate limits.
+
 **Not blocking any phase:**
 - Disclaimer copy finalization (Evan should review the draft text in plan Section 6.2 step 3).
 - Beta subscriber recruitment (pre-launch task before Phase 2 ships).

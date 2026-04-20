@@ -260,7 +260,13 @@ forward-paper-trader/main.py: UNCHANGED in this phase. No new imports, no Firest
 **Secrets:** `OPENCLAW_HOOKS_TOKEN`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GROUP_JID` mounted from Secret Manager. Never in env plaintext.
 
 **Paywall mechanism (v2.1 — simpler than per-user messaging):**
-For the v1 launch, the paywall IS the WhatsApp group invitation. Stripe subscription success triggers a webhook that adds the user's phone number to an allowlist Firestore collection `whatsapp_allowlist`. Evan (or an OpenClaw automation) reads that allowlist and manually/automatically invites those numbers to the private group. Cancellation removes them. No per-message gating needed because the group itself is gated. This sidesteps the whole "identify which user sent a WhatsApp message" problem until we have a real reason to solve it.
+For the v1 launch, the paywall IS the WhatsApp group invitation. Stripe subscription success triggers a webhook that appends the user's phone number to Firestore `whatsapp_allowlist/{phone_e164}`. Evan (or an OpenClaw automation) reads that allowlist and invites those numbers to the private group. Cancellation sets `active: false`. No per-message gating needed for Phase 2 push — the group itself is gated.
+
+**Phase 3 paywall (upgraded mechanism, informed by OpenClaw research):**
+When we ship the chat experience (paid users ask questions in the group and Claude answers via MCP), per-message gating becomes needed. The right pattern is a small **OpenClaw plugin** (`openclaw/plugin-sdk`, docs at `/home/user/openclaw/docs/tools/plugin.md`) that inspects every inbound `senderId` (phone_e164) against `whatsapp_allowlist`:
+- If sender is paid + active: let the agent run with MCP tools
+- If sender is unknown / unpaid: short-circuit reply with a paywall note + Stripe checkout link
+This is a ~100-line TypeScript plugin living in Evan's OpenClaw install, NOT a separate Cloud Run service. Keeps auth logic close to the channel it enforces.
 
 **Specific edits:**
 
@@ -331,6 +337,17 @@ From MCP Explore report — fix/add matrix:
 - Add Firestore-backed API key check (`taas_users` collection already designed per MCP_AUTH.md)
 - Free public access keeps 3 tools: `get_daily_report`, `get_report_list`, `get_freemium_preview`
 - Paid/API-key gated: everything else, especially `get_open_position`
+
+**OpenClaw MCP integration path (v2.1 — from OpenClaw research):**
+OpenClaw is a multi-channel AI gateway (MIT TS/Node, self-hosted, Baileys-based WhatsApp) running `pi-agent-core` as its agent loop. It does **not** implement a native MCP host/client — instead, it bundles the `mcporter` skill (`/home/user/openclaw/skills/mcporter/SKILL.md`) which is a CLI that shells out to any MCP server over HTTP/stdio. Our Cloud Run MCP at `https://gammarips-mcp-406581297632.us-central1.run.app/sse` is reachable via `mcporter call gammarips.<tool> arg=value`.
+
+To wire it up (Phase 3 deployment):
+1. Enable `mcporter` skill in OpenClaw config
+2. Register our SSE endpoint so `mcporter` knows about `gammarips.*` tools
+3. Ensure the API-key auth on our MCP is pluggable into `mcporter`'s call format (header-based Bearer)
+4. Confirm the tool latency is acceptable for an in-group chat interaction (target <5s per tool call)
+
+**Model cost lever:** OpenClaw's Anthropic provider supports a **setup-token** path (`/home/user/openclaw/docs/providers/anthropic.md`) that reuses an existing Claude Pro/Code subscription instead of paying per-token on the Anthropic API. If Evan runs the chat on his own subscription seat, per-message cost is near-zero (subject to subscription's rate limits). The alternative is a dedicated Anthropic API key with prompt caching enabled (`short`=5min, `long`=1h) — OpenClaw supports both.
 
 **Definition of Done (Phase 3):**
 - All 3 fixes deployed; old `score >= 6` gate eliminated everywhere
@@ -522,6 +539,7 @@ Per CLAUDE.md's governance: any change that touches execution or gate logic requ
 - ✅ X poster located: `win-tracker/main.py:351-408` — Tweepy-based, fires on strong wins only. Keep as-is; new GTM drafter (Phase 5) adds auto-X posts for daily report summary, top-signals teaser, and arena verdict using same 4 X API creds.
 - ✅ OpenClaw API contract received: `POST /hooks/agent` with Bearer, JSON body `{message, name, deliver: true, channel: "whatsapp", to: <GROUP_JID>}`. Architecture simplified — no Pub/Sub, no `whatsapp-notifier` service. Direct POST from `signal-notifier`, `agent-arena`, and new tiny `exit-reminder` service.
 - ✅ Push vs pull decision: **Push** (Option A) — real-time delivery matters for V5.3's 09:00 → 10:00 ET window.
+- ✅ OpenClaw stack understood (investigated install at `/home/user/openclaw`, v2026.2.9): MIT TypeScript gateway, Baileys WhatsApp + native group routing, `pi-agent-core` agent loop, first-class Claude (API key or setup-token), MCP integration via bundled `mcporter` skill (CLI shell-out). Phase 3 chat paywall will be a small OpenClaw plugin keyed on `senderId` vs Firestore `whatsapp_allowlist`, not a separate Cloud Run service.
 
 **Still open:**
 1. **Group creation (Evan action):** create the private WhatsApp group, add OpenClaw's linked number, get the GROUP_JID from OpenClaw, enable hooks config (`{"hooks": {"enabled": true, "token": "<secret>", "path": "/hooks"}}`) and share the `HOOKS_TOKEN` + `GATEWAY_URL` + `GROUP_JID` via Google Secret Manager (never in chat/plaintext).
