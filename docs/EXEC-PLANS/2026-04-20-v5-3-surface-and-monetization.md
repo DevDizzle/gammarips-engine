@@ -15,6 +15,12 @@
     - **Phase 2 (OpenClaw wiring) is now the single launch blocker** for the paid tier. Phase 2 scope expands to include the @mention-aware chat agent, its system prompt, and compliance guardrails.
     - ✅ Phase 3a (MCP tool refresh) remains the prerequisite — the OpenClaw agent needs those tools via `mcporter`.
     - Revised execution order: 1.0 → 1 → 3a → 2 → 4 → (post-launch) 3b → 5.
+- **v2.5 (2026-04-20, post-audit):** `gammarips-researcher` ledger diagnostic surfaced a wrong mental model in my original Phase 3a `get_open_position` tool.
+    - Root cause: **`forward-paper-trader` is a batch simulator** that runs at 16:30 ET Mon–Fri and processes scan_date = today minus 4 trading days. Every ledger row is terminal by the time it's written — there's no "live open position" in the ledger by design.
+    - Also found a bug I shipped: `get_position_history` SELECTed a nonexistent `exit_price` column; ledger encodes outcome via `realized_return_pct` + `underlying_exit_price`.
+    - **Fix (already deployed, `gammarips-mcp-00022-xhs`):** `get_open_position` now returns a composite `{pending_pick, awaiting_simulation, most_recent_closed_trade, explanation}` sourced from Firestore `todays_pick` + a lookup of scan_dates still inside their 3-day hold window + the latest `entry_price IS NOT NULL AND exit_reason NOT IN ('INVALID_LIQUIDITY','SKIPPED')` ledger row. `get_position_history` drops `exit_price` and excludes `INVALID_LIQUIDITY` rows.
+    - **Consequence for Phase 2 chat agent:** the system prompt must frame the chat answer in those three pieces. "What's my open position?" returns "next trade tomorrow at 10:00 ET is FIX BULLISH (or today's skip reason); last closed trade was WPM BULLISH TIMEOUT at +0.42%; 3 scan_dates in the 3-day hold window awaiting simulator reconciliation." NEVER claim a live unrealized P&L against a stale row.
+    - **Still open (deferred, lower priority):** the ledger has a backlog of NULL-entry rows with `exit_reason = 'INVALID_LIQUIDITY'` where the option contract had no bars at 10:00 ET day-1. Auditor recommends the trader write a placeholder `exit_timestamp` + `realized_return_pct = 0` on those rows rather than leaving everything NULL. Needs a `gammarips-engineer` diff + DECISIONS/ note. Not launch-blocking — downstream queries already filter by `exit_reason NOT IN ('INVALID_LIQUIDITY','SKIPPED')`.
 
 ---
 
@@ -317,7 +323,7 @@ open paper positions, realized trade history, and the enriched signals table.
 
 You DO answer:
   - "What did GammaRips pick today and why did it clear the V5.3 gates?"
-  - "What's the current unrealized P&L on the engine's open paper trade?"
+  - "What's the status of the engine's trades right now?" — report the next trade (from Firestore `todays_pick`), how many scan_dates are still inside their 3-day hold window awaiting simulation, and the most recent closed trade's outcome. The paper-trader is a batch simulator — there is no live unrealized P&L; never fabricate one.
   - "How has the engine done over the last 30 days?"
   - "Walk me through the enriched data for FIX / any ticker."
   - "What's in the daily report?"
