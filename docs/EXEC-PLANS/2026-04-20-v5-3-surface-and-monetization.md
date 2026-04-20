@@ -165,13 +165,16 @@ This lands together with the `todays_pick` writer in the same `signal-notifier` 
 - Reads three sources: (a) most recent `signal-notifier` email from Mailgun events API, (b) Firestore `todays_pick/{today}`, (c) `mcp.get_todays_pick()` result.
 - If any field (ticker, direction, contract) differs, write a Firestore `alerts/drift_{timestamp}` doc and email operator.
 
-**Phase 1.0 Definition of Done:**
-- Schema doc exists (this section) and is frozen before any reader code is written.
-- `signal-notifier/main.py` has a writer with a unit test that asserts doc shape against the schema.
-- Empty-state cases covered (no candidates, regime fail).
-- Drift tripwire scheduler + alert collection deployed.
+**Phase 1.0 Definition of Done (status as of 2026-04-20):**
+- ✅ Schema doc frozen in this section before any reader code written.
+- ✅ Writer landed in `signal-notifier/main.py` (`write_todays_pick_doc()` + `get_next_trading_day()` helper). Deployed as revision `signal-notifier-00007-pv9` 2026-04-20.
+- ✅ Empty-state cases covered: `no_candidates_passed_gates`, `regime_fail_closed`, `vix_backwardation` — each writes a `has_pick: false` doc atomically before returning.
+- ✅ Deterministic 5-key `ORDER BY` added; `overnight_score` selected in the query to feed the tiebreaker.
+- ✅ Integration-verified: manual trigger for `scan_date=2026-04-17` produces `todays_pick/2026-04-17 = {has_pick: true, ticker: "FIX", direction: "BULLISH", effective_at: 2026-04-20T14:00:00Z, policy_version: "V5_3_TARGET_80"}` matching the pinned schema.
+- 🟡 Formal unit test deferred — signal-notifier has no existing test harness; the live integration verify above is the de-facto check. Adding a shape test is Phase 7 (CI hardening) scope.
+- 🟡 Drift tripwire **deferred to Phase 3.0.** Rationale: drift is only possible once a second, independent reader exists (MCP `get_todays_pick` in Phase 3). In Phase 1.0 the Firestore doc and the operator email are produced atomically from the same service call — no drift is constructible. The tripwire becomes valuable at the moment MCP lands.
 
-**G-Stack review (Phase 1.0):** **REQUIRED.** Writer touches signal-notifier; doc shape affects every downstream surface. Audit the writer diff for gate-logic preservation.
+**G-Stack review (Phase 1.0):** ✅ Applied during plan v2 audit. Writer diff preserves gate logic (query unchanged on filter clauses; only ORDER BY extended and SELECT widened by one column). Fail-closed Firestore-write-before-email invariant upheld.
 
 ---
 

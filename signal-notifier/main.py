@@ -27,7 +27,7 @@ import pandas_market_calendars as mcal
 import pytz
 import requests
 from flask import Flask, jsonify, request
-from google.cloud import bigquery
+from google.cloud import bigquery, firestore
 
 app = Flask(__name__)
 
@@ -60,6 +60,89 @@ def get_previous_trading_day(base_date: date) -> date:
     schedule = nyse.schedule(start_date=start_date, end_date=base_date)
     valid_dates = [d.date() for d in schedule.index if d.date() < base_date]
     return valid_dates[-1] if valid_dates else None
+
+
+def get_next_trading_day(base_date: date) -> date:
+    schedule = nyse.schedule(start_date=base_date, end_date=base_date + timedelta(days=10))
+    valid_dates = [d.date() for d in schedule.index if d.date() > base_date]
+    return valid_dates[0] if valid_dates else base_date + timedelta(days=1)
+
+
+def write_todays_pick_doc(
+    scan_date: date,
+    has_pick: bool,
+    top: pd.Series | None = None,
+    vix_now: float | None = None,
+    skip_reason: str | None = None,
+) -> None:
+    """Canonical writer for Firestore ``todays_pick/{scan_date}``.
+
+    This is the single source of truth for "what did GammaRips pick today"
+    across all downstream surfaces (webapp banner, MCP get_todays_pick,
+    arena-verdict, GTM drafter, WhatsApp push). All readers MUST read this
+    doc without re-applying filters — that is the drift-prevention invariant.
+
+    Schema pinned in docs/EXEC-PLANS/2026-04-20-v5-3-surface-and-monetization.md
+    Phase 1.0.
+    """
+    db = firestore.Client(project=PROJECT_ID)
+    doc_ref = db.collection("todays_pick").document(scan_date.isoformat())
+
+    if not has_pick:
+        doc_data = {
+            "scan_date": scan_date.isoformat(),
+            "decided_at": firestore.SERVER_TIMESTAMP,
+            "effective_at": None,
+            "has_pick": False,
+            "skip_reason": skip_reason,
+            "policy_version": "V5_3_TARGET_80",
+        }
+    else:
+        assert top is not None, "write_todays_pick_doc(has_pick=True) requires `top`"
+        entry_day = get_next_trading_day(scan_date)
+        entry_dt_et = est.localize(datetime.combine(entry_day, datetime.strptime("10:00", "%H:%M").time()))
+        effective_at = entry_dt_et.astimezone(pytz.UTC)
+
+        def _num(key: str) -> float | None:
+            v = top.get(key)
+            return float(v) if v is not None and not pd.isna(v) else None
+
+        def _int(key: str) -> int | None:
+            v = top.get(key)
+            return int(v) if v is not None and not pd.isna(v) else None
+
+        def _str(key: str) -> str | None:
+            v = top.get(key)
+            return str(v) if v is not None and not pd.isna(v) else None
+
+        doc_data = {
+            "scan_date": scan_date.isoformat(),
+            "decided_at": firestore.SERVER_TIMESTAMP,
+            "effective_at": effective_at.isoformat(),
+            "has_pick": True,
+            "skip_reason": None,
+            "ticker": _str("ticker"),
+            "direction": _str("direction"),
+            "recommended_contract": _str("recommended_contract"),
+            "recommended_strike": _num("recommended_strike"),
+            "recommended_expiration": _str("recommended_expiration"),
+            "recommended_mid_price": _num("recommended_mid_price"),
+            "recommended_dte": _int("recommended_dte"),
+            "overnight_score": _int("overnight_score") if "overnight_score" in top else None,
+            "vol_oi_ratio": _num("volume_oi_ratio"),
+            "moneyness_pct": _num("moneyness_pct"),
+            "call_dollar_volume": _num("call_dollar_volume"),
+            "put_dollar_volume": _num("put_dollar_volume"),
+            "vix3m_at_enrich": _num("vix3m_at_enrich"),
+            "vix_now_at_decision": float(vix_now) if vix_now is not None else None,
+            "policy_version": "V5_3_TARGET_80",
+        }
+
+    doc_ref.set(doc_data)
+    logger.info(
+        f"Wrote todays_pick/{scan_date.isoformat()} has_pick={has_pick}"
+        + (f" skip_reason={skip_reason}" if not has_pick else f" ticker={doc_data.get('ticker')}")
+    )
 
 
 def fetch_vix_close(scan_date: date) -> float | None:
@@ -200,17 +283,23 @@ def run_notifier(target_date: date | None = None):
 
     client = bigquery.Client(project=PROJECT_ID)
 
-    # V5.3 filter stack. UOA dollar volume is direction-dependent: call_uoa_depth
-    # for BULLISH, put_uoa_depth for BEARISH. Enrichment already gates on
+    # V5.3 filter stack. UOA dollar volume is direction-dependent: call_dollar_volume
+    # for BULLISH, put_dollar_volume for BEARISH. Enrichment already gates on
     # spread <= 10%, overnight_score >= 1, and directional UOA > $500k — we
     # layer V5.3's additional quality filters on top and cap to LIMIT 1.
+    #
+    # The ORDER BY is deterministic: 5-key tiebreaker so `LIMIT 1` always
+    # returns the same row given the same input (primary: directional UOA;
+    # tiebreakers cascade to overnight_score, vol_oi ratio, tighter spread,
+    # then alphabetical ticker). Single-key ORDER BY would non-deterministically
+    # pick among rows with identical dollar volume. See exec-plan Phase 1.0.
     query = f"""
     SELECT
         ticker, scan_date, direction,
         recommended_contract, recommended_strike, recommended_expiration,
         recommended_dte, recommended_volume, recommended_oi,
         recommended_mid_price, recommended_spread_pct,
-        premium_score,
+        overnight_score, premium_score,
         call_dollar_volume, put_dollar_volume, call_uoa_depth, put_uoa_depth,
         volume_oi_ratio, moneyness_pct, vix3m_at_enrich
     FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
@@ -224,7 +313,11 @@ def run_notifier(target_date: date | None = None):
       AND vix3m_at_enrich IS NOT NULL
     ORDER BY
         CASE WHEN direction = 'BULLISH' THEN call_dollar_volume
-             ELSE put_dollar_volume END DESC
+             ELSE put_dollar_volume END DESC,
+        overnight_score DESC,
+        volume_oi_ratio DESC,
+        recommended_spread_pct ASC,
+        ticker ASC
     LIMIT 1
     """
 
@@ -238,6 +331,9 @@ def run_notifier(target_date: date | None = None):
 
     if len(df) == 0:
         logger.info("No eligible V5.3 signal for this scan_date. No email sent.")
+        # Fail-closed: write the empty-state todays_pick doc so every downstream
+        # reader (webapp banner, MCP, GTM) learns the skip reason atomically.
+        write_todays_pick_doc(target_date, has_pick=False, skip_reason="no_candidates_passed_gates")
         return True, "No eligible signal."
 
     top = df.iloc[0]
@@ -250,17 +346,23 @@ def run_notifier(target_date: date | None = None):
             f"Regime gate fail-closed: vix3m_at_enrich={vix3m}, vix_now={vix_now}. "
             f"No email sent."
         )
+        write_todays_pick_doc(target_date, has_pick=False, skip_reason="regime_fail_closed")
         return True, "Regime gate fail-closed (missing VIX or VIX3M)."
     if vix_now > float(vix3m):
         logger.info(
             f"Regime gate: VIX {vix_now:.2f} > VIX3M {float(vix3m):.2f} "
             f"(backwardation). Skipping email."
         )
+        write_todays_pick_doc(target_date, has_pick=False, skip_reason="vix_backwardation")
         return True, f"Backwardation regime (VIX {vix_now:.2f} > VIX3M {float(vix3m):.2f}). Skipped."
 
-    entry_day = next((d.date() for d in nyse.schedule(
-        start_date=target_date, end_date=target_date + timedelta(days=7)
-    ).index if d.date() > target_date), target_date + timedelta(days=1))
+    # Happy path: write todays_pick doc BEFORE sending email. Fail-closed —
+    # if the Firestore write raises, we do NOT send an email (the operator
+    # would see email-without-webapp state and that's the exact drift we're
+    # preventing with the single-source-of-truth contract).
+    write_todays_pick_doc(target_date, has_pick=True, top=top, vix_now=vix_now)
+
+    entry_day = get_next_trading_day(target_date)
 
     html_content = format_email_html(top, target_date, entry_day)
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
