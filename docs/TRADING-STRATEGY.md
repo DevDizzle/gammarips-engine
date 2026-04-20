@@ -31,9 +31,23 @@ Notifier (`signal-notifier`) layers on top of that:
 - `volume_oi_ratio > 2.0` at focal strike
 - `moneyness_pct BETWEEN 0.05 AND 0.15` (5-15% OTM)
 - `VIX <= VIX3M` regime gate (fail-closed if either is NULL)
-- `ORDER BY` directional UOA dollar volume, `LIMIT 1`
+- Deterministic 5-key `ORDER BY` then `LIMIT 1`: `(1) directional_dollar_volume DESC, (2) overnight_score DESC, (3) volume_oi_ratio DESC, (4) recommended_spread_pct ASC, (5) ticker ASC`. Every tiebreaker is necessary — same-cent dollar-volume ties did happen in April 2026 (FIX vs DAL, $60K gap), so a single sort key would have produced non-deterministic picks.
 
 If nothing clears the stack, nothing is emailed.
+
+## Publication timing (canonical surface contract)
+Today's pick is revealed publicly on the webapp, to paid WhatsApp subscribers, and to any MCP consumer **simultaneously at ~09:00 ET day-0** — the same moment `signal-notifier` fires the operator email. There is no earlier access tier. Paying WhatsApp subscribers pay for **convenience** (a push notification to their phone so they don't have to check the webapp), not for timing advantage over free users.
+
+The single source of truth is Firestore `todays_pick/{scan_date}`, written exactly once per run by `signal-notifier` atomically **before** the operator email is sent (fail-closed: if the Firestore write raises, the email is not sent — we never emit inconsistent surfaces). All downstream surfaces (webapp banner, MCP `get_todays_pick`, agent-arena verdict debate, GTM content drafter, WhatsApp push) MUST read this doc without re-applying gate filters. Re-filtering on the read side is the drift vector this contract exists to eliminate.
+
+Schema of `todays_pick/{scan_date}`:
+- `has_pick: bool` — false on empty-state days, with `skip_reason` ∈ {`no_candidates_passed_gates`, `regime_fail_closed`, `vix_backwardation`}
+- `ticker, direction, recommended_contract, recommended_strike, recommended_expiration, recommended_mid_price, recommended_dte` — the pick
+- `overnight_score, vol_oi_ratio, moneyness_pct, call_dollar_volume, put_dollar_volume, vix3m_at_enrich, vix_now_at_decision` — the gate-evidence fields (for the "why today's pick" panel)
+- `decided_at: TIMESTAMP, effective_at: ISO8601 string` — decision time and the 10:00 ET day-1 simulated entry time
+- `policy_version: "V5_3_TARGET_80"` — pinned. Never gets mutated; a new version string means a different policy.
+
+**Simulated entry at 10:00 ET day-1 in `forward-paper-trader` models realistic operator slippage; real-money execution is the operator's responsibility and discretionary.** The paper ledger is the control — it takes every V5.3 pick regardless of arena verdict or operator skip. When we start publishing real-money track record as a marketing claim (Phase 5+), every claim must be labeled with the filter used (e.g., "paper: full-coverage +X%" vs "arena-filtered: took only TAKE-votes, +Y%").
 
 ## Feature enrichment (`overnight_signals_enriched`)
 Three V5.3 columns added on top of the existing schema (all NULLABLE; old rows get NULL and are excluded by the notifier's fail-closed filter):
