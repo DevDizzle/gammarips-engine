@@ -7,6 +7,7 @@
 **Change log:**
 - **v1 (2026-04-20):** initial draft
 - **v2 (2026-04-20):** post-review amendments — Phase 2 push moved out of forward-paper-trader (BLOCKER), `todays_pick` writer pinned to signal-notifier (HIGH), drift tripwire added (HIGH), arena commentary gated to post-market (HIGH), real-money-vs-paper discipline rule proposed for TRADING-STRATEGY.md (HIGH), Secret Manager mandate added to all phases (LOW), sequencing within Week 1 spelled out (LOW).
+- **v2.2 (2026-04-20, later):** **execution order swapped — Phase 3 (MCP refresh) ships BEFORE Phase 2 (WhatsApp paywall).** Rationale: Evan probed whether $29/mo was justifiable when the webapp reveals the same info simultaneously. Honest answer is the chat-with-agent feature (Phase 3 `get_todays_pick`, `get_open_position`, win-rate) is the real moat — push alone prices at $5–10/mo, push + agent-chat with live Polygon data prices at $29–49/mo. Launching paid without the agent chat would feel thin. Numbering unchanged (references to "Phase 3" across doc remain stable); only execution order shifts. Also added model-cost note for the OpenClaw chat agent (see Phase 3). Pricing and freemium-gating decisions deferred pending competitive research (in-flight as of this edit).
 
 ---
 
@@ -350,7 +351,18 @@ To wire it up (Phase 3 deployment):
 3. Ensure the API-key auth on our MCP is pluggable into `mcporter`'s call format (header-based Bearer)
 4. Confirm the tool latency is acceptable for an in-group chat interaction (target <5s per tool call)
 
-**Model cost lever:** OpenClaw's Anthropic provider supports a **setup-token** path (`/home/user/openclaw/docs/providers/anthropic.md`) that reuses an existing Claude Pro/Code subscription instead of paying per-token on the Anthropic API. If Evan runs the chat on his own subscription seat, per-message cost is near-zero (subject to subscription's rate limits). The alternative is a dedicated Anthropic API key with prompt caching enabled (`short`=5min, `long`=1h) — OpenClaw supports both.
+**Model cost lever (v2.2 — Evan's call):** the chat agent must NOT be routed to a flagship model for every user message at $29/mo, or per-user economics break. OpenClaw supports multiple providers — the right default for this use case is a **cheap-but-tool-capable** model:
+
+| Option | In/Out $/M | Fit |
+|---|---|---|
+| **Claude Haiku 4.5** | 0.25 / 1.25 | Best tool-use reliability in its tier; strong for MCP Q&A with structured responses. Default recommendation. |
+| **Gemini 2.5 Flash** | 0.075 / 0.30 | Very cheap with native thinking; already in use by GammaRips for enrichment + report generation, so Evan has ops experience. Solid alternative. |
+| **DeepSeek V3 (via HF)** | ~0 (free tier) | Acceptable tool use; latency and rate-limit risk at scale. |
+| **Claude Sonnet 4.6 / Opus 4.7** | ≥3.0 / ≥15.0 | Overkill for Q&A about a single daily pick; reserve for rare escalation. |
+
+Also supported: OpenClaw's **setup-token** path reuses Evan's existing Claude Pro/Code subscription as an alternative to pay-per-token API. Useful for dev/test; at real scale, a dedicated API key with OpenClaw's built-in prompt caching (`short`=5min, `long`=1h) is more predictable. Per-user monthly cost target: ≤$2 at 50 questions/mo → leaves $27 of $29 as gross margin.
+
+Decision: default to **Haiku 4.5 via Anthropic API** with prompt caching on the system prompt + MCP tool descriptions. Revisit after first month of real usage data.
 
 **Definition of Done (Phase 3):**
 - All 3 fixes deployed; old `score >= 6` gate eliminated everywhere
@@ -496,16 +508,22 @@ Every push, every MCP call, every draft should be traceable:
 
 ---
 
-## 5. Timeline
+## 5. Timeline (v2.2 — Phase 3 before Phase 2)
 
-Assuming user is the sole developer and Claude assists:
+Assuming Evan is the sole developer and Claude assists. Execution order is now **1.0 → 1 → 3 → 2 → 4 → 5**. The paid tier does not launch until the chat-with-agent moat (Phase 3) is live — pushing a notification alone does not justify $29/mo.
 
 ```
-Week 1 (Apr 21–25):  Phase 1 (webapp V5.3 alignment) + Phase 3 fixes to existing MCP tools
-Week 2 (Apr 28–May 2): Phase 2 (paywall/WhatsApp) draft + compliance track kickoff
-Week 3 (May 5–9):    Phase 3 new MCP tools; Phase 4 arena reshape
-Week 4 (May 12–16):  Phase 5 GTM drafter + X/Reddit pipeline
-Week 5+:             Soft launch with 5–10 beta subscribers; iterate
+Week 1 (Apr 21–25):  Phase 1.0 ✅ DONE, Phase 1 ✅ DONE, start Phase 3 (MCP fixes + new tools)
+Week 2 (Apr 28–May 2): Finish Phase 3 (auth, get_todays_pick, get_open_position, win-rate,
+                       freemium_preview) + integrate with OpenClaw via mcporter skill.
+                       Soft test of agent chat in a dev WhatsApp group.
+Week 3 (May 5–9):    Phase 2 (Stripe webhook → whatsapp_allowlist, OpenClaw direct-POST from
+                       signal-notifier + exit-reminder cron, OpenClaw plugin for per-sender
+                       paywall enforcement). Requires Evan's OpenClaw group + secrets.
+Week 4 (May 12–16):  Phase 4 arena Option C (verdict debate at 09:15 ET). Phase 5 GTM drafter
+                       kickoff in parallel.
+Week 5+:             Soft launch paid tier with 5–10 beta subscribers now that the chat moat
+                       is in place. Iterate on pricing + gating based on feedback.
 ```
 
 Track record milestone for marketing claims: end of May (≥30 closed V5.3 trades).
