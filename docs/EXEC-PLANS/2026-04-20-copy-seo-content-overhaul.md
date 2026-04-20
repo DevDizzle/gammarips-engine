@@ -1173,3 +1173,499 @@ No CMS needed for 13 posts. A single markdown folder in `/home/user/gammarips-we
 ---
 
 *End of plan. This document is the source of truth for copy rewrites and SEO updates. Revisit at the end of Month 3 once N≥30 V5.3 closed trades are in the ledger and social proof content can cite specifics.*
+
+---
+
+## §9 Addendum — surfaces missed in the first pass (2026-04-20)
+
+**Status:** filled in after Evan flagged gaps in §4 coverage. Voice rules, One Promise, and target-audience catalog from §1–§3 apply unchanged. Every surface below was re-read in full; no inferred content.
+
+**Cross-cutting finding (§9.2–§9.5):** `llms.txt`, `ai-plugin.json`, `mcp.json`, and the root `<meta>` block are a single positioning system. All four get crawled within hours of each other and cross-referenced. Today all four disagree on product name, pricing, tool count, and tagline — so AI agents surface the lowest-common-denominator summary. Fixing this is the single highest-leverage MCP-positioning move we can make without shipping code.
+
+### §9.1 Developers page (`src/app/developers/page.tsx`)
+
+**CURRENT:** H1 *"Build with Overnight Edge Data"*; metadata title *"GammaRips MCP API — Options Flow Intelligence for AI Agents"*; 9 tools listed (missing 6); pricing block *"MCP API — 100% FREE — All 9 tools unlocked"*; tool description for `get_enriched_signals` claims *"AI-enriched signals (score ≥ 6)"* (stale gate); one Python client example only.
+
+**PROBLEMS:**
+- ❌ **Tool count wrong:** lists 9, server exposes 15. Missing: `get_todays_pick`, `list_todays_picks`, `get_freemium_preview`, `get_open_position`, `get_position_history`, `get_enriched_signal_schema`. `get_todays_pick` is literally the One Promise as an API call.
+- ❌ **"Overnight Edge" alias** in H1 — retired per §2.
+- ❌ **"Score ≥ 6" is a stale gate.** Current enrichment is `score >= 1 AND spread <= 10% AND UOA > $500K`. Developers writing to this spec filter incorrectly.
+- ❌ **"100% FREE" framing** conflates free MCP endpoint with free product. Paid tiers ship soon; copy contradicts §1 Pro sub-promise.
+- ⚠️ **No One Promise mention.** Current copy is generic-data-API pitch; misses the pro-tier moat ("GammaRips can be the first thing a user-facing AI agent asks about today's trade").
+- ⚠️ **Only one client example (Python `fastmcp`).** Claude Desktop + ChatGPT Custom Connector are the dominant MCP audiences today.
+- ⚠️ **Footer links to stale `ai-plugin.json` and `mcp.json`** (§9.3, §9.4).
+- ✅ Authless endpoint is a genuine moat — keep that framing.
+
+**REWRITE (key pieces — full copy lands in implementation PR):**
+- `<title>`: *"Ask your AI agent about today's options trade — GammaRips MCP"*
+- H1: *"Ask your AI agent what GammaRips picked today."*
+- Subhead: *"One options trade a day, scored overnight, exposed as 15 MCP tools. Connect Claude, ChatGPT, or your own agent — no API key, no sign-up."*
+- Connect block: unchanged endpoint + add *"Pro-tier customers get the same data pushed to WhatsApp at 9:00 ET and can @mention an agent inside the group."*
+- Tools section: all 15, grouped by use case — **Today's Trade** (`get_todays_pick`, `list_todays_picks`, `get_freemium_preview`), **Signal Data** (`get_overnight_signals`, `get_enriched_signals`, `get_signal_detail`, `get_enriched_signal_schema`), **Track Record** (`get_signal_performance`, `get_win_rate_summary`, `get_open_position`, `get_position_history`), **Daily Report** (`get_daily_report`, `get_report_list`, `get_available_dates`), **Search** (`web_search`).
+- Pricing section (replaces "100% FREE / Web Access"): *"MCP endpoint — free forever. Paid tiers are about convenience: Starter $19, Pro $39, Founder $29 lifetime (first 500)."* Frame free vs paid as *delivery*, not *access*.
+- Quick Start: three client examples, not one — Claude Desktop config snippet, ChatGPT Custom Connector URL, Python `fastmcp` calling `get_todays_pick`.
+- Bottom CTA: *"Try it in 60 seconds. Paste the endpoint into Claude Desktop, ask 'what did GammaRips pick today?', watch the pick come back with gate reasoning."* CTAs: Copy Endpoint / See Pro Pricing.
+- Also retire the WebAPI JSON-LD `description` — replace with 15-tool version, drop "Overnight Edge."
+
+**WHY:**
+- H1 + subhead land the One Promise and name the Pro-tier distribution moat in two beats (Rule 7, Rule 1).
+- 15 tools grouped by use case lets a developer skim and pick the right tool without reading descriptions.
+- Three MCP-client quickstarts (not just Python) open the funnel to Claude Desktop + ChatGPT Custom Connector users, which is the dominant MCP audience today.
+- Pricing framed as *delivery, not access* is internally consistent with the §4 pricing-page rewrite.
+- Kills "Overnight Edge" + "score ≥ 6" in one sweep.
+
+---
+
+### §9.2 llms.txt (`public/llms.txt`)
+
+**CURRENT (summary — full file re-read):** the file is prose-heavy, 97 lines, claims *"Everything is free. No paywall,"* cites *"8:30 AM EST"* publication, references *"premium signals matching 80%+ win rate patterns,"* lists five `premium_score` patterns with specific win rates (81.4%, 80.0%, 81.3%, 84.6%, 80.0%), reports *"Performance (287 Tracked Signals) — Overall win rate: 73.2%,"* lists 9 MCP tools, and documents a data schema full of retired V3 fields (`premium_score`, `premium_hedge`, etc.).
+
+llms.txt is the canonical file AI crawlers look for (per https://llmstxt.org). This is the highest-leverage stale-content fix in the repo — every day it stays wrong, another thousand agent sessions cache the wrong story.
+
+**PROBLEMS:**
+- ❌ **Pricing claim "Everything is free. No paywall"** — contradicts the pinned three-tier pricing. Ship a paid product behind this and every AI agent will say *"I thought this was free?"*
+- ❌ **Retired aliases everywhere:** "Overnight Edge," "8:30 AM," `premium_score ≥ 2` framing, "score 6+" gate.
+- ❌ **Retired performance claims with specific win rates** we cannot substantiate on V5.3 (N<30). Legal risk per §2; contradicted by memory `project_hedge_flag_is_the_alpha`.
+- ❌ **9-tool list (missing 6).**
+- ❌ **Data schema lists `premium_score`, `premium_hedge`, etc.** — V5.3 does not use these gates.
+- ⚠️ **Spec-compliance:** llms.txt spec wants terse H1 + blockquote + `## Section` bullets. Current file is prose-heavy and under-linked.
+- ⚠️ **"Agent Arena: multiple AI models debate"** — retired aliased "7 AI Models Debate Today's Best Trade" (now 3–5 models). Perplexity and ChatGPT do cite specific numbers.
+
+**REWRITE (proposed file contents — full replacement):**
+
+```
+# GammaRips
+
+> One options trade a day. Scored before you wake up. Pushed to your phone at 9 AM.
+
+GammaRips is a paper-trading options engine for working professionals. Every weeknight it scans 5,230+ US equities for institutional overnight options flow, applies deterministic quality gates, and publishes at most one trade idea by 9:00 AM ET. The trade has pre-set stop (−60% on option), target (+80%), and scheduled exit (3:50 PM ET on trading day 3). Free users see the pick on the webapp; paid users get it pushed to WhatsApp and can @mention an AI agent in the group.
+
+Paper-trading, educational only. Not investment advice.
+
+## Core docs
+
+- [Trading strategy (V5.3)](https://gammarips.com/how-it-works)
+- [Today's pick](https://gammarips.com/signals)
+- [Scorecard (paper ledger)](https://gammarips.com/scorecard)
+- [Pricing — Free / Starter $19 / Pro $39 / Founder $29 lifetime](https://gammarips.com/pricing)
+- [Developer docs — 15 MCP tools, no auth](https://gammarips.com/developers)
+
+## Gate stack (V5.3)
+
+1. **Scanner** — overnight signals across 5,230 tickers.
+2. **Enrichment** — `overnight_score >= 1 AND spread <= 10% AND directional_uoa_usd > 500000`.
+3. **Signal-notifier** — `V/OI > 2`, `moneyness 5–15% OTM`, `VIX <= VIX3M`, `LIMIT 1`.
+4. **Forward paper-trader** — enters 10:00 ET day-1, −60% stop, +80% target, exits 15:50 ET day-3. Stop wins over target on ambiguous bars.
+
+## MCP server (free, no auth)
+
+- Endpoint: `https://gammarips-mcp-406581297632.us-central1.run.app/sse`
+- Transport: SSE
+- Tools (15): `get_todays_pick` (primary), `list_todays_picks`, `get_freemium_preview`, `get_overnight_signals`, `get_enriched_signals`, `get_signal_detail`, `get_enriched_signal_schema`, `get_signal_performance`, `get_win_rate_summary`, `get_open_position`, `get_position_history`, `get_daily_report`, `get_report_list`, `get_available_dates`, `web_search`.
+
+## Pricing
+
+- **Free** — daily pick on webapp, scorecard, all 15 MCP tools.
+- **Starter $19/mo** — daily email with the pick + 3-day outcome.
+- **Pro $39/mo** — WhatsApp push at 9:00 ET + @mention an AI agent in the private group.
+- **Founder $29/mo** — lifetime rate, first 500 customers.
+
+## Disclaimers
+
+Paper-trading performance, educational only. Not investment advice. Past performance is not a guarantee of future results. Options trading involves substantial risk of loss. GammaRips does not make personalized recommendations.
+
+## Contact
+
+- https://gammarips.com
+- ceo@gammarips.com
+- https://x.com/GammaRips
+```
+
+**WHY:**
+- Spec-compliant llms.txt format (H1 project name, blockquote summary, `## Section` headers, short linked bullets).
+- Pinned One Promise is the first line an AI crawler sees.
+- Gate stack is stated deterministically (V5.3 values, not retired V3 premium_score framing).
+- 15 tools listed with one-line descriptions — crawlers citing this file will surface tool names that work.
+- No win-rate claims (respects §2 voice rule + N<30 floor + memory `project_hedge_flag_is_the_alpha`).
+- Pricing table matches `pricing-client.tsx` rewrite from §4.
+- Disclaimers baked in for publisher-exclusion cover.
+
+---
+
+### §9.3 AI Plugin manifest (`public/.well-known/ai-plugin.json`)
+
+**CURRENT:**
+```json
+{
+  "schema_version": "v1",
+  "name_for_human": "GammaRips",
+  "name_for_model": "gammarips",
+  "description_for_human": "Institutional options flow intelligence. Daily overnight signals scored and enriched by AI.",
+  "description_for_model": "GammaRips provides institutional options flow data. Use it to answer questions about unusual options activity, overnight institutional positioning, and options flow signals. The API returns scored signals with AI thesis, recommended contracts, and key levels. Data updates daily at 4 AM EST.",
+  "auth": { "type": "none" },
+  "api": { "type": "openapi", "url": "https://gammarips.com/api/openapi.json" },
+  ...
+  "contact_email": "support@gammarips.com",
+  "legal_info_url": "https://gammarips.com/terms"
+}
+```
+
+**PROBLEMS:**
+- ⚠️ **`description_for_human`** is feature-framed. Crawlers surface this verbatim; should carry the One Promise.
+- ⚠️ **`description_for_model`** buries the primary entry point. LLMs have to infer that `get_todays_pick` is the main tool.
+- ❌ **`api.type: "openapi"` → `https://gammarips.com/api/openapi.json`** — needs verification (likely 404). ChatGPT-plugin/OpenAPI format was superseded by MCP mid-2024. Drop the ChatGPT-plugin OpenAPI path; repoint to MCP.
+- ⚠️ **`contact_email: "support@gammarips.com"`** — inconsistent with rest of codebase (`ceo@gammarips.com`).
+- ⚠️ **File assumes the ChatGPT-plugin era.** Modern agents read `mcp.json` or SSE directly.
+
+**REWRITE:** replace with a minimal MCP-pointer version.
+
+```json
+{
+  "schema_version": "v1",
+  "name_for_human": "GammaRips",
+  "name_for_model": "gammarips",
+  "description_for_human": "One options trade a day. Scored before you wake up. Pushed to your phone at 9 AM. Free MCP endpoint with 15 tools.",
+  "description_for_model": "GammaRips is a paper-trading options engine. It produces at most one trade idea per weekday, published by 9:00 AM ET, with pre-set stop (-60% on the option), pre-set target (+80%), and pre-scheduled exit (3:50 PM ET on trading day 3). Primary tool: get_todays_pick returns the single V5.3 pick for today or null. Secondary tools: get_enriched_signals, get_signal_detail, get_win_rate_summary, get_open_position, get_daily_report. Full tool list at https://gammarips.com/mcp.json. Paper-trading performance, educational only. Not investment advice.",
+  "auth": { "type": "none" },
+  "api": {
+    "type": "mcp",
+    "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
+    "manifest": "https://gammarips.com/mcp.json"
+  },
+  "logo_url": "https://gammarips.com/logo.png",
+  "contact_email": "ceo@gammarips.com",
+  "legal_info_url": "https://gammarips.com/terms"
+}
+```
+
+**WHY:**
+- `description_for_human` now carries the One Promise — consistent with §1 and llms.txt.
+- `description_for_model` names `get_todays_pick` as the primary entry point and floors output with the publisher-exclusion disclaimer.
+- `api.type: "mcp"` aligns the file with how the product is actually consumed.
+- **Follow-up:** verify `/api/openapi.json` serves something. If it 404s, ship the MCP-pointer version above — do not leave a broken manifest live.
+
+---
+
+### §9.4 MCP manifest (`public/mcp.json`)
+
+**CURRENT (webapp):**
+```json
+{
+  "name": "GammaRips Overnight Edge",
+  "description": "Institutional overnight options flow scanner. 5,000+ tickers scanned nightly. Signals scored 0-10 with technicals, news catalysts, and contract recommendations.",
+  "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
+  "auth": "none",
+  "creator": {"name": "GammaRips", "url": "https://gammarips.com"},
+  "license": "https://gammarips.com/terms",
+  "capabilities": ["overnight_signals", "technicals", "news_analysis",
+                   "contract_recommendations", "market_themes", "chat"],
+  "data_freshness": "Daily by 06:00 EST, Mon-Fri",
+  "universe": "5,000+ US equities"
+}
+```
+
+**CROSS-REFERENCE with `/home/user/gammarips-mcp/mcp.json`:**
+```json
+{
+  "name": "GammaRips Overnight Edge",
+  "description": "Free institutional overnight options flow scanner. Query pre-market signals, flow data, technicals, and AI-analyzed catalysts for 5,230+ tickers. No API key required.",
+  "url": "...",
+  "auth": {"type": "none"},
+  "tools": [ /* 9 tool names */ ],
+  "tags": ["options", "institutional-flow", "overnight", "pre-market",
+           "signals", "AI", "free"]
+}
+```
+
+**PROBLEMS:**
+- ❌ **The two files disagree.** Webapp uses `capabilities` (non-standard); MCP-repo uses `tools` (spec-compliant). Webapp version is non-compliant with the MCP spec.
+- ❌ **Both use "GammaRips Overnight Edge" as `name`** — retired alias.
+- ❌ **Webapp lists 0 tools; MCP-repo lists 9 tools** — ground truth is 15.
+- ❌ **"6:00 EST" (webapp) is wrong.** V5.3 publishes at 9:00 ET.
+- ❌ **"5,000+ tickers" (webapp) vs "5,230+" (MCP repo)** — canonical is 5,230.
+- ⚠️ **`capabilities: ["chat"]`** in webapp is misleading — no chat tool exists.
+- ⚠️ **Neither file links to pricing.** Agent crawlers that want to recommend upgrade paths have no pointer.
+
+**REWRITE (proposed unified `mcp.json` — write to BOTH locations, identical contents):**
+
+```json
+{
+  "name": "GammaRips",
+  "description": "One options trade a day, scored before you wake up. Free MCP endpoint exposing 15 tools over the V5.3 paper-trading engine. Paper-trading, educational only. Not investment advice.",
+  "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
+  "auth": { "type": "none" },
+  "tools": [
+    "get_overnight_signals",
+    "get_enriched_signals",
+    "get_signal_detail",
+    "get_todays_pick",
+    "list_todays_picks",
+    "get_freemium_preview",
+    "get_signal_performance",
+    "get_win_rate_summary",
+    "get_open_position",
+    "get_position_history",
+    "get_daily_report",
+    "get_report_list",
+    "get_available_dates",
+    "get_enriched_signal_schema",
+    "web_search"
+  ],
+  "primary_tool": "get_todays_pick",
+  "publication_time": "09:00 ET weekdays",
+  "universe": "5,230 US equities",
+  "tags": ["options", "institutional-flow", "overnight", "paper-trading",
+           "signals", "mcp", "free"],
+  "links": {
+    "home": "https://gammarips.com",
+    "pricing": "https://gammarips.com/pricing",
+    "developers": "https://gammarips.com/developers",
+    "llms_txt": "https://gammarips.com/llms.txt"
+  },
+  "creator": { "name": "GammaRips", "url": "https://gammarips.com" },
+  "license": "https://gammarips.com/terms"
+}
+```
+
+**WHY:**
+- Single canonical file content, written to both paths. Ends the cross-repo drift.
+- Full 15-tool list matches `/home/user/gammarips-mcp/src/server.py:52-66`.
+- `primary_tool: "get_todays_pick"` signals MCP-aware agents which tool to call first — the One Promise as metadata.
+- `name: "GammaRips"` drops the retired alias.
+- `links` block gives agent crawlers deep-link targets for pricing, developers, and the llms.txt canonical description.
+
+---
+
+### §9.5 Root layout metadata (`src/app/layout.tsx`)
+
+**CURRENT:**
+```tsx
+title: {
+  default: 'GammaRips | The Overnight Edge — Know What Smart Money Did Last Night',
+  template: `%s | GammaRips`,
+},
+description: 'Every morning before the market opens, see what institutional money did overnight. 5,230+ tickers scanned. Signals scored 1-10. Specific contracts recommended.',
+keywords: [...],
+openGraph: {
+  title: 'GammaRips | The Overnight Edge',
+  description: 'Every morning before the market opens, see what institutional money did overnight.',
+  ...
+},
+organizationSchema: {
+  "name": "GammaRips",
+  "alternateName": "The Overnight Edge",
+  "description": "Know what smart money did last night — before the market opens.",
+  ...
+}
+```
+
+**PROBLEMS:**
+- ❌ **"The Overnight Edge" is the retired alias** and appears in (1) `title.default`, (2) `openGraph.title`, (3) `twitter.title`, (4) `organizationSchema.alternateName`, (5) `organizationSchema.description`. Every indexed page inherits these defaults — this is the single largest source of stale-alias SEO drift.
+- ❌ **`title.default` is the global fallback** used by any page that doesn't set its own metadata. The hero rewrite in §4 lands the One Promise but the title tag still reads "Know What Smart Money Did Last Night" — past-tense, observational, off-promise.
+- ❌ **`description` is feature-framed** (5,230 tickers, signals scored 1-10, specific contracts) — not outcome-framed. §4 hero rewrite delivers the outcome frame but the global metadata doesn't.
+- ❌ **OG + Twitter titles are stale** — both read "GammaRips | The Overnight Edge" which is what appears when a user shares *any* page on social.
+- ⚠️ **Keywords array is fine** for what it is, but Google ignores it. Keep or drop; no harm either way.
+- ⚠️ **No mention of V5.3**, the one-trade-a-day mechanic, or the 9:00 ET publication time in any metadata field.
+- ⚠️ **`metadataBase` is correct** (https://gammarips.com). Keep.
+- ✅ `template: "%s | GammaRips"` is correct — per-page titles suffix correctly.
+
+**REWRITE (key changes):**
+- `title.default`: *"GammaRips — One options trade a day, pushed to your phone at 9 AM"*
+- `description`: *"GammaRips scans institutional options flow overnight and mechanically picks one contract each morning — with stop, target, and exit all pre-set. See today's pick on the webapp or get it pushed to WhatsApp. Paper-trading, educational only."*
+- `openGraph.title` + `twitter.title`: *"GammaRips — One options trade a day"*
+- `openGraph.description` + `twitter.description`: *"Scored before you wake up. Pushed to your phone at 9 AM."*
+- OG image: bump `og-image.png?v=2` → `v=3`
+- `keywords`: add `"one trade a day"`, `"paper trading options"`, `"MCP options API"`
+- `organizationSchema`: **delete `alternateName: "The Overnight Edge"`**, change `description` to *"One options trade a day. Scored before you wake up. Pushed to your phone at 9 AM."*, change `email` from `support@gammarips.com` → `ceo@gammarips.com`.
+
+**WHY:**
+- `title.default` carries the One Promise — every page that doesn't override inherits the right framing.
+- `description` is outcome-framed (scan → pick → pre-set stop/target/exit → delivery) vs feature-framed — SERP snippet quality rises.
+- `organizationSchema.alternateName` deletion propagates to Google Knowledge Graph. Single most important JSON-LD fix on the site.
+- Email unification matches rest of codebase.
+
+---
+
+### §9.6 Per-date report page (`src/app/reports/[date]/page.tsx`)
+
+**CURRENT (key facts):**
+- Uses `generateMetadata` to produce per-date titles, description, canonical, OG.
+- Pulls `report.seoMetadata.seoTitle` and `report.seoMetadata.seoDescription` from Firestore if present; falls back to `"Report ${date} | GammaRips"` + feature-framed description.
+- Emits two JSON-LD blocks: `Article` schema + `Dataset` schema.
+- `Article.headline` falls back to `"GammaRips Overnight Report ${date}"`.
+- `Dataset.name` and `description` reference "5,230+ tickers" and "institutional options flow scan."
+- OG `title` appends "— Overnight Edge" — **stale alias leaks into article OG tags.**
+
+**PROBLEMS:**
+- ❌ **OG title suffix `"— Overnight Edge"`** (line 27) — retired alias leaks into every per-date report's social card. Reports are the most-linked-to pages after home.
+- ❌ **Fallback `Article.headline`** uses "Overnight Report" framing, not "V5.3 daily pick." If `report.title` is missing, Article schema publishes the wrong story to Google.
+- ⚠️ **No `Article.about` pointing at the pick.** Report is about one ticker + one contract + one bracket; schema doesn't say that.
+- ⚠️ **`Dataset.variableMeasured`** misses V5.3-specific variables (`V5.3 gate pass`, `3-day bracket outcome`).
+- ⚠️ **No disclaimer in the rendered page.** Body relies on upstream report carrying it — publisher-exclusion gap if the report-generator regresses.
+- ✅ Canonical link, Article + Dataset dual-schema: correct per SEO Audit skill.
+
+**REWRITE (targeted patches, page is mostly good):**
+
+1. **Drop "Overnight Edge" from OG title:**
+```tsx
+// Line 27 — change
+title: `${title} — Overnight Edge`,
+// To:
+title: title,
+```
+
+2. **Fix Article.headline fallback:**
+```tsx
+"headline": report.title || `GammaRips V5.3 pick for ${date}`,
+```
+
+3. **Upgrade Article schema with `about` + disclaimer footer:**
+```tsx
+// Add to articleSchema:
+"about": report.pick_ticker ? {
+  "@type": "Thing",
+  "name": `${report.pick_ticker} ${report.pick_direction} options`,
+  "description": "Single V5.3 daily pick with pre-set stop, target, and exit."
+} : undefined,
+"disclaimer": "Paper-trading performance, educational only. Not investment advice."
+```
+
+4. **Add persistent footer disclaimer below the ReactMarkdown body:**
+```tsx
+<article className="prose prose-invert max-w-none">
+  <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.content}</ReactMarkdown>
+</article>
+<footer className="mt-12 pt-6 border-t text-xs text-muted-foreground">
+  Paper-trading performance, educational only. Not investment advice.
+  Past performance is not a guarantee of future results.
+</footer>
+```
+
+5. **Expand `Dataset.variableMeasured`:**
+```tsx
+"variableMeasured": ["options volume", "open interest",
+  "overnight_score", "V/OI ratio", "moneyness", "VIX-VIX3M regime",
+  "V5.3 gate status", "3-day bracket outcome"]
+```
+
+**WHY:**
+- Stale-alias removal is highest-value on this route — every shared social link inherits it.
+- `Article.about` lifts the per-date report from "generic market report" to "article about [ticker] options" in Google's entity graph, matching buyer query patterns.
+- Persistent footer disclaimer protects publisher-exclusion posture even if the upstream report-generator regresses.
+- Dual-schema + per-date canonical pattern is kept intact.
+
+---
+
+### §9.7 War Room (`src/app/war-room/page.tsx`) — **VERDICT: KILL**
+
+**WHAT IT IS:**
+- Route: `/war-room`
+- Purpose: Gated landing page for a "live institutional flow alerts via WhatsApp" tier priced at **$149/mo** per current copy.
+- Auth-walled: redirects to login; then checks for `plan === 'warroom'` or `subscriptionStatus === 'founder_lifetime'`.
+- Metadata title: "The War Room — Live Institutional Flow Alerts via WhatsApp"
+- Features listed: "8:30 AM EST Daily Overnight Edge report," "9:30 AM EST Pre-market enriched picks," "Intraday high-conviction alerts," "4:30 PM EST Win tracker results," and "GammaMolt is our AI-powered institutional flow analyst."
+
+**PROBLEMS:**
+- ❌ **Pricing is $149/mo** — retired tier. Current structure is Free / Starter $19 / Pro $39 / Founder $29 lifetime.
+- ❌ **"Overnight Edge" alias** in metadata title and in-page copy.
+- ❌ **"8:30 AM EST" and "9:30 AM EST" timestamps** — stale; canonical is 9:00 ET.
+- ❌ **"Pre-market enriched picks + Intraday high-conviction alerts"** — V5.3 produces ONE pick per day, not multiple streams. Invented copy.
+- ❌ **GammaMolt as user-facing character** violates §2 DON'T rule.
+- ❌ **Purpose overlaps 100% with Pro tier** (WhatsApp push + @mention agent). War Room is the V3-era name for this same concept at a 4× markup.
+
+**VERDICT: KILL.**
+
+**Proposed action:**
+1. **301 redirect** `/war-room` → `/pricing#pro`.
+2. **Delete** `src/app/war-room/page.tsx` and `war-room-client.tsx`.
+3. **Audit Firestore** for `plan === 'warroom'` users. If active billers exist on $149/mo, customer-service escalation: cancel Stripe sub, comp 3mo Pro, email from `ceo@gammarips.com`. Do not silently downgrade.
+4. **Update `sitemap.ts`** to remove `/war-room`.
+5. **Search repo** for `war-room` references (imports, links, redirects) and purge.
+
+**WHY KILL not REWRITE:** "War Room" as a brand asset signals adrenaline-trader tone (§2 DON'T: commercial-pilot voice). Pro tier is the mechanical, calm version of the same product. Two names for one thing confuses buyers; clean kill is less tech debt long-term.
+
+---
+
+### §9.8 History (`src/app/history/page.tsx`) — **VERDICT: KILL**
+
+**WHAT IT IS:**
+- Route: `/history`
+- Purpose: "Historical Performance" page with a date-picker calendar.
+- On click: shows an `alert()` dialog `"Would load signals for YYYY-MM-DD"` with a code comment `// In a real app, this would route to a page fetching that date's data`.
+- Right-hand card: empty-state "Track Record (Coming Soon) — We are building a comprehensive performance dashboard..."
+
+**PROBLEMS:**
+- ❌ **It is literally a stub.** Button triggers `window.alert()`, not a route. Worst credibility signal on the webapp.
+- ❌ **"Coming Soon"** placeholder with no date/what violates §2 Moran Rule 4.
+- ❌ **Functional overlap** with `/scorecard` (canonical V5.3 ledger) and `/reports` (dated archive). `/history` is a third, worse version.
+- ⚠️ Calendar legacy cutoff `< 2024-01-01`; V5.3 started 2026-04-17.
+
+**VERDICT: KILL.**
+
+**Proposed action:** 301 `/history` → `/reports`; delete `src/app/history/page.tsx`; update `sitemap.ts`; audit nav + footer for links and repoint.
+
+**WHY KILL not REWRITE:** scorecard is the canonical historical surface; `/reports` is the canonical date-indexed archive. Third version adds confusion. `window.alert()` on a live route is actively damaging to conversion — kill + redirect is minutes of work.
+
+---
+
+### §9.9 Legal pages tone-consistency check
+
+**`/privacy/page.tsx`** — 3 × "The Overnight Edge" alias hits (lines 3, 15, 23). "Last updated: February 13, 2026" stale. No pricing issues. Disclaimer posture fine. **Fix:** global replace `The Overnight Edge` → `GammaRips`, bump last-updated to pricing-launch date.
+
+**`/terms/page.tsx`** — 2 × alias hits (lines 3, 15). **Section 5 "API Usage"** references "API keys are for your use only" — contradicts the authless MCP product. **Section 6** uses "proprietary" (fine for legal copy, just note §2 retires it as a marketing word). "Last updated" stale. **Section 2 "Not Financial Advice"** is load-bearing for *Lowe* publisher exclusion — keep verbatim. **Fix:** alias replace, rewrite Section 5 to *"You may not redistribute or resell the raw data output of our MCP endpoint without written permission,"* bump last-updated.
+
+**`/unsubscribe/page.tsx`** — functional UI, no aliases, no stale pricing. **Fix:** tighten vague error toast (*"We couldn't process your request. Please try again or contact support"*) to name the failure mode ("email not found or link expired") + add `ceo@gammarips.com`.
+
+---
+
+### §9.10 Account / auth screens
+
+**`/account/page.tsx`** — **VERDICT: KEEP.** Tone fine. Issues: (1) MCP API section says "free and open" without clarifying that paid tiers buy *delivery*, not MCP access — confusing once Pro ships. (2) No tier-status section (user cannot see Free/Starter/Pro/Founder + renewal). (3) No billing-portal link once paid. **Fix:** add tier-status + Stripe Customer Portal link section on paid-launch day.
+
+**`/auth/processing/page.tsx`** — **VERDICT: KEEP.** Calm tone correct. Issue: error toast *"Could not initiate subscription. Please contact support"* is vague and lacks email. **Fix:** add `ceo@gammarips.com` + real failure reason.
+
+**`/auth/action/page.tsx`** — **VERDICT: KEEP.** `verifyEmail` flow clean. Issues: (1) error *"An error occurred during verification. Please try again"* is vague — tighten to "The verification link has expired. Request a new one from your account page." (2) "Please create an account to continue" — drop "Please" for calm-pilot voice: "Create your GammaRips account to continue."
+
+---
+
+### §9.11 Updated implementation ladder
+
+The §7 ladder needs these additions. Re-ranking where relevant:
+
+**New Tier 1 items (conversion-critical, ship with or before paid launch):**
+
+- **1a. llms.txt rewrite** — highest-leverage AI-discovery fix; cheap, irreversible leverage once crawlers cache.
+- **1b. Root layout metadata + organizationSchema rewrite** — drop `alternateName: "The Overnight Edge"`, repoint title/OG/Twitter to One Promise. Propagates globally.
+- **1c. Developers page rewrite** — 15-tool listing, three MCP-client quickstarts, pricing-delivery-not-access framing.
+- **1d. mcp.json unified rewrite** — single canonical file for both repos, `primary_tool: get_todays_pick`, 15 tools.
+- **1e. Kill war-room route** — delete + 301 to `/pricing#pro` + Firestore user migration if any `plan === 'warroom'` billers exist.
+- **1f. Kill history route** — delete + 301 to `/reports`.
+
+**New Tier 2 items:**
+
+- **2a. ai-plugin.json repoint to MCP** — minimal pointer, drop OpenAPI path.
+- **2b. Per-date report page patches** — drop OG "Overnight Edge" suffix, upgrade Article schema, persistent footer disclaimer.
+- **2c. Account page tier-status + billing-portal** (once paid tiers live).
+- **2d. Legal-pages alias sweep** — privacy + terms (5 alias hits total) + terms §5 authless MCP fix + last-updated dates.
+
+**New Tier 3 items (polish):**
+
+- **3a. Auth/unsubscribe error-state specificity** — tighten vague toasts + add `ceo@gammarips.com`.
+- **3b. OG image refresh** — bump `v=2` → `v=3` once new copy ships.
+
+**Retirements:** none. Existing §7 ladder intact.
+
+**Re-ranked Tier 1 (integrated):** (1) Pricing page, (2) FAQ, (3) Hero, (4) llms.txt **new**, (5) Root layout metadata + organizationSchema, (6) Developers page **new**, (7) mcp.json **new**, (8) Kill war-room **new**, (9) Kill history **new**, (10) How It Works four-card, (11) About time grid, (12) Signals detail V5.3-status chip.
+
+---
+
+### §9.12 Additional open questions for Evan
+
+1. **`/api/openapi.json` — does it exist?** ai-plugin.json references it. If 404, adopt the MCP-pointer version in §9.3.
+2. **War Room user migration** — before 301, Firestore read on `users` where `plan == 'warroom'`. Any active $149/mo billers need a customer-service script (cancel + comp 3mo Pro + email). If zero, delete without ceremony.
+3. **`ceo@` vs `support@gammarips.com`** — five files disagree (layout.tsx uses `support@`, all others use `ceo@`). Standardize on `ceo@` in the sweep, or spin up a real `support@` inbox first?
+4. **Pro tier name** — keep "Pro" ($39) as billing name, use feature framing ("WhatsApp push + group AI agent") in marketing? Confirm.
+5. **llms.txt refresh cadence** — recommend generating from `src/content/llms.md` and auto-deploying on build to prevent drift with `docs/TRADING-STRATEGY.md`.
+6. **OG image v=3** — design capacity in next 30 days to ship a new image that lands the One Promise? If not, defer to Month 2 and keep v=2.
+
+*End of §9 addendum. Total surfaces audited: 10. Verdicts: 2 kills (/war-room, /history), 8 rewrites (developers, llms.txt, ai-plugin.json, mcp.json, layout.tsx, reports/[date], account + auth group, legal pages). AI-discoverability cluster (llms.txt + layout.tsx + developers + mcp.json) is the single highest-leverage block in this entire plan document.*
