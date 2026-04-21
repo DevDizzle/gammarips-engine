@@ -40,6 +40,12 @@ MAILGUN_API_KEY = os.environ.get("MAILGUN_API_KEY", "").strip()
 MAILGUN_SENDER = f"GammaRips Engine <mailgun@{MAILGUN_DOMAIN}>"
 RECIPIENT_EMAIL = "eraphaelparra@gmail.com"
 
+# OpenClaw — non-blocking WhatsApp push. Activates the moment all three
+# env vars are present. If any are missing the post is skipped silently.
+OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "").strip()
+OPENCLAW_HOOKS_TOKEN = os.environ.get("OPENCLAW_HOOKS_TOKEN", "").strip()
+OPENCLAW_GROUP_JID = os.environ.get("OPENCLAW_GROUP_JID", "").strip()
+
 nyse = mcal.get_calendar("NYSE")
 est = pytz.timezone("America/New_York")
 
@@ -201,6 +207,103 @@ def send_email(subject: str, html_content: str) -> bool:
         return False
 
 
+def format_whatsapp_message(
+    row: pd.Series | None,
+    target_date: date,
+    entry_day: date | None,
+    has_pick: bool,
+    skip_reason: str | None = None,
+) -> str:
+    """Plain-text WhatsApp message — mirrors the email content, concise.
+
+    On happy path: single pick + routine. On skip: one-line rationale so the
+    group sees the engine is standing down (and doesn't wonder if it's broken).
+    """
+    stop_pct_str = f"{int(STOP_PCT_DISPLAY * 100)}%"
+    target_pct_str = f"{int(TARGET_PCT_DISPLAY * 100)}%"
+
+    if not has_pick:
+        reason_lines = {
+            "no_candidates_passed_gates": "Nothing cleared the V5.3 gates. Do nothing today.",
+            "regime_fail_closed": "VIX or VIX3M missing — engine is standing down.",
+            "vix_backwardation": "VIX > VIX3M (backwardation). Engine skipped today.",
+        }
+        reason = reason_lines.get(skip_reason or "", f"No pick today ({skip_reason}).")
+        return (
+            f"*GammaRips — {target_date.isoformat()}*\n"
+            f"No trade today.\n"
+            f"{reason}\n\n"
+            f"_Paper-trading, educational only. Not investment advice._"
+        )
+
+    assert row is not None and entry_day is not None
+    ticker = row["ticker"]
+    direction = row["direction"]
+    contract = row.get("recommended_contract", "")
+    strike = row.get("recommended_strike")
+    dte = row.get("recommended_dte")
+    mid = row.get("recommended_mid_price")
+    vol_oi = row.get("volume_oi_ratio")
+    money = row.get("moneyness_pct")
+
+    try:
+        vol_oi_str = f"{float(vol_oi):.2f}" if vol_oi is not None else "n/a"
+    except (TypeError, ValueError):
+        vol_oi_str = "n/a"
+    try:
+        money_str = f"{float(money) * 100:.1f}% OTM" if money is not None else "n/a"
+    except (TypeError, ValueError):
+        money_str = "n/a"
+    try:
+        mid_str = f"${float(mid):.2f}" if mid is not None else "—"
+    except (TypeError, ValueError):
+        mid_str = "—"
+
+    return (
+        f"*GammaRips — {entry_day.isoformat()}*\n"
+        f"*{ticker} {direction}*\n"
+        f"`{contract}`\n"
+        f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}\n\n"
+        f"*Routine*\n"
+        f"10:00 ET — buy 1 contract at market\n"
+        f"Arm GTC −{stop_pct_str} stop AND +{target_pct_str} target\n"
+        f"15:50 ET day-3 — close if neither has filled\n\n"
+        f"_Paper-trading, educational only. Not investment advice._"
+    )
+
+
+def post_to_openclaw(message: str) -> None:
+    """Fire-and-forget WhatsApp push to OpenClaw. NEVER raises.
+
+    Activates when ``OPENCLAW_GATEWAY_URL``, ``OPENCLAW_HOOKS_TOKEN``, and
+    ``OPENCLAW_GROUP_JID`` are all set. If any are missing or the POST fails,
+    we log and move on — the email path is the fallback.
+    """
+    if not (OPENCLAW_GATEWAY_URL and OPENCLAW_HOOKS_TOKEN and OPENCLAW_GROUP_JID):
+        logger.info("OpenClaw not configured (missing env); skipping WhatsApp push.")
+        return
+
+    try:
+        url = f"{OPENCLAW_GATEWAY_URL.rstrip('/')}/hooks/agent"
+        payload = {
+            "chat_jid": OPENCLAW_GROUP_JID,
+            "text": message,
+        }
+        headers = {
+            "Authorization": f"Bearer {OPENCLAW_HOOKS_TOKEN}",
+            "Content-Type": "application/json",
+        }
+        resp = requests.post(url, json=payload, headers=headers, timeout=5)
+        if resp.status_code >= 400:
+            logger.warning(
+                f"OpenClaw push returned {resp.status_code}: {resp.text[:200]}"
+            )
+        else:
+            logger.info(f"OpenClaw push OK ({resp.status_code}).")
+    except Exception as e:  # noqa: BLE001 — intentional broad catch
+        logger.warning(f"OpenClaw push failed (non-fatal): {e}")
+
+
 def format_email_html(row: pd.Series, target_date: date, entry_day: date) -> str:
     """V5.3 email: one signal, one routine. Mirrors CHEAT-SHEET.md."""
     ticker = row["ticker"]
@@ -334,6 +437,9 @@ def run_notifier(target_date: date | None = None):
         # Fail-closed: write the empty-state todays_pick doc so every downstream
         # reader (webapp banner, MCP, GTM) learns the skip reason atomically.
         write_todays_pick_doc(target_date, has_pick=False, skip_reason="no_candidates_passed_gates")
+        post_to_openclaw(format_whatsapp_message(
+            None, target_date, None, has_pick=False, skip_reason="no_candidates_passed_gates"
+        ))
         return True, "No eligible signal."
 
     top = df.iloc[0]
@@ -347,6 +453,9 @@ def run_notifier(target_date: date | None = None):
             f"No email sent."
         )
         write_todays_pick_doc(target_date, has_pick=False, skip_reason="regime_fail_closed")
+        post_to_openclaw(format_whatsapp_message(
+            None, target_date, None, has_pick=False, skip_reason="regime_fail_closed"
+        ))
         return True, "Regime gate fail-closed (missing VIX or VIX3M)."
     if vix_now > float(vix3m):
         logger.info(
@@ -354,6 +463,9 @@ def run_notifier(target_date: date | None = None):
             f"(backwardation). Skipping email."
         )
         write_todays_pick_doc(target_date, has_pick=False, skip_reason="vix_backwardation")
+        post_to_openclaw(format_whatsapp_message(
+            None, target_date, None, has_pick=False, skip_reason="vix_backwardation"
+        ))
         return True, f"Backwardation regime (VIX {vix_now:.2f} > VIX3M {float(vix3m):.2f}). Skipped."
 
     # Happy path: write todays_pick doc BEFORE sending email. Fail-closed —
@@ -368,6 +480,11 @@ def run_notifier(target_date: date | None = None):
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
 
     success = send_email(subject, html_content)
+
+    # WhatsApp push is non-blocking and runs whether or not email succeeded —
+    # it's an independent fan-out to a different channel, not a retry path.
+    post_to_openclaw(format_whatsapp_message(top, target_date, entry_day, has_pick=True))
+
     if success:
         return True, f"Emailed top V5.3 signal: {top['ticker']} {top['direction']}."
     return False, "Failed to send email."
