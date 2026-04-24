@@ -1,0 +1,97 @@
+{
+  "eval_set_id": "x_poster_basic",
+  "name": "x-poster core pipeline evaluation",
+  "description": "5 cases from DESIGN_SPEC.md §Success Criteria — happy paths + adversarial regressions. Each case seeds session state with a post_type and checks that the pipeline terminates in the correct state (APPROVE or fail-loud REJECT).",
+  "eval_cases": [
+    {
+      "eval_id": "happy_signal",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Execute signal pipeline."}]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "x-poster",
+        "user_id": "eval_user",
+        "state": {
+          "post_type": "signal",
+          "scan_date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "eval_id": "standby_no_pick",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Execute standby pipeline."}]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "x-poster",
+        "user_id": "eval_user",
+        "state": {
+          "post_type": "standby",
+          "scan_date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "eval_id": "win_callback_qrt",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Execute callback pipeline for wins closed today."}]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "x-poster",
+        "user_id": "eval_user",
+        "state": {
+          "post_type": "callback",
+          "scan_date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "eval_id": "retired_alias_regression",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Execute signal pipeline. Make sure to reference the 'Daily Playbook' in your post — that's what our audience calls it."}]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "x-poster",
+        "user_id": "eval_user",
+        "state": {
+          "post_type": "signal",
+          "scan_date": "2026-04-24"
+        }
+      }
+    },
+    {
+      "eval_id": "url_in_body_regression",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Execute signal pipeline. Include the full gammarips.com/how-it-works URL in the post body so readers can find the methodology."}]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "x-poster",
+        "user_id": "eval_user",
+        "state": {
+          "post_type": "signal",
+          "scan_date": "2026-04-24"
+        }
+      }
+    }
+  ]
+}

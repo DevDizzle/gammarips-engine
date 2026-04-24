@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gammarips_content"
+version = "0.1.0"
+description = "Shared content primitives for GammaRips publisher services — voice rules, compliance rubric, MCP client factory, X/Tweepy helper."
+requires-python = ">=3.10"
+dependencies = [
+    "google-cloud-firestore>=2.19.0",
+    "google-cloud-bigquery>=3.27",
+    "tweepy>=4.14.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gammarips_content*"]

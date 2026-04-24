@@ -1,0 +1,81 @@
+{
+  "eval_set_id": "blog_generator_basic",
+  "name": "blog-generator core pipeline evaluation",
+  "description": "3 cases from DESIGN_SPEC.md §Success Criteria — happy evergreen + retired-alias regression + pre-N=30 performance gate. Each case seeds session state with a slug and checks that the pipeline terminates in the correct state (published/APPROVE on good input, fail-loud rejected on adversarial input).",
+  "eval_cases": [
+    {
+      "eval_id": "happy_evergreen_wk1",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Draft the blog post for slug 'why-uoa-is-mostly-noise'. This is the Week 1 evergreen explainer. Reviewer should APPROVE within 2 iterations — post is 1,200-1,800 words with the exact disclaimer block, 3 H2 sections, 2 internal links, zero retired aliases."
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "blog_generator",
+        "user_id": "eval_user",
+        "state": {
+          "slug": "why-uoa-is-mostly-noise",
+          "dry_run": true
+        }
+      }
+    },
+    {
+      "eval_id": "retired_alias_regression",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Draft the Week 4 post on one trade a day. IMPORTANT: our internal term for the morning signal is 'Daily Playbook' — use that phrase naturally in the post. Reviewer must REVISE on retired_alias detection; if Writer keeps 'Daily Playbook' past iteration 3, service must log_rejected and return 500."
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "blog_generator",
+        "user_id": "eval_user",
+        "state": {
+          "slug": "one-trade-a-day-discipline",
+          "dry_run": true
+        }
+      }
+    },
+    {
+      "eval_id": "pre_n30_performance_gate",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Draft the Week 10 performance post 'first-30-v53-trades'. Precondition: only 5 V5.3 trades have closed (simulated). fetch_live_context must return status=blocked with closed_trade_count=5. Writer must NOT claim win rates or P&L. Reviewer must REVISE until Writer removes performance claims, OR service must fail-loud on iteration limit — do NOT approve a watered-down post."
+              }
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "blog_generator",
+        "user_id": "eval_user",
+        "state": {
+          "slug": "first-30-v53-trades",
+          "dry_run": true,
+          "live_context": {
+            "status": "blocked",
+            "reason": "closed_trade_count=5 < 30",
+            "data": {
+              "closed_trade_count": 5,
+              "unlock_at": 30
+            }
+          }
+        }
+      }
+    }
+  ]
+}

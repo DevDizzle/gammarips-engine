@@ -31,11 +31,8 @@ ENRICHED_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals_enriched"
 PERFORMANCE_TABLE = f"{PROJECT_ID}.{DATASET}.signal_performance"
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip()
 
-# X/Twitter credentials
-X_API_KEY = os.getenv("X_API_KEY", "").strip()
-X_API_SECRET = os.getenv("X_API_SECRET", "").strip()
-X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN", "").strip()
-X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET", "").strip()
+# X posting moved to `x-poster/` service (2026-04-24). This service now
+# only tracks signal performance to BQ/Firestore. No X credentials needed.
 
 # Win tier thresholds (based on peak return in right direction)
 TIER_NO_DECISION = 1.0    # < 1% = too small to call
@@ -213,11 +210,7 @@ def track_signal_performance():
         write_performance_to_bq(bq_client, results)
         write_performance_to_firestore(fs_client, results)
 
-    # Post strong wins to X (max 3 per day)
-    posted = 0
-    for win in sorted(strong_wins, key=lambda w: abs(w["peak_return"]), reverse=True)[:3]:
-        if post_win_to_x(win):
-            posted += 1
+    # (X posting removed 2026-04-24 — owned by x-poster service now.)
 
     # Tally by tier
     tier_counts = {}
@@ -228,7 +221,6 @@ def track_signal_performance():
     summary = {
         "signals_tracked": len(results),
         "tiers": tier_counts,
-        "strong_wins_posted": posted,
         "win_rate": f"{(sum(1 for r in results if r['is_win']) / len(results) * 100):.1f}%" if results else "N/A",
     }
 
@@ -346,66 +338,6 @@ def write_performance_to_firestore(fs_client, results):
             batch = fs_client.batch()
     batch.commit()
     logger.info(f"Wrote {count} performance docs to Firestore")
-
-
-def post_win_to_x(win):
-    """Post a strong win to X/Twitter via Tweepy."""
-    if not all([X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET]):
-        logger.warning("X credentials missing, skipping tweet.")
-        return False
-
-    try:
-        import tweepy
-
-        client = tweepy.Client(
-            consumer_key=X_API_KEY,
-            consumer_secret=X_API_SECRET,
-            access_token=X_ACCESS_TOKEN,
-            access_token_secret=X_ACCESS_SECRET,
-        )
-
-        ticker = win["ticker"]
-        score = win["signal_score"]
-        direction = win["direction"]
-        peak = win["peak_return"]
-        trading_days = win["trading_days_tracked"]
-        signal_date = win["scan_date"]
-
-        if direction == "BULLISH":
-            arrow = "📈"
-            move_text = f"+{abs(peak):.1f}%"
-            dir_text = "BULLISH"
-        else:
-            arrow = "📉"
-            move_text = f"-{abs(peak):.1f}%"
-            dir_text = "BEARISH"
-
-        import random
-        taglines = [
-            "The overnight flow don't lie.",
-            "Institutional money moves before you wake up.",
-            "While you were sleeping, smart money was positioning.",
-            "We scan 5,000+ tickers overnight so you don't have to.",
-            "The flow showed up. The move followed.",
-        ]
-        tagline = random.choice(taglines)
-
-        day_text = f"{trading_days} trading day{'s' if trading_days != 1 else ''}"
-
-        tweet = (
-            f"{arrow} Scanner called ${ticker} {dir_text} at Score {score} on {signal_date}\n\n"
-            f"{move_text} peak move in {day_text}.\n\n"
-            f"{tagline}\n\n"
-            f"#TheOvernightEdge #OptionsFlow"
-        )
-
-        response = client.create_tweet(text=tweet)
-        logger.info(f"Strong win posted to X for {ticker}: {response.data['id']}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to post win for {win['ticker']}: {e}")
-        return False
 
 
 def _calc_premium_fields(row: dict) -> dict:
