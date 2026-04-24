@@ -1,150 +1,191 @@
 # Next Session Prompt
 
-**Last session wrapped:** 2026-04-20 (big day — see below)
+**Last session wrapped:** 2026-04-22 (webapp launch cleanup — paid tier now live and crawlable)
 **Current policy:** V5.3 "Target 80" (unchanged; no execution-policy edits in this session)
-**Status:** All engine services live. Paid tier launch blocked only on Evan setting up OpenClaw + Stripe.
+**Status:** Paid tier LIVE. E2E Stripe + Firebase Auth + WhatsApp provisioning verified end-to-end. SSR is fully crawlable for AI agents and search engines. All copy aligned to One Promise.
 
 ---
 
 ## Before you do anything
 
 Read in this order:
+
 1. `CHEAT-SHEET.md` — operator one-pager (unchanged; still current).
-2. `docs/TRADING-STRATEGY.md` — canonical execution policy. **NEW "Publication timing" section** pins the simultaneous-reveal contract (webapp + WhatsApp + MCP all see today's pick at 09:00 ET). The `signal-notifier` ORDER BY now has a deterministic 5-key tiebreaker documented here.
-3. `docs/EXEC-PLANS/2026-04-20-v5-3-surface-and-monetization.md` — **the master plan for monetization.** v2.6 as of this session, with 6 amendment layers. Read §4.4 (Pricing), §4.5 (Freemium gating), §5 (Timeline), and Phase 2 (the OpenClaw agent spec + compliance guardrails) carefully.
-4. `docs/DECISIONS/2026-04-20-v5-3-surface-and-monetization.md` — accountable decision record.
-5. `docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md` — **copy + SEO + 90-day blog plan, ~11K words.** Section 7 has the prioritized implementation ladder. Section 9 addendum covers AI-discoverability surfaces (llms.txt, ai-plugin.json, mcp.json, developers page) the first pass missed.
-6. `docs/EXEC-PLANS/2026-04-20-mcp-chat-readiness.md` — the MCP audit that caught the direction-filter bug and pinned 4 system-prompt patterns for the Phase 2 chat agent.
+2. `docs/TRADING-STRATEGY.md` — canonical execution policy.
+3. `docs/EXEC-PLANS/2026-04-20-v5-3-surface-and-monetization.md` — master monetization plan.
+4. `docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md` — **the 90-day blog schedule is in §7. Critical for GTM planning.**
+5. `docs/DECISIONS/2026-04-22-launch-cleanup.md` — **decision record for this session's webapp work.** Covers the SSR crawlability fix, the origin bug, the auth-bypass hardening, and the copy-retirement sweep.
+6. `docs/DECISIONS/2026-04-20-v5-3-surface-and-monetization.md` — background on the monetization decisions.
+
+Do NOT read first: `PROMPT-*` docs, `_archive/`, or any pre-2026-04 research summaries. Those are historical, not authoritative.
 
 ---
 
-## What happened in this session (2026-04-20)
+## Evan's stated intentions for next session
 
-### Engine-side work (all deployed)
-- **Fixed broken Firestore sync** in `enrichment-trigger` (V5.2 had commented out `sync_to_firestore` — webapp had been rendering 4-day-stale signals). Backfilled today's data (FIX BULLISH for 2026-04-17).
-- **Fixed scheduler race condition** — `agent-arena-trigger` was firing at 05:30 ET alongside enrichment, causing arena to read yesterday's enriched data. Moved arena to 06:00 ET.
-- **Extended enrichment-trigger scheduler deadline** from 180s → 1800s (runs take ~8 min).
-- **Phase 1.0 shipped** — `signal-notifier` now writes Firestore `todays_pick/{scan_date}` atomically before email. Deterministic 5-key ORDER BY. All 4 return paths (happy / no-candidates / regime-fail-closed / vix-backwardation) write a canonical doc. Revision: `signal-notifier-00007-pv9`.
-- **Phase 1 shipped (webapp)** — home page has `TodaysPickCard` banner reading from Firestore. Killed all V3 "premium" badge/filter UI. Ghost type fields removed. Webapp commit: `e440b733`.
-- **Phase 3a shipped (MCP)** — 15 tools registered. 5 new (`get_todays_pick`, `list_todays_picks`, `get_freemium_preview`, `get_open_position`, `get_position_history`, `get_enriched_signal_schema`). 2 fixes (stale score-6 gate, direction casing). Bug fixes: direction filter `LIKE` not `=`, `get_open_position` now returns composite {pending_pick, awaiting_simulation, most_recent_closed_trade, explanation} instead of pretending the batch simulator has live positions. Revision: `gammarips-mcp-00023-q8p`.
-- **Diagnosed forward_paper_ledger** via `gammarips-researcher` — batch simulator runs 16:30 ET Mon-Fri processing scan_date = today-4-trading-days. NULL-entry rows are terminal `INVALID_LIQUIDITY` (Polygon had no bars on the contract at 10:00 ET day-1), not pending. Deferred hygiene fix to task #21.
+Two workstreams, both in the user's zone more than the code zone:
 
-### Planning work (all pushed)
-- **Pricing decided** after competitive research across 25 products: Free / Starter $19 / Pro $39 / Pro Annual $399. $29 was undersold by ~4x. Founder lock: first 500 Pro subs get $29/mo lifetime. 7-day free trial. Anchor: $39 is the prosumer sweet spot (Cheddar $45, Benzinga Basic $37, OptionStrat $40).
-- **Freemium gating:** gate features, not information. Daily pick / signals / report / methodology stay free. Arena full transcript + debrief pages + full performance ledger soft-gate. Chat agent + live-position tracker + watchlist + journal + alerts hard-gate.
-- **Arena repurposed** to Option C: pre-entry verdict debate at 09:15 ET (after notifier, before entry). 3 agents (Claude + Grok + Gemini), 1 round, TAKE / CAUTION / SKIP. Extends `todays_pick` doc with `arena_verdict`. Paper ledger stays full-coverage as the control.
-- **Compliance stance:** no counsel at this scale — legal basis is *SEC v. Lowe (1985)* publisher exclusion. Disclaimer hygiene checklist in §6.2. Counsel becomes relevant at >500 subs or state RIA challenge or if we publish real-money track record.
-- **WhatsApp architecture:** OpenClaw `/hooks/agent` direct POST from `signal-notifier` at 09:00 ET + new tiny `exit-reminder` service at 15:50 ET day-3. Chat lives ONLY in the WhatsApp group (dropped webapp `/chat` widget). Agent responds only when @mentioned. Paywall = OpenClaw plugin keyed on `senderId` vs Firestore `whatsapp_allowlist`. Model: Claude Haiku 4.5 with prompt caching (~$0.10/user/month).
-- **Copy plan (9.2K words + 5K addendum)** — One Promise pinned: *"One options trade a day. Scored before you wake up. Pushed to your phone at 9 AM."* Retires "The Overnight Edge." 17 Tier 1-2 items + 13-post 90-day blog schedule. Addendum §9 adds AI-discoverability cluster (llms.txt, ai-plugin.json, mcp.json, developers page, root layout metadata). `/war-room` and `/history` flagged for KILL.
+### 1. Email flow
 
-### Housekeeping
-- Project ID cleanup (`profitscout-lx6bb` → `profitscout-fida8`) in 6 active-code files. Archives left alone.
-- CI actions bumped to Node 24 natives (`checkout@v6`, `setup-python@v6`, `auth@v3`, `setup-gcloud@v3`).
-- **CD workflow deleted** — `gcloud run deploy --source=.` from local shell has been the real deploy path. The GitHub Action was fighting cross-project IAM. CI (ruff format + lint) retained.
-- Ruff format + lint now clean across MCP repo.
+The welcome-email path is fully working end-to-end (Mailgun accepted, recipient MX returned 250 OK, Firestore + whatsapp_allowlist provisioned). But recipient-side quarantine is eating mail on certain corporate recipients (Proofpoint at `owenec.com` held Evan's own two welcome messages on 2026-04-22). Work to plan:
 
----
+- Proofpoint allow-list for `mg.gammarips.com` (Evan's side — admin action on his owenec tenant).
+- Assess whether to enable DMARC on `gammarips.com` (currently empty). Weigh trade-off: DMARC tightens legit deliverability once fully aligned, but can increase rejections if any legacy sender isn't covered.
+- Warm-up plan for the sending domain — right now `mg.gammarips.com` has SPF + MX + one DKIM selector (`k1._domainkey`) but is cold reputation-wise. Gradual volume ramp, keep complaint rate near zero.
+- Audit the four scheduled cron emails in `apphosting.yaml` against current V5.3 reality:
+  - `send-daily-setups` (weekday 20:00 ET) — copy fixed today but the data source is probably empty under `profitscout-fida8` (the old `winners_dashboard` table is V2-era per `.claude/rules/scripts-research.md`).
+  - `send-top-pick` (weekday 08:00 ET) — needs verification that it's reading the current `todays_pick` Firestore doc, not a stale table.
+  - `send-midday-movers` (weekday 13:00 ET) — probably also V2-era.
+  - `send-feedback-requests` (daily 10:00 ET) — copy fixed today.
+- Consider retiring email crons entirely if the WhatsApp channel is the primary distribution. If we keep them, they need clear V5.3 alignment and real data.
+- End-state target: a 7-email lifecycle (welcome, day-3 reminder, trial ending, trial converted, churn intent, churn completed, win-back) that fires automatically off Stripe webhook and Firestore state — not time-based crons.
 
-## What's blocked on Evan (not Claude)
+### 2. 100-day GTM plan
 
-Listed in priority order. These unblock Phase 2 (paid launch).
+Evan is now the distribution bottleneck, not the product. The site works, the paid tier works, the product story is clear. What's missing is traffic.
 
-### Must-do before Phase 2 ships
-1. **Create the private WhatsApp group + wire OpenClaw hooks.** Add OpenClaw's linked number, get `GROUP_JID`, enable hooks config `{"hooks": {"enabled": true, "token": "<secret>", "path": "/hooks"}}`. Mount 3 secrets via `gcloud secrets create`:
-   - `OPENCLAW_GATEWAY_URL` (e.g., `http://<gateway>:18789`)
-   - `OPENCLAW_HOOKS_TOKEN`
-   - `OPENCLAW_GROUP_JID`
-2. **Set up Stripe SKUs.** Starter $19/mo, Pro $39/mo, Pro Annual $399/yr, Founder $29/mo (lifetime lock for first 500 — use a separate Stripe price + coupon).
+Material for next session:
+- `docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md` §7 has a **13-post 90-day blog schedule** already drafted. That's the backbone.
+- Historical distribution data: **March 2026 had 7 signups**, all clustered in a 4-day window 3/10–3/13 driven by X posts. Zero retention (all 7 hit the `/dashboard` 404 that got fixed 2026-04-22 — so the zero retention was the bug, not disinterest). One more 3/25 signup after delayed discovery of same content. **When Evan stopped X posting on 4/6, signups went to 0 immediately.** X is the proven channel.
+- Search Console: **5,091 impressions / 19 clicks (0.37% CTR) in March**. Almost certainly explained by the SSR loader bug (fixed this session) — crawlers indexed a spinner, users clicked and bounced. Expect CTR to improve over 2–4 weeks as Google re-crawls with real content.
+- Pricing: Free / **Pro $39/mo with 7-day trial** / Founder $29/mo lifetime for first 500 (`FOUNDER29` promo code).
+- Compliance frame: *SEC v. Lowe (1985)* publisher exclusion. Cited in `docs/EXEC-PLANS/2026-04-20-v5-3-surface-and-monetization.md` §6. Don't publish real-money track record until end-of-May when V5.3 has ≥30 closed trades.
 
-### Should-do (minor unblocks)
-3. **Create Google Programmable Search Engine** at programmablesearchengine.google.com, copy the CX ID, `gcloud secrets create GOOGLE_CSE_ID --data-file=-`. Unblocks `web_search` MCP tool (task #22).
-4. **Draft founder-story paragraph for About page** — copy plan flagged this for E-E-A-T + social proof (open question #3).
-5. **Decide founder seat count** — plan says 500, adjustable (open question #1).
+100-day GTM framework to propose (starting points):
+- **Days 1–14 (launch ramp):** resume X at pre-4/6 cadence. Announcement thread pinned. 2–3 methodology posts/week. No paid tier hard sell yet — lead with paper-trading transparency.
+- **Days 15–30 (blog foundation):** ship first 4 posts from the 90-day schedule. Prioritize `/how-it-works` long-form companion ("How V5.3 Works") and a "reading options flow" primer.
+- **Days 31–60 (Reddit + cross-posting):** introduce r/options, r/thetagang, r/Daytrading. Methodology content, no promotion. Skip r/wallstreetbets (copy plan flags as Month 3+).
+- **Days 61–90 (first track record milestone):** ≥30 closed V5.3 trades landed. Scorecard post, breakdown of hits and misses. That's the inflection point from "here's how we built it" to "here's what it's done."
+- **Days 91–100 (first evaluation gate):** measure: paid conversions, trial → paid rate, churn %, top acquisition sources. Decide whether to double-down on X, move aggressively onto Reddit, or open paid acquisition.
 
 ---
 
-## High-value next steps (ordered by ROI)
+## What happened in this session (2026-04-22)
 
-Everything below is code-ready from Claude's side and doesn't require the WhatsApp group to exist. Pick top 1-3 for next session.
+### Launch-critical fixes (all shipped to production)
 
-### 🔥 Tier 1 — conversion-critical (ship before paid launch)
-1. **Pricing page rewrite** — `src/app/pricing/pricing-client.tsx` + `page.tsx`. Current schema declares `Product.offers.price = "0.00"` and title "GammaRips is Free" — shipping paid tiers without fixing this will actively damage SERP rankings. Three-tier Product schema with Offer entries drafted in copy plan §4 and §5. **~1-2 hrs.**
-2. **Hero + root layout metadata** — `src/components/landing/hero.tsx` and `src/app/layout.tsx`. New One Promise hero: *"One options trade a day. Scored before you wake up. Pushed to your phone at 9 AM."* Retires "The Overnight Edge" alias. **~30 min.**
-3. **FAQ full replacement** — `src/components/landing/faq.tsx`. All 8 current items reference retired $49/$149 pricing + 8:30 AM times. 10-item replacement drafted. **~30 min.**
-4. **llms.txt + ai-plugin.json + mcp.json + developers page** — the AI-discoverability cluster. Copy plan §9 flags this as "single highest-leverage block" in the whole document. These shape how ChatGPT/Perplexity/Claude describe GammaRips. **~1-2 hrs.**
-5. **`signal-notifier` → OpenClaw POST wiring** — code-ready. Non-blocking fire-and-forget HTTP, try/except wrapped, activates the moment the 3 secrets land. Lines up for Phase 2 launch. **~30 min.**
+- **Firebase API key was quote-wrapped in the Firebase App Hosting console override**, causing every sign-up to 400 with `auth/api-key-not-valid`. Root cause: Evan's Firebase App Hosting console had `NEXT_PUBLIC_*` env overrides with YAML-literal `"` characters baked into the strings. Deleted the 11 `NEXT_PUBLIC_*` overrides (they duplicate `apphosting.yaml`) and stripped quotes on the remaining server-side secrets. Firebase sign-up now works.
+- **Stripe Secret Key had the same quote bug** — Stripe SDK rejected it with `StripeAuthenticationError`. Fixed by de-quoting.
+- **Checkout `/api/checkout` 500'd** because `firebase-admin` was lazy-init only and the route's side-effect `import` never triggered `initializeApp`. Exported `getAdminApp` and called `getAuth(getAdminApp())` explicitly.
+- **Stripe success URL landed on `https://0.0.0.0:8080`** (Cloud Run internal address). Fixed by resolving origin via `X-Forwarded-Host` / `X-Forwarded-Proto` headers instead of `req.nextUrl.origin`.
+- **SSR rendered a full-screen loader spinner for every page** because `root-layout-client.tsx` had `if (loading && !user) return <Loader/>` — and during SSR, Firebase Auth's `loading` is always true. Every AI crawler (GPTBot, ClaudeBot, PerplexityBot, Bing AI) was seeing a spinner and nothing else. **Deleted the gate.** Biggest single SEO unlock of the session.
+- **`/dashboard` 404 on every sign-up** — `use-auth.tsx` defaulted redirects to `/dashboard` which doesn't exist. All 7 March users bounced here. Fixed to `/`.
+- **Forced Stripe auto-redirect on signup** (`auth/processing/page.tsx` shoved every new user into Stripe after 2.5s). Killed. New users now land on `/about?welcome=1&session_id=...`.
 
-### ⚙️ Tier 2 — ships alongside Phase 2 or soon after
-6. **OpenClaw paywall plugin (~100 LOC TS)** — draft locally, Evan deploys into his OpenClaw install. Checks `senderId` vs `whatsapp_allowlist`, short-circuits paywall reply for unknown numbers.
-7. **@mention agent system prompt** — compliance guardrails in plan §2 + 4 patterns from MCP chat-readiness audit §5.1-5.5. Ship as a drop-in OpenClaw config.
-8. **Arena Phase 4 Option C** — modify `agent-arena/main.py` to read `todays_pick`, run 3-agent 1-round verdict debate at 09:15 ET, write `arena_verdict` field back. Move scheduler from 06:00 ET → 09:15 ET. **~2-3 hrs.**
-9. **Exit-reminder cron service** — new Cloud Run service. Query `forward_paper_ledger` for open day-3 positions, POST OpenClaw reminder at 15:50 ET. **~1-2 hrs.**
-10. **Phase 3b soft-gating UX** — arena full-transcript blur + read-through counter, per-trade debrief 48h time-delay for free users. Webapp work. **~1-2 hrs.**
+### Onboarding + post-checkout surface
 
-### 🧹 Tier 3 — nice-to-have / post-launch
-11. `/war-room` and `/history` page deletions + 301 redirects (copy plan §9.7-9.8 killed them).
-12. Ledger `INVALID_LIQUIDITY` hygiene fix — stamp placeholder `exit_timestamp` + `realized_return_pct = 0.0` on terminal non-liquid rows (task #21).
-13. Pre-commit hook config (solves the ruff-CI-red-on-push problem forever).
-14. Legal pages tone pass — copy plan §9.9 flagged no immediate issues but worth a scan.
-15. Webapp `/positions` live tracker (post-launch Phase 3c).
+- **`/about` rewritten as dual-purpose surface.** Anonymous visitors see E-E-A-T + methodology + founder/GammaMolt cards + pricing. Post-checkout visitors hitting `?welcome=1&session_id=…` see a prepended "You're in. Here's your 09:00 ET routine" banner with the **WhatsApp invite link embedded directly** (from the `WHATSAPP_GROUP_INVITE_URL` secret). Email-in-inbox is now belt-and-suspenders, not critical path.
+- `/account` left as a utility page (subscription management, password reset). Not the post-checkout landing.
+
+### Copy / branding cleanup
+
+- `ceo@gammarips.com` → `evan@gammarips.com` across 10 files (layout, developers, privacy, terms, footer, contact form, pricing client, llms.txt, ai-plugin.json, mailgun templates).
+- Mailgun default FROM display: `GammaRips <ceo@…>` → `Evan Parra <evan@…>` (personal-name sender beats brand for transactional deliverability).
+- `@mention` → `@gamma` (the actual WhatsApp tag OpenClaw listens for) across pricing pro-features, welcome banner, and all Mailgun templates. Grammar rewrapped to read natural.
+- GammaMolt card on `/about` retitled to "Chief Intelligence Officer" with Evan's new copy (Claude Opus via OpenClaw, real-time BigQuery queries, not canned responses).
+- **Retired `"Ripper"` and `"Daily Playbook"` zombie language** — the auth-dialog popup and three Mailgun email templates (feedback-request, daily-setups, insider-invite). One Promise aligned.
+- `/signals` page got a two-paragraph intent intro — retargets SEO away from per-ticker research queries (AppLovin buyback, Hess production data were March's top indexed queries) toward product-category queries (daily options signals scanner, unusual options activity, one trade a day).
+- `/how-it-works` rewritten top-to-bottom — dropped "The Overnight Edge" alias and the fabricated FSLY 9/10 signal example; now describes the real V5.3 pipeline (three-gate enrichment, 09:00 ET notifier stack, execution rules).
+- `/arena` gated with a noindex placeholder — stripped "7 AI Models" / "Claude, GPT, Grok, Gemini, DeepSeek, Llama, Mistral" metadata that was SEO-poisoning launch day crawls. Removed from global nav. Phase 4 agents-vs-V5.3 scoreboard deferred to post-May when the ledger has ≥30 closed trades.
+
+### Security hardening
+
+- `FIREBASE_PRIVATE_KEY` was being `console.log`'d on every admin init — scrubbed.
+- `/api/debug-firebase` route deleted (dead code, imported a non-exported symbol).
+- `createCheckoutSession` server action now takes an ID token instead of a raw `uid` — verifies via Firebase Admin before deriving uid. Closes the auth bypass where any client could call it with any uid.
+- Firebase API key restricted by HTTP referrer — `gammarips.com/*`, `*.gammarips.com/*`, `*.hosted.app/*`, `localhost:3000/*`.
+
+### Activation / email
+
+- `<EmailCapture />` dropped on the homepage (before FAQ, default variant) and the footer sitewide (minimal variant, form only). Low-friction activation ladder that sidesteps the Firebase-account → Stripe funnel.
+- Confirmed via Mailgun Events API that welcome emails ARE delivered at the SMTP layer (250 OK from recipient MX). The gap is recipient-side quarantine (Proofpoint at `owenec.com` held both of Evan's welcome messages 2026-04-22).
+- Suppression lists clean — no bounces/unsubscribes/complaints on either `eparra@owenec.com` or `eraphaelparra@gmail.com`.
+
+### Infrastructure + deploy hygiene
+
+- Confirmed `gammarips.com` is in Firebase Auth Authorized Domains.
+- Firebase API key restriction in place.
+- Identified that the existing GA4 property `G-KPGTJDBC6N` is attached to a "ProfitScout" stream pointing at `profitscout.app` (orphan domain). Decision: nuke it and create a fresh `gammarips.com` property in a Google account Evan controls long-term. **Pending on Evan.**
 
 ---
 
-## DO NOT do
+## What's still open
 
-- Do NOT modify V5.3 execution policy. Entry 10:00 ET / stop -60% / target +80% / 3-day hold / exit 15:50 ET day-3. Pinned in `docs/TRADING-STRATEGY.md` and forward-paper-trader.
-- Do NOT add gates to `forward-paper-trader` (rule in `.claude/rules/forward-paper-trader.md`). Gates live in `enrichment-trigger` + `signal-notifier`.
-- Do NOT use FMP. Retired 2026-04-08.
-- Do NOT modify `scripts/research/` or `signals_labeled_v1` — frozen.
-- Do NOT reference retired aliases in new copy: "The Overnight Edge", "GammaRips is Free", "7 AI Models", "score >= 6", "8:30 AM", "premium signal", "$49/$149 pricing".
-- Do NOT publish real-money track record until there are ≥30 closed V5.3 trades (end of May at earliest). Paper-trader stays the only marketable source until then.
-- Do NOT skip the 4 agent-system-prompt patterns from MCP chat-readiness §5. They prevent embarrassing chat turns on day one.
-- Do NOT deploy any MCP tool that reads from old tables (`winners_dashboard`, `options_chain`, `calendar_events`, `performance_tracker` singular) — those are V2-era and empty under `profitscout-fida8`.
+### Blocked on Evan (console / admin, not code)
 
----
+1. **GA4 fresh property** — create in a Google account you own, add a web data stream for `gammarips.com`, mark `purchase` as a key event, create a Measurement Protocol API secret. Paste the new `G-XXXXXXXXXX` measurement ID + the MP secret to the next session; Claude swaps `apphosting.yaml` + the hardcoded `G-KPGTJDBC6N` in `src/app/layout.tsx:44,72-90` and updates the `GA_API_SECRET` console env var.
+2. **Proofpoint allow-list for `mg.gammarips.com`** on your owenec.com tenant. Admin action in Proofpoint Essentials. Tracked as task #23.
+3. **Google Programmable Search Engine** at `programmablesearchengine.google.com` — copy CX ID, `gcloud secrets create GOOGLE_CSE_ID --data-file=-`. Unblocks the `web_search` MCP tool. From prior session handoff, still outstanding.
+4. **WhatsApp group wiring** — create private group, link OpenClaw's number, mount `OPENCLAW_GATEWAY_URL`, `OPENCLAW_HOOKS_TOKEN`, `OPENCLAW_GROUP_JID` as secrets. From prior session handoff, still outstanding (though Evan has been joining manually for testing today).
 
-## Deployed revision sheet
+### Nice-to-have / post-launch
 
-| Service | Revision | Deployed | Notes |
-|---|---|---|---|
-| signal-notifier | `signal-notifier-00007-pv9` | 2026-04-20 13:45 UTC | V5.3 + todays_pick writer + 5-key tiebreaker |
-| enrichment-trigger | `enrichment-trigger-00032-2z4` | 2026-04-20 15:30 UTC | Firestore sync restored |
-| forward-paper-trader | `forward-paper-trader-...` | 2026-04-20 13:46 UTC (morning) | Untouched by this session |
-| agent-arena | `agent-arena-...` | 2026-04-10 | Scheduler moved to 06:00 ET |
-| overnight-report-generator | `overnight-report-generator-...` | 2026-04-10 | Working |
-| gammarips-mcp | `gammarips-mcp-00023-q8p` | 2026-04-20 20:30 UTC | 15 tools + P0 direction-filter fix |
-| gammarips-webapp | `e440b733` (Firebase) | 2026-04-20 | TODAY'S PICK banner live |
-
-Canonical scheduler cron:
-- `overnight-scanner` — `0 23 * * 1-5` ET (23:00 ET Mon-Fri)
-- `enrichment-trigger-daily` — `30 5 * * 1-5` ET (5:30 ET, deadline 1800s)
-- `agent-arena-trigger` — `0 6 * * 1-5` ET (moved from 5:30 today to avoid enrichment race)
-- `overnight-report-generator-trigger` — `15 8 * * 1-5` ET
-- `signal-notifier-job` — `0 9 * * 1-5` ET
-- `forward-paper-trader-trigger` — `30 16 * * 1-5` ET (batch simulator)
-- `track-signal-performance` — `30 16 * * 1-5` ET
-- `polygon-iv-cache-daily` — `30 16 * * 1-5` ET
+- **Secret Manager migration** — all remaining server-side secrets in the Firebase App Hosting console (Stripe, Mailgun, Polygon, FMP, Gemini, Firebase Admin, CRON, MCP, GA_API) should be migrated from console overrides to Google Secret Manager so `apphosting.yaml`'s `secretEnv:` block becomes the single source of truth. Tracked as task #19. Non-urgent unless secrets rotate.
+- **DMARC on `gammarips.com`** — currently empty. Adding `p=none` first to monitor, then tightening to `p=quarantine` once deliverability stabilizes.
+- **JSON-LD re-verify** — flagged in prior session but SSR bug was the actual cause. Likely resolved. Spot-check via `curl -s -H 'Cache-Control: no-cache' https://gammarips.com/pricing | grep 'application/ld+json'` when convenient. Tracked as task #8.
 
 ---
 
 ## Key facts to hold in memory
 
-- **Paper-trader is a batch simulator.** No live positions in `forward_paper_ledger`. Every row is terminal. Chat-agent answers framed as {pending_pick, awaiting_simulation, most_recent_closed_trade} — never fabricate unrealized P&L.
-- **Two win-rate universes.** `get_win_rate_summary` = `signal_performance` (enriched 3-day forward returns, ~30/day, ~80% win rate). `get_position_history` = `forward_paper_ledger` (V5.3 realized bracket trades, 1/day). NEVER conflate them.
-- **V5.3 filter stack.** Enrichment: score≥1, spread≤10%, UOA>$500K. Notifier: V/OI>2, moneyness 5–15% OTM, VIX≤VIX3M, LIMIT 1 ORDER BY 5-key deterministic.
-- **15 MCP tools** registered. Web search still broken until `GOOGLE_CSE_ID` is provisioned.
-- **NULL-entry ledger rows = INVALID_LIQUIDITY terminal state.** Downstream MCP queries filter them via `exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')`.
-- **Disclaimer on every user-facing surface:** "Paper-trading performance, educational only. Not investment advice."
+- **Paid tier is LIVE.** First real subscription (Evan's own) created 2026-04-22 14:44 UTC via `FOUNDER29` on a live card. Stripe webhook fired, Firestore `users/{uid}.plan = "pro"`, `whatsapp_allowlist` provisioned, Mailgun 250 OK.
+- **Welcome email deliverability**: Mailgun delivers to recipient MX. Downstream quarantine (Proofpoint, Gmail Promotions) is recipient-side. `/about?welcome=1` now carries the WhatsApp invite inline, so the email is backup, not critical path.
+- **SSR is now fully crawlable.** The previous root-layout-client loader gate was rendering nothing but a spinner to non-JS crawlers. That fix (commit `d78efd29`) is the single highest-leverage SEO change ever made on this project. Expect 2–4 weeks for Google to re-crawl with real content.
+- **V5.3 ledger has ~0 closed trades as of launch.** Track record narrative is a 30–45 day wait. Nothing marketed as real-money P&L until ≥30 closed trades — that's end of May at earliest.
+- **X is the proven distribution channel.** March 2026 = 7 signups from a 4-day X cluster (3/10–3/13); April 2026 (after X stopped 4/6) = 0 signups. Resume is the fastest lever.
+- **Pricing**: Free / Pro $39/mo with 7-day trial / Founder $29/mo lifetime for first 500 (promo code `FOUNDER29`).
+- **@gamma** is the WhatsApp tag for the chat agent (not `@mention`, not `@GammaMolt`). OpenClaw listens for `@gamma`.
 
 ---
 
-## Open questions for Evan (from copy plan)
+## DO NOT do
 
-1. Founder-price seat count: 500 sticks, or adjust to 250 (tighter scarcity) / 1,000 (dilutes)?
-2. GammaMolt character scope — About-only, or wider?
-3. Founder-story 200-300 words for About page (E-E-A-T + social proof)?
-4. Which Reddit subs for blog schedule — plan recommends skipping r/wallstreetbets for Month 1-2?
-5. Hero CTA A/B — "See Today's Pick" (free-funnel) vs "Start 7-Day Free Trial" (Pro) once tier is live?
+- Do NOT modify V5.3 execution policy. Entry 10:00 ET / stop −60% / target +80% / 3-day hold / exit 15:50 ET day-3. Pinned in `docs/TRADING-STRATEGY.md` and `forward-paper-trader`.
+- Do NOT add gates to `forward-paper-trader` (rule in `.claude/rules/forward-paper-trader.md`). Gates live in `enrichment-trigger` + `signal-notifier`.
+- Do NOT use FMP. Retired 2026-04-08.
+- Do NOT modify `scripts/research/` or `signals_labeled_v1` — frozen.
+- Do NOT reference retired aliases in new copy: "The Overnight Edge", "GammaRips is Free", "7 AI Models", "score >= 6", "8:30 AM", "premium signal", "$49/$149 pricing", "Daily Playbook", "Ripper", "interactive dashboard".
+- Do NOT publish real-money track record until there are ≥30 closed V5.3 trades (end of May at earliest). Paper-trader stays the only marketable source until then.
+- Do NOT re-add `ceo@gammarips.com` — that's a dead-letter address now. `evan@gammarips.com` is the public contact. `GammaRips <ceo@…>` display name is also retired — use `Evan Parra <evan@gammarips.com>`.
+- Do NOT re-introduce `@mention` — the chat agent only responds to `@gamma` in the WhatsApp group (OpenClaw binding).
+- Do NOT paste live secrets into chat. Secret rotation debt accumulates fast. If diagnosing a secret-related issue, work from names, line numbers, and first/last 4 chars.
+
+---
+
+## Deployed revision sheet (webapp)
+
+| Commit | Branch | Revision | Deployed | Summary |
+|---|---|---|---|---|
+| `e7c3aa0f` | main | build-2026-04-22-008 (pending rollout) | 2026-04-22 ~20:00 UTC | Retired "Ripper" / "Daily Playbook" copy across auth modal + 3 email templates |
+| `d78efd29` | main | build-2026-04-22-007 | 2026-04-22 19:51 UTC | **SSR crawlability fix** — removed root-layout-client loader gate |
+| `313c5765` | main | build-2026-04-22-006 | 2026-04-22 19:45 UTC | Five-task batch: signals SEO intent copy, how-it-works V5.3 rewrite, auth hardening (createCheckoutSession ID-token), EmailCapture on homepage+footer, dead /api/debug-firebase deleted |
+| `d591cbe5` | main | build-2026-04-22-005 | 2026-04-22 ~17:30 UTC | Branding sweep: ceo@ → evan@, @mention → @gamma, GammaMolt copy, Mailgun default FROM → "Evan Parra" |
+| `edf4b685` | main | build-2026-04-22-004 | 2026-04-22 15:18 UTC | WhatsApp invite link rendered directly on /about?welcome=1 |
+| `2d56729f` | main | build-2026-04-22-003 | 2026-04-22 14:55 UTC | Origin bug fix (X-Forwarded-Host); /about rewrite with welcome banner |
+| `7c1a4867` | main | build-2026-04-22-002 | 2026-04-22 14:38 UTC | Firebase Admin init fix; /dashboard → /; Stripe auto-redirect killed; /arena gated |
+| `8b650b97` | main | build-2026-04-22-001 | 2026-04-21 21:30 UTC | Prior session: V5.3 copy rewrite + paid tier wiring |
+
+Engine-side services (from prior session, no changes this session):
+
+| Service | Revision | Deployed |
+|---|---|---|
+| signal-notifier | `signal-notifier-00007-pv9` | 2026-04-20 |
+| enrichment-trigger | `enrichment-trigger-00032-2z4` | 2026-04-20 |
+| forward-paper-trader | `forward-paper-trader-...` | 2026-04-20 |
+| agent-arena | `agent-arena-...` | 2026-04-10 |
+| overnight-report-generator | `overnight-report-generator-...` | 2026-04-10 |
+| gammarips-mcp | `gammarips-mcp-00023-q8p` | 2026-04-20 |
+| gammarips-webapp | `edf4b685` → `e7c3aa0f` (above chain) | 2026-04-22 |
+
+Scheduler cron (unchanged since 2026-04-20):
+- `overnight-scanner` — `0 23 * * 1-5` ET
+- `enrichment-trigger-daily` — `30 5 * * 1-5` ET
+- `agent-arena-trigger` — `0 6 * * 1-5` ET
+- `overnight-report-generator-trigger` — `15 8 * * 1-5` ET
+- `signal-notifier-job` — `0 9 * * 1-5` ET
+- `forward-paper-trader-trigger` — `30 16 * * 1-5` ET
+- `track-signal-performance` — `30 16 * * 1-5` ET
+- `polygon-iv-cache-daily` — `30 16 * * 1-5` ET
 
 ---
 
@@ -154,8 +195,8 @@ Canonical scheduler cron:
 - **`gammarips-researcher`** — backtests, cohort analysis, BQ diagnostic reads. Read-only.
 - **`gammarips-review`** — audits for lookahead bias, data leakage. **ALWAYS invoke before any forward-paper-trader or signal-notifier diff deploys.**
 
-New subagents proven useful this session (general-purpose + Explore): ledger diagnosis, MCP chat-readiness audit, copywriting/SEO research, pricing research. Spawn fresh for one-shot deliverables.
+For GTM and email-flow work specifically: spawn `general-purpose` or `Explore` subagents as needed. Mailgun Events API is queryable via `MAILGUN_API_KEY` from `/home/user/gammarips-webapp/.env` if diagnostic queries are needed (e.g., "what was the delivery status for message-id X?"). See 2026-04-22 session for the shape of those queries.
 
 ---
 
-*End of handoff. First action next session: ask Evan the status of the WhatsApp group setup + the GOOGLE_CSE_ID secret. If both done, go direct to Phase 2 code. If not, work the Tier 1 copy rewrites list.*
+*End of handoff. First action next session: confirm with Evan which of the two workstreams (email flow, 100-day GTM) to start on. Email flow is more code/config; GTM planning is more doc/strategy work.*
