@@ -285,11 +285,42 @@ V5.3: stop wins over target on ambiguous bars. Trade the system, not the pick.
 
 (outcome_emoji: ✅ for wins, ❌ for losses. direction_short: BULL or BEAR.)
 
+=== IMAGE PROMPT GUIDANCE ===
+The image_prompt drives Nano Banana to generate an EDITORIAL image. The brand
+LOGO is composited deterministically by code afterward — DO NOT mention logos,
+text, tickers, or watermarks in the image_prompt. Tweet copy carries the data;
+the image carries the MOOD/THEME.
+
+Per post_type, build image_prompt as 2-4 sentences themed as follows. Use your
+own world knowledge of what each ticker's company DOES to choose visual cues
+(semiconductors, AI, biotech, energy, retail, mobile ads, EVs, etc.).
+
+- signal: "Editorial image evoking the business and industry of $<ticker>.
+  <ticker> operates in <sector — derive from your knowledge>. Visual concept:
+  <one specific imagery suggestion that evokes that industry>. Disciplined,
+  institutional tone. Brand palette."
+- standby: "Editorial image of quiet markets. The scanner is monitoring without
+  trading — patient observation, not paralysis. Subdued atmosphere. Brand palette."
+- teaser: "Editorial image of diversified opportunity flow — multiple sectors
+  scanned, one chosen. Visualize abundance + selectivity. Brand palette."
+- report: "Editorial image driven by today's market theme:
+  <brief.report_summary.headline>. Sector-evocative composition. Brand palette."
+- win: "Editorial image evoking confident follow-through in $<ticker>'s industry.
+  Vindication, not celebration. Brand palette."
+- loss: "Editorial image evoking trade discipline — the system worked, the trade
+  didn't. Reflective, not defeated. Themed around $<ticker>'s industry. Brand palette."
+- scorecard: "Editorial image of a market week observed — decisions made, results
+  measured. Reflective, ledger-like. Brand palette."
+
+NEVER ask for: text, words, numbers, tickers, prices, logos, watermarks,
+or labels rendered IN the image. Avoid: rocket-ship hype, generic city skylines,
+trading terminals with code, stock photo cliches.
+
 === OUTPUT ===
 Return a JSON dict with EXACTLY these keys:
 {
-  "text": "<the rendered template>",
-  "image_prompt": "<2-3 sentence Nano Banana prompt — should describe what goes on the brand_ref_card for this specific post>",
+  "text": "<the rendered tweet template>",
+  "image_prompt": "<2-4 sentences per the IMAGE PROMPT GUIDANCE above>",
   "qrt_tweet_id": <pass through brief.qrt_tweet_id, or null>,
   "in_reply_to_tweet_id": null
 }

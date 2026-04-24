@@ -48,6 +48,15 @@ FONTS: dict[str, str] = {
 LOGO_URL = "https://gammarips.com/icon.png"
 OG_IMAGE_URL = "https://gammarips.com/og-image.png"
 OG_IMAGE_LOCAL = "/home/user/gammarips-webapp/public/og-image.png"
+
+# Brand logo — used as a deterministic PIL-composited watermark on every
+# generated image. Source of truth for the brand mark. JPG with dark-teal
+# backdrop (functions as a small badge in the bottom-right of editorial cards).
+LOGO_GCS = "gs://gammarips-x-media/brand_logo.jpg"
+
+# Deprecated 2026-04-24 — the og-image highlights the multi-agent /arena
+# debate which we deprecated. Use LOGO_GCS for watermarking; let Nano Banana
+# generate the editorial image freely from a theme-driven prompt.
 BRAND_REF_GCS_DEFAULT = "gs://gammarips-x-media/brand_ref_card.png"
 
 

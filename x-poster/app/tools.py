@@ -308,68 +308,99 @@ def score_against_rubric(text: str, post_type: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Image generation (Nano Banana via Vertex AI)
+# Image generation (Nano Banana via Vertex AI) + PIL logo composite
 # ---------------------------------------------------------------------------
+#
+# Strategy (Evan 2026-04-24): Let Nano Banana COOK an editorial image themed
+# around the post's subject (ticker industry, daily report theme, etc.).
+# DO NOT pass the og-image as a multimodal reference — it carries deprecated
+# multi-agent debate visuals. Instead: brand guidelines flow via prompt only;
+# the brand LOGO is composited deterministically via PIL bottom-right so the
+# brand mark is pixel-perfect every time.
 
-# Module-level cache for the brand reference card bytes. We fetch once per
-# Cloud Run instance on first use — subsequent calls reuse. Set to None if the
-# fetch fails so generate_image degrades gracefully to text-only posts.
-_brand_ref_bytes: bytes | None = None
-_brand_ref_attempted: bool = False
+_logo_bytes: bytes | None = None
+_logo_attempted: bool = False
 
 
-def _load_brand_ref() -> bytes | None:
-    """Fetch gs://gammarips-x-media/brand_ref_card.png once. Cache bytes."""
-    global _brand_ref_bytes, _brand_ref_attempted
-    if _brand_ref_attempted:
-        return _brand_ref_bytes
-    _brand_ref_attempted = True
+def _load_logo() -> bytes | None:
+    """Fetch the brand logo (gs://gammarips-x-media/brand_logo.jpg) once. Cache."""
+    global _logo_bytes, _logo_attempted
+    if _logo_attempted:
+        return _logo_bytes
+    _logo_attempted = True
 
-    gcs_uri = os.getenv("BRAND_REF_GCS", BRAND_REF_GCS)
+    gcs_uri = os.getenv("LOGO_GCS", brand.LOGO_GCS)
     if not gcs_uri.startswith("gs://"):
-        logger.warning(f"BRAND_REF_GCS not a gs:// URI: {gcs_uri!r}")
+        logger.warning(f"LOGO_GCS not a gs:// URI: {gcs_uri!r}")
         return None
     bucket_name, _, blob_name = gcs_uri[len("gs://"):].partition("/")
     if not bucket_name or not blob_name:
-        logger.warning(f"BRAND_REF_GCS malformed: {gcs_uri!r}")
+        logger.warning(f"LOGO_GCS malformed: {gcs_uri!r}")
         return None
 
     try:
         from google.cloud import storage
         client = storage.Client(project=PROJECT_ID)
-        blob = client.bucket(bucket_name).blob(blob_name)
-        _brand_ref_bytes = blob.download_as_bytes()
-        logger.info(f"Loaded brand_ref_card: {len(_brand_ref_bytes)} bytes from {gcs_uri}")
+        _logo_bytes = client.bucket(bucket_name).blob(blob_name).download_as_bytes()
+        logger.info(f"Loaded brand logo: {len(_logo_bytes)} bytes from {gcs_uri}")
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Failed to load brand_ref_card from {gcs_uri}: {exc}")
-        _brand_ref_bytes = None
-    return _brand_ref_bytes
+        logger.warning(f"Failed to load brand logo from {gcs_uri}: {exc}")
+        _logo_bytes = None
+    return _logo_bytes
+
+
+def _composite_logo(
+    image_bytes: bytes,
+    logo_bytes: bytes,
+    size_pct: float = 0.12,
+    margin_px: int = 30,
+) -> bytes:
+    """Composite the brand logo onto bottom-right of the image.
+
+    Returns PNG bytes. Logo is resized to size_pct of base image width with
+    aspect preserved. The logo's own background (dark teal in our case) acts
+    as a subtle badge on the dark editorial backdrop — works visually without
+    needing a transparent PNG.
+    """
+    from io import BytesIO
+    from PIL import Image
+
+    base = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    logo = Image.open(BytesIO(logo_bytes)).convert("RGBA")
+
+    new_w = max(1, int(base.width * size_pct))
+    aspect = logo.height / logo.width
+    new_h = max(1, int(new_w * aspect))
+    logo = logo.resize((new_w, new_h), Image.LANCZOS)
+
+    x = base.width - new_w - margin_px
+    y = base.height - new_h - margin_px
+    base.paste(logo, (x, y), logo)
+
+    out = BytesIO()
+    base.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
 
 
 def generate_image(image_prompt: str, post_type: str) -> dict:
-    """Call Nano Banana (`gemini-3-pro-image-preview`) to render a branded post card.
-
-    Fetches the shared `brand_ref_card.png` from GCS and passes it as a Part
-    input so the model preserves the real brand aesthetic (the webapp's
-    og-image.png: dark bg, lime-green/gold palette, Space Grotesk typography)
-    and varies only per-post data. Prepends `brand.render_for_image_prompt()`
-    so the model sees exact hex codes + fonts + personality rules before the
-    per-post prompt.
+    """Generate an editorial image via Nano Banana, then composite the brand logo.
 
     Args:
-        image_prompt: Writer's composed per-post prompt (e.g. "apply ticker
-            AAPL bullish, strike $225 call ring, V/OI 5.4").
-        post_type: Used for logging + template-specific prompt shaping.
+        image_prompt: Writer's composed THEME-driven prompt (e.g. "Editorial
+            image evoking $NVDA's semiconductor industry — silicon, fabrication,
+            data centers. Dark palette."). NO text/logo guidance — that's
+            handled by the deterministic logo composite step.
+        post_type: Logged for observability + future post-type-specific tweaks.
 
     Returns:
-        dict: {"status": "success", "image_bytes": <bytes>, "image_url": None}
+        dict: {"status": "success", "image_bytes": <PNG bytes>, "image_url": None,
+               "logo_composited": bool}
               or {"status": "error", "message": "...", "image_bytes": None}.
-              Caller MUST handle error gracefully — image generation is never
-              blocking for publish.
+              Image generation is non-blocking for publish — caller falls back
+              to text-only on error.
     """
     try:
         from google import genai
-        from google.genai import types as genai_types
     except ImportError as exc:
         return {"status": "error", "message": f"google-genai import: {exc}", "image_bytes": None}
 
@@ -379,43 +410,54 @@ def generate_image(image_prompt: str, post_type: str) -> dict:
         brand_preamble = brand.render_for_image_prompt()
         full_prompt = (
             f"{brand_preamble}\n\n"
-            f"Per-post instruction (post_type={post_type}):\n{image_prompt}\n\n"
-            f"Render a 1200x675 card. Preserve the brand layout from the attached "
-            f"reference image; vary only the per-post data (ticker, direction, "
-            f"contract, flow stats). Use green (#a4e600) for bullish, red (#cc3333) "
-            f"for bearish, gold (#ffcc00) for highlights. Space Grotesk bold for "
-            f"ticker + headline. 'V5_3_TARGET_80' watermark bottom-right."
+            f"--- THEME-DRIVEN EDITORIAL IMAGE (post_type={post_type}) ---\n"
+            f"{image_prompt}\n\n"
+            f"Composition rules:\n"
+            f"- 1200x675 horizontal landscape\n"
+            f"- Editorial financial-news style. Bloomberg meets modern SaaS.\n"
+            f"- Dominant palette: dark navy/slate backgrounds (#1a1f2e, #242a3d) "
+            f"with brand-color accents (lime green #a4e600, gold #ffcc00, bear red #cc3333 if relevant).\n"
+            f"- ABSOLUTELY NO TEXT, words, numbers, tickers, logos, wordmarks, or "
+            f"watermarks in the image. The logo is composited separately. The "
+            f"tweet copy carries the data.\n"
+            f"- Avoid cliches: stock photo handshakes, generic city skylines, "
+            f"computer screens with code, 'to the moon' rocket imagery, lit-up "
+            f"trading terminals, generic 'business meeting' shots, hype graphics.\n"
+            f"- Aim for: editorial, disciplined, sector-evocative, single focal "
+            f"point with intentional negative space."
         )
 
-        # Pass the brand reference as a Part input so the model can edit it
-        # rather than generate a fresh card from text alone.
-        brand_ref = _load_brand_ref()
-        if brand_ref is not None:
-            contents = [
-                full_prompt,
-                genai_types.Part.from_bytes(data=brand_ref, mime_type="image/png"),
-            ]
-        else:
-            contents = full_prompt
+        response = client.models.generate_content(model=IMAGE_MODEL, contents=full_prompt)
 
-        response = client.models.generate_content(model=IMAGE_MODEL, contents=contents)
-
-        # Extract image bytes from the first inline_data part.
         for part in (response.candidates[0].content.parts if response.candidates else []):
             if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
+                raw_bytes = part.inline_data.data
+                logo = _load_logo()
+                if logo is not None:
+                    try:
+                        final_bytes = _composite_logo(raw_bytes, logo)
+                        return {
+                            "status": "success",
+                            "image_bytes": final_bytes,
+                            "image_url": None,
+                            "logo_composited": True,
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(f"Logo composite failed, returning raw: {exc}")
+                        return {
+                            "status": "success",
+                            "image_bytes": raw_bytes,
+                            "image_url": None,
+                            "logo_composited": False,
+                        }
                 return {
                     "status": "success",
-                    "image_bytes": part.inline_data.data,
+                    "image_bytes": raw_bytes,
                     "image_url": None,
-                    "used_brand_ref": brand_ref is not None,
+                    "logo_composited": False,
                 }
 
-        return {
-            "status": "error",
-            "message": "No inline_data in response",
-            "image_bytes": None,
-            "used_brand_ref": brand_ref is not None,
-        }
+        return {"status": "error", "message": "No inline_data in response", "image_bytes": None}
     except Exception as exc:  # noqa: BLE001
         logger.error(f"generate_image failed: {exc}")
         return {"status": "error", "message": str(exc), "image_bytes": None}

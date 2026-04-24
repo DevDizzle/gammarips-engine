@@ -15,6 +15,7 @@ dependencies = [
     "google-cloud-bigquery>=3.27",
     "google-cloud-storage>=2.18",
     "tweepy>=4.14.0",
+    "pillow>=10.0",
     "fastapi>=0.115.8,<1.0.0",
     "uvicorn~=0.34.0",
     "asyncpg>=0.30.0,<1.0.0",
