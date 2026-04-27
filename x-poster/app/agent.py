@@ -322,8 +322,15 @@ Return a JSON dict with EXACTLY these keys:
   "text": "<the rendered tweet template>",
   "image_prompt": "<2-4 sentences per the IMAGE PROMPT GUIDANCE above>",
   "qrt_tweet_id": <pass through brief.qrt_tweet_id, or null>,
-  "in_reply_to_tweet_id": null
+  "in_reply_to_tweet_id": null,
+  "ticker": "<TICKER without $ — for signal/win/loss only; null otherwise>",
+  "direction": "<BULLISH or BEARISH — for signal/win/loss only; null otherwise>"
 }
+
+The `ticker` / `direction` fields drive the deterministic PIL overlay on
+signal/win/loss images (large $TICKER + colored direction badge for feed-scroll
+readability). If post_type is signal and brief.pick is null (standby fallback)
+OR post_type is teaser/report/standby/scorecard, set both to null.
 
 Char budgets (hard): signal=400, standby=280, teaser=300, report=280, win=200, loss=200, scorecard=400.""",
         output_key="post_draft",
@@ -398,6 +405,28 @@ class Publisher(BaseAgent):
         review = review_raw if isinstance(review_raw, dict) else {}
         draft = _coerce_draft(draft_raw)
 
+        # No-content guard for callback: paper-trader writes exits at 16:30 ET,
+        # callback fires at 16:45 ET. If the ledger has zero closes for today,
+        # skip publishing entirely — never post an empty "called it" recap.
+        # Detected via writer setting ticker=null (writer routes win/loss based
+        # on closing_trades being non-empty).
+        if post_type == "callback":
+            draft_for_check = _coerce_draft(draft_raw)
+            if not (draft_for_check.get("ticker") or "").strip():
+                logger.info("callback fired but no closes today — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error="no_closes_today",
+                )
+                noop = {"status": "skipped", "reason": "no_closes_today"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
         # Loop exhausted without APPROVE → log rejection
         if review.get("status") != "APPROVE":
             logger.warning("Loop ended without APPROVE — logging rejected.")
@@ -425,9 +454,15 @@ class Publisher(BaseAgent):
         reply_id = draft.get("in_reply_to_tweet_id") or None
 
         # Image gen (non-blocking — ship text-only on error)
+        # Ticker/direction drive a deterministic PIL overlay on signal/win/loss
+        # images. Writer populates them; null on standby/teaser/report/scorecard.
         image_bytes = None
         if image_prompt:
-            img_result = tools.generate_image(image_prompt, post_type)
+            ticker = draft.get("ticker") or None
+            direction = draft.get("direction") or None
+            img_result = tools.generate_image(
+                image_prompt, post_type, ticker=ticker, direction=direction,
+            )
             if img_result.get("status") == "success":
                 image_bytes = img_result.get("image_bytes")
             else:

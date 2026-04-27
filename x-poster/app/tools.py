@@ -382,8 +382,115 @@ def _composite_logo(
     return out.getvalue()
 
 
-def generate_image(image_prompt: str, post_type: str) -> dict:
+# Path inside the deployed image (Dockerfile copies ./assets to /code/assets).
+# Resolved relative to this file so local `make playground` and Cloud Run both
+# find the bundled font.
+_FONT_PATH = os.path.join(os.path.dirname(__file__), "..", "assets",
+                          "SpaceGrotesk-VariableFont_wght.ttf")
+
+# Fallback if the bundled TTF is missing — DejaVu Sans Bold is in slim images
+# only sometimes, so the function is defensive: it returns the input unchanged
+# rather than crashing the publish pipeline.
+_DEJAVU_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def _composite_ticker_overlay(
+    image_bytes: bytes,
+    ticker: str,
+    direction: str,
+    ticker_pt: int = 180,
+    direction_pt: int = 60,
+    margin_px: int = 60,
+) -> bytes:
+    """Composite a large `$TICKER` + direction badge on the upper-left of the image.
+
+    For signal/win/loss posts only — gives feed-scroll readability without
+    relying on the AI image to render text. Drop-shadow ensures legibility on
+    any backdrop. Returns PNG bytes; never raises (returns input on failure).
+
+    Color contract: BULLISH → brand lime-green #a4e600, BEARISH → bear red
+    #cc3333. Direction defaults to neutral off-white if anything else.
+    """
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        base = Image.open(BytesIO(image_bytes)).convert("RGBA")
+
+        font_path = _FONT_PATH if os.path.exists(_FONT_PATH) else _DEJAVU_FALLBACK
+        if not os.path.exists(font_path):
+            logger.warning("ticker overlay: no font available, returning input")
+            return image_bytes
+
+        ticker_font = ImageFont.truetype(font_path, size=ticker_pt)
+        direction_font = ImageFont.truetype(font_path, size=direction_pt)
+        # Set Bold weight on the variable font when supported.
+        for f in (ticker_font, direction_font):
+            try:
+                f.set_variation_by_name("Bold")
+            except Exception:  # noqa: BLE001
+                pass
+
+        dir_upper = (direction or "").upper().strip()
+        if dir_upper.startswith("BULL"):
+            accent = (164, 230, 0, 255)   # #a4e600
+        elif dir_upper.startswith("BEAR"):
+            accent = (204, 51, 51, 255)   # #cc3333
+        else:
+            accent = (232, 236, 247, 255)  # #e8ecf7 (foreground)
+
+        ticker_text = f"${ticker.upper().lstrip('$')}"
+        direction_text = dir_upper
+
+        # Draw onto a transparent overlay so the shadow blends correctly.
+        overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        # Drop shadow (offset 4px, semi-opaque black).
+        shadow_offset = 4
+        shadow_color = (0, 0, 0, 200)
+        draw.text(
+            (margin_px + shadow_offset, margin_px + shadow_offset),
+            ticker_text, font=ticker_font, fill=shadow_color,
+        )
+        draw.text(
+            (margin_px, margin_px),
+            ticker_text, font=ticker_font, fill=(255, 255, 255, 255),
+        )
+
+        # Direction badge sits below the ticker, accent color, with shadow.
+        # Use textbbox to space it consistently regardless of font metrics.
+        ticker_bbox = draw.textbbox((margin_px, margin_px), ticker_text, font=ticker_font)
+        dir_y = ticker_bbox[3] + 8  # 8px gap under ticker baseline-box
+        draw.text(
+            (margin_px + shadow_offset, dir_y + shadow_offset),
+            direction_text, font=direction_font, fill=shadow_color,
+        )
+        draw.text(
+            (margin_px, dir_y),
+            direction_text, font=direction_font, fill=accent,
+        )
+
+        composed = Image.alpha_composite(base, overlay)
+        out = BytesIO()
+        composed.convert("RGB").save(out, format="PNG", optimize=True)
+        return out.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"ticker overlay failed, returning unmodified image: {exc}")
+        return image_bytes
+
+
+def generate_image(
+    image_prompt: str,
+    post_type: str,
+    ticker: str | None = None,
+    direction: str | None = None,
+) -> dict:
     """Generate an editorial image via Nano Banana, then composite the brand logo.
+
+    For post_type ∈ {signal, win, loss}, additionally composites a large
+    `$TICKER` + direction PIL overlay on the upper-left for feed-scroll
+    readability. Other post_types stay editorial-clean.
 
     Args:
         image_prompt: Writer's composed THEME-driven prompt (e.g. "Editorial
@@ -391,10 +498,13 @@ def generate_image(image_prompt: str, post_type: str) -> dict:
             data centers. Dark palette."). NO text/logo guidance — that's
             handled by the deterministic logo composite step.
         post_type: Logged for observability + future post-type-specific tweaks.
+        ticker: Cashtag (without `$`) for the optional ticker overlay. Required
+            when post_type ∈ {signal, win, loss}; ignored otherwise.
+        direction: BULLISH or BEARISH for the direction badge color + label.
 
     Returns:
         dict: {"status": "success", "image_bytes": <PNG bytes>, "image_url": None,
-               "logo_composited": bool}
+               "logo_composited": bool, "ticker_overlay": bool}
               or {"status": "error", "message": "...", "image_bytes": None}.
               Image generation is non-blocking for publish — caller falls back
               to text-only on error.
@@ -432,29 +542,36 @@ def generate_image(image_prompt: str, post_type: str) -> dict:
         for part in (response.candidates[0].content.parts if response.candidates else []):
             if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
                 raw_bytes = part.inline_data.data
+
+                # Step 1: composite brand logo (every post type).
                 logo = _load_logo()
+                logo_composited = False
                 if logo is not None:
                     try:
-                        final_bytes = _composite_logo(raw_bytes, logo)
-                        return {
-                            "status": "success",
-                            "image_bytes": final_bytes,
-                            "image_url": None,
-                            "logo_composited": True,
-                        }
+                        raw_bytes = _composite_logo(raw_bytes, logo)
+                        logo_composited = True
                     except Exception as exc:  # noqa: BLE001
-                        logger.warning(f"Logo composite failed, returning raw: {exc}")
-                        return {
-                            "status": "success",
-                            "image_bytes": raw_bytes,
-                            "image_url": None,
-                            "logo_composited": False,
-                        }
+                        logger.warning(f"Logo composite failed: {exc}")
+
+                # Step 2: composite ticker overlay (signal/win/loss only).
+                # post_type "callback" also triggers — the scheduler payload is
+                # always "callback" and the writer routes internally to win/loss.
+                overlay_applied = False
+                if post_type in ("signal", "win", "loss", "callback") and ticker:
+                    try:
+                        raw_bytes = _composite_ticker_overlay(
+                            raw_bytes, ticker=ticker, direction=direction or "",
+                        )
+                        overlay_applied = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(f"Ticker overlay failed: {exc}")
+
                 return {
                     "status": "success",
                     "image_bytes": raw_bytes,
                     "image_url": None,
-                    "logo_composited": False,
+                    "logo_composited": logo_composited,
+                    "ticker_overlay": overlay_applied,
                 }
 
         return {"status": "error", "message": "No inline_data in response", "image_bytes": None}

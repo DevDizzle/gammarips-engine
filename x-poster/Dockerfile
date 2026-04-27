@@ -9,6 +9,9 @@ COPY ./pyproject.toml ./README.md ./uv.lock* ./
 
 COPY ./app ./app
 
+# Bundled assets (logo, Space Grotesk Bold TTF for ticker overlay).
+COPY ./assets ./assets
+
 # Resolve + install Python deps (no --frozen; lockfile regenerated at build)
 RUN uv sync
 
