@@ -87,6 +87,57 @@ One row per (ticker, as_of_date). Populated daily by `forward-paper-trader/main.
 
 Idempotent per `as_of_date`: the endpoint issues `DELETE FROM polygon_iv_history WHERE as_of_date = CURRENT_DATE()` before appending, so re-triggering on the same day does not double-write.
 
+## Firestore — `x_posts/{scan_date}_{post_type}` (added 2026-04-24)
+
+Audit log + idempotency store for `x-poster` (Cloud Run service). One doc per published or rejected X post. Doc id pattern: `2026-04-24_signal`, `2026-04-24_standby`, `2026-04-24_teaser`, `2026-04-24_callback`, `2026-04-24_scorecard`. Scorecard thread tweets get suffixed: `..._scorecard_0`, `_1`, `_2`.
+
+### Fields
+- `scan_date` (str, YYYY-MM-DD ET)
+- `post_type` (str, one of `signal|standby|teaser|report|callback|scorecard`)
+- `text` (str, the canonicalized tweet body)
+- `tweet_id` (str|None, X API tweet id; `dry_run_*` in DRY_RUN mode)
+- `image_url` (str|None, GCS URL of generated image; currently None — bytes pass directly to Tweepy media_upload)
+- `iterations` (int, how many LoopAgent iterations the writer needed)
+- `error` (str|None, populated on rejected/failed posts)
+- `dry_run` (bool, true if DRY_RUN env was set)
+- `posted_at` (timestamp, server time)
+- `thread_tweet_index` (int|None, set only for scorecard thread members)
+
+Used by win/loss callback posts to look up the original signal post's `tweet_id` for quote-retweet via `firestore_helpers.fetch_original_tweet_id()`.
+
+## Firestore — `blog_posts/{slug}` (added 2026-04-24, blog-generator)
+
+Output collection for `blog-generator` ADK service. Webapp `/blog/[slug]` route renders directly from these docs. Slug is the URL-safe hyphenated title (e.g. `why-uoa-is-mostly-noise`).
+
+### Fields
+- `slug` (str)
+- `title` (str)
+- `description` (str, meta description)
+- `markdown` (str, full post body)
+- `keywords` (list[str])
+- `cta` (str, CTA target — `webapp_visit` | `pro_trial` | `starter_trial`)
+- `published_at` (timestamp)
+- `reviewer_score` (float, holistic LLM review score)
+- `iterations` (int, LoopAgent iterations used)
+- `status` (str, `published` | `rejected` | `draft`)
+- `reading_time_min` (int)
+
+## Firestore — `blog_schedule/current` + `blog_config/voice_rules` (added 2026-04-24, blog-generator)
+
+`blog_schedule/current` — single doc holding the 13-row 90-day schedule. Each row: `{slug, week_num, title_candidate, persona, keywords, cta, type, cross_channel, status}`. `status` flips `pending` → `publishing` → `published` (atomic via Firestore transaction).
+
+`blog_config/voice_rules` — rendered output of `gammarips_content.voice_rules.render_for_prompt()`. Seeded once via `blog-generator/scripts/seed_schedule.py`.
+
+## GCS — `gs://gammarips-x-media/` (added 2026-04-24)
+
+| Path | Purpose |
+|---|---|
+| `brand_logo.jpg` | Brand mark — PIL-composited at 12% width on bottom-right of every generated image. 400×400 JPG. **Source of truth for the brand mark.** |
+| `brand_ref_card.png` | Deprecated 2026-04-24. Was the webapp og-image; carried `/arena` multi-agent debate visuals which we gated noindex 2026-04-22. No longer used by image-gen pipeline. |
+| `preview/` | First-round AI-generated brand cards (REJECTED by Evan as off-brand). Archive only. |
+| `preview_v2/` | Second-round themed-editorial previews (signal_app, signal_nvda, teaser, standby + manual_nvda_test). Used by Evan to eyeball image-gen output before flipping DRY_RUN=false. |
+| `_archive/` | Misc snapshots. |
+
 ## Current policy contract (V5.3 Target 80 — no trader-side gates)
 
 All signals that pass the enrichment filter (`overnight_score >= 1 AND recommended_spread_pct <= 0.10 AND directional UOA > $500K`) are simulated by the paper trader. Human alerting is gated separately in `signal-notifier` by V5.3 quality filters (`volume_oi_ratio > 2`, `moneyness_pct BETWEEN 0.05 AND 0.15`, `VIX <= VIX3M`) with `LIMIT 1`. Premium flags are computed and stored as features for post-hoc discovery. See `docs/DECISIONS/2026-04-17-v5-3-target-80.md`.

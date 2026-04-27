@@ -78,8 +78,11 @@ Three project-specific subagents in `.claude/agents/`:
 | `agent-arena/` | Multi-model debate / signal ranking (instrumented) |
 | `overnight-report-generator/` | Gemini editorial synthesis (instrumented) |
 | `gammarips-eval/` | LLM eval service — monitoring-only, non-gating. See `docs/EVAL-SYSTEM.md`. |
+| `x-poster/` | **ADK multi-agent X publisher for @gammarips** (since 2026-04-24). Planner→Writer→Reviewer→EscalationChecker LoopAgent + Publisher. 7 post types behind `POST /post`. Nano Banana editorial image gen + PIL logo composite. Cloud Run, DRY_RUN=true default. See `x-poster/DESIGN_SPEC.md`. |
+| `blog-generator/` | **ADK multi-agent blog writer** (since 2026-04-24). Same shape as x-poster, writes Firestore `blog_posts/{slug}` for webapp `/blog` rendering. Weekly Mon 05:00 ET cron. Not yet deployed; blocked on dangling-state-ref fix. See `blog-generator/DESIGN_SPEC.md`. |
 | `libs/trace_logger/` | Shared BQ trace logger, vendored into each service by `deploy.sh` |
-| `win-tracker/` | Post-trade outcome tracking |
+| `libs/gammarips_content/` | **Shared content lib** (since 2026-04-24). brand constants (real hex codes + fonts + voice markers), compliance rubric + canonicalizer, tweepy + firestore + MCP helpers. Vendored into x-poster + blog-generator at deploy time. |
+| `win-tracker/` | Post-trade outcome tracking. **X posting moved to x-poster 2026-04-24** — win-tracker now writes signal_performance only. |
 | `src/`, `overnight-scanner/` | Scanner logic |
 | `scripts/research/` | Frozen research scripts (do not modify) |
 | `scripts/ledger_and_tracking/` | Ledger maintenance and EDA |
