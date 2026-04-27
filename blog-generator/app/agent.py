@@ -12,9 +12,12 @@ Pipeline:
       └── Publisher      — Firestore write (blog_posts/{slug}) + schedule row update
 
 State keys across the pipeline:
-    slug, schedule_slot, voice_rules, prior_posts, live_context,
-    post_outline, post_markdown, rubric_check, review, publish_result,
-    iterations, dry_run
+    slug, voice_rules, post_outline, post_markdown, rubric_check, review,
+    publish_result, iterations, dry_run
+
+  `post_outline` (planner output) carries nested `schedule_slot` and
+  `live_context` dicts — writer + reviewer read both from there rather
+  than from separate top-level state keys.
 """
 from __future__ import annotations
 
@@ -95,16 +98,19 @@ Slug target: {slug?}
 Responsibilities:
 1. Call `fetch_next_schedule_slot` (no args) if no specific slug was provided.
    If a slug was provided in session state, call `fetch_schedule_slot_by_slug(slug)`.
-   The returned dict goes into `schedule_slot` via your output_key.
+   Hold the returned dict — you'll embed it in your `post_outline` output below.
 2. Call `fetch_prior_posts(limit=5)` to get titles + slugs + keywords of
    recent published posts for internal-link targets + style continuity.
-3. If schedule_slot.type is one of:
+3. If the schedule_slot's `type` is one of:
      weekly_engine_recap, performance_post, post_mortem, video_demo
-   then call `fetch_live_context(post_type=schedule_slot.type, scan_date=<today ET>)`.
-   If live_context.status == "blocked" (closed_trade_count < 30), write an
-   `outline` that EXPLICITLY removes any win-rate/P&L claim and labels the post
+   then call `fetch_live_context(post_type=<that type>, scan_date=<today ET>)`.
+   If the returned `live_context.status == "blocked"` (closed_trade_count < 30),
+   the outline must EXPLICITLY remove any win-rate/P&L claim and label the post
    as structural-only. Do NOT fabricate numbers.
-4. Produce the final `post_outline` dict:
+4. Produce the final `post_outline` dict. CRITICAL: embed the raw
+   `schedule_slot` and `live_context` tool results as nested keys —
+   downstream agents (writer, reviewer) read them from here, not from
+   separate state keys.
      {
        "h1": "...",
        "intro_hook": "one-sentence hook (facts, not hype)",
@@ -114,7 +120,9 @@ Responsibilities:
        "closing_cta": "webapp_visit" | "pro_trial" | "starter_trial",
        "target_word_count": 1500,
        "primary_keyword": "...",
-       "secondary_keywords": ["...", "..."]
+       "secondary_keywords": ["...", "..."],
+       "schedule_slot": <verbatim dict from fetch_next_schedule_slot or fetch_schedule_slot_by_slug>,
+       "live_context": <verbatim dict from fetch_live_context, or null if not called>
      }
 
 Constraints:
@@ -143,8 +151,11 @@ def create_writer() -> Agent:
         instruction="""You write the full blog post markdown for @gammarips.
 
 Outline: {post_outline}
-Schedule slot: {schedule_slot?}
-Live context (may be empty): {live_context?}
+
+The outline includes nested `schedule_slot` (the slot the planner picked
+from blog_schedule) and `live_context` (live engine numbers, may be null
+or status='blocked' when closed_trade_count < 30). Read both from
+`post_outline.schedule_slot` and `post_outline.live_context`.
 
 Voice rules:
 {voice_rules}
@@ -170,7 +181,7 @@ Requirements:
 - End with the EXACT literal disclaimer block (inside a blockquote):
     > Paper-trading performance, educational content only. Not investment
     > advice. Past performance is not a guarantee of future results.
-- End with a tier-matched CTA paragraph per schedule_slot.cta.
+- End with a tier-matched CTA paragraph per `post_outline.schedule_slot.cta`.
 - Specific dollar amounts and specific times. "$500 per trade", "10:00 AM ET",
   "3 trading days", "-60% / +80%" — not "a lot" or "about $500".
 - Publisher framing only. NO "buy this", "act now", "for you", second-person
@@ -187,9 +198,9 @@ Forbidden (retired aliases — hard-fail if present):
 - "premium signal"
 - "interactive dashboard"
 
-If live_context.status == "blocked", DO NOT include any win-rate, closed
-trades, or P&L numbers. Pivot to structural claims only (e.g. "max per-trade
-loss is $300 on a $500 position").
+If `post_outline.live_context.status == "blocked"`, DO NOT include any
+win-rate, closed trades, or P&L numbers. Pivot to structural claims only
+(e.g. "max per-trade loss is $300 on a $500 position").
 
 Revision behavior: if `review.notes` is present, treat those notes as hard
 constraints and regenerate the full markdown, fixing each specific item.
@@ -210,7 +221,8 @@ def create_reviewer() -> Agent:
 
 Deterministic rubric check (run before you): {rubric_check}
 Post outline: {post_outline}
-Schedule slot: {schedule_slot?}
+(`post_outline.schedule_slot` carries the slot/cta/type, and
+`post_outline.live_context` carries any live engine numbers or block status.)
 
 The rubric_check dict has: passed (bool), word_count, h2_count,
 disclaimer_present, internal_link_count, failures[], warnings[].
