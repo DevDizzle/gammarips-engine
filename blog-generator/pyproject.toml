@@ -16,6 +16,10 @@ dependencies = [
     "fastapi>=0.115.8,<1.0.0",
     "uvicorn~=0.34.0",
     "asyncpg>=0.30.0,<1.0.0",
+    "google-cloud-storage>=2.18,<3.0.0",
+    "requests>=2.31,<3.0.0",
+    "google-analytics-data>=0.18.0,<1.0.0",
+    "google-api-python-client>=2.140.0,<3.0.0",
 ]
 requires-python = ">=3.10,<3.14"
 
