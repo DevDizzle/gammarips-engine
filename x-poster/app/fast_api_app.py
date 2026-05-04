@@ -61,7 +61,7 @@ app.description = (
 # --- Scheduler-triggered pipeline endpoint --------------------------------
 class PostRequest(BaseModel):
     post_type: Literal[
-        "signal", "standby", "report", "teaser", "callback", "scorecard"
+        "signal", "watchlist", "standby", "report", "teaser", "callback", "scorecard"
     ] = Field(description="Which post-type handler to invoke.")
     scan_date: Optional[str] = Field(
         default=None,
