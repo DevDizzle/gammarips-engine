@@ -378,10 +378,12 @@ class Publisher(BaseAgent):
         post_type = state.get("post_type", "")
         review_raw = state.get("review", {})
         draft_raw = state.get("post_draft", {})
-        # Writer has no output_schema; its output may come through as a raw string.
-        # Parse to dict defensively so Publisher never crashes on shape.
+        # Writer/planner have no output_schema; their outputs may arrive as raw
+        # JSON-encoded strings (markdown-fenced or bare). Parse to dict defensively
+        # so Publisher's no-content guards never crash on shape.
         review = review_raw if isinstance(review_raw, dict) else {}
         draft = _coerce_draft(draft_raw)
+        brief = _coerce_draft(state.get("post_brief", {}))
 
         # No-content guard for callback: paper-trader writes exits at 16:30 ET,
         # callback fires at 16:45 ET. If the ledger has zero closes for today,
@@ -410,8 +412,7 @@ class Publisher(BaseAgent):
         # empty. Without this, the writer drifts to a 0/1-row teaser that
         # duplicates the SIGNAL post — exactly the MDB 2026-04-29 incident.
         if post_type == "teaser":
-            brief = state.get("post_brief", {}) or {}
-            runner_ups = brief.get("runner_ups") if isinstance(brief, dict) else None
+            runner_ups = brief.get("runner_ups")
             if not runner_ups:
                 logger.info("teaser fired but no runner-ups today — skipping publish.")
                 tools.log_post(
@@ -432,8 +433,7 @@ class Publisher(BaseAgent):
         # First real-fire window is post-watchlist-launch (5/8 onward) — until
         # then the public ledger restricts to ~0 rows.
         if post_type == "scorecard":
-            brief = state.get("post_brief", {}) or {}
-            wl = brief.get("weekly_ledger") if isinstance(brief, dict) else None
+            wl = brief.get("weekly_ledger")
             trades = (wl or {}).get("trades") if isinstance(wl, dict) else None
             if not trades:
                 logger.info("scorecard fired but no posted-ticker closes this week — skipping publish.")
@@ -454,8 +454,7 @@ class Publisher(BaseAgent):
         # only emitted the paid pick (or nothing), the discovery feed has
         # nothing to surface — skip rather than render an empty card.
         if post_type == "watchlist":
-            brief = state.get("post_brief", {}) or {}
-            wl = brief.get("watchlist") if isinstance(brief, dict) else None
+            wl = brief.get("watchlist")
             if not wl:
                 logger.info("watchlist fired but no setups today — skipping publish.")
                 tools.log_post(
@@ -477,11 +476,7 @@ class Publisher(BaseAgent):
         # the STANDBY template and we get a duplicate Standby on the feed
         # (Evan 2026-04-28 incident). Detect via empty post_brief.report_summary.
         if post_type == "report":
-            brief = state.get("post_brief", {}) or {}
-            if isinstance(brief, dict):
-                summary = brief.get("report_summary")
-            else:
-                summary = None
+            summary = brief.get("report_summary")
             has_summary = bool(summary) and bool(
                 (summary.get("headline") or "").strip()
                 if isinstance(summary, dict) else False
