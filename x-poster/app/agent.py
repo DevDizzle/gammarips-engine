@@ -90,6 +90,19 @@ def _coerce_draft(raw) -> dict:
     return {"text": s}
 
 
+def _unwrap_brief(brief: dict) -> dict:
+    """The planner LLM sometimes emits {"post_brief": {...}} instead of the
+    bare brief because the prompt's "Output post_brief as a JSON dict" header
+    reads like a key name. Unwrap if the only top-level key is `post_brief`
+    and its value is itself a dict.
+    """
+    if isinstance(brief, dict) and len(brief) == 1 and isinstance(
+        brief.get("post_brief"), dict
+    ):
+        return brief["post_brief"]
+    return brief
+
+
 # --- Callbacks -------------------------------------------------------------
 async def seed_voice_rules(callback_context: CallbackContext) -> None:
     """Load brand voice rules into state before the first agent runs."""
@@ -147,7 +160,13 @@ Scan date: {scan_date}   ← this is today's ET date, also the header date for t
 - callback (wins/losses): FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=5) to learn which tickers we've publicly named (callbacks should ONLY discuss tickers the X audience has seen). THEN call fetch_closing_trades(scan_date, restrict_tickers=<comma-joined ticker list>). For each closing trade in the result, call find_originating_post_for_ticker(ticker) to get the QRT id for win posts.
 - scorecard: FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=10) — the public scorecard recaps ONLY trades on tickers the audience has publicly seen us name. THEN call fetch_weekly_ledger(week_ending=scan_date, restrict_tickers=<comma-joined ticker list>). Pass result.data through verbatim — items already include outcome_emoji, direction_short, pct_signed.
 
-=== STEP 2: Output post_brief as a JSON dict ===
+=== STEP 2: Output the brief as a bare JSON dict ===
+
+Your final response must be a JSON dict whose top-level keys ARE the brief
+fields below. DO NOT wrap them inside a `post_brief` key — `post_brief` is the
+state slot we store your output into, not a key in your output. Example shape:
+`{"pick": {...}, "watchlist": [...], "runner_ups": [], ...}` — NOT
+`{"post_brief": {"pick": {...}, ...}}`.
 
 Anti-hallucination rules (NON-NEGOTIABLE):
 - If a tool returned status="empty", DO NOT invent fictional data. Set the relevant field to null.
@@ -383,7 +402,7 @@ class Publisher(BaseAgent):
         # so Publisher's no-content guards never crash on shape.
         review = review_raw if isinstance(review_raw, dict) else {}
         draft = _coerce_draft(draft_raw)
-        brief = _coerce_draft(state.get("post_brief", {}))
+        brief = _unwrap_brief(_coerce_draft(state.get("post_brief", {})))
 
         # No-content guard for callback: paper-trader writes exits at 16:30 ET,
         # callback fires at 16:45 ET. If the ledger has zero closes for today,
