@@ -141,10 +141,11 @@ Scan date: {scan_date}   ← this is today's ET date, also the header date for t
 === STEP 1: Call the right tools for this post_type ===
 - signal: fetch_todays_pick(scan_date)
 - standby: fetch_todays_pick(scan_date)  — expected to return status=empty; that's normal
-- teaser: fetch_runner_ups(scan_date, n=3)
+- watchlist: FIRST fetch_todays_pick(scan_date) to learn the paid daily-pick ticker (if any). THEN call fetch_watchlist(scan_date, n=3, exclude_ticker=<pick.ticker or "">). Watchlist surfaces popular flow magnets ranked by dollar volume — NOT the paid V5.3 pick. If fetch_watchlist returns empty, leave brief.watchlist=[] — the publisher will skip.
+- teaser: FIRST fetch_todays_pick(scan_date) to learn today's daily-pick ticker (if any), THEN call fetch_runner_ups(scan_date, n=3, exclude_ticker=<pick.ticker or "">). The teaser must show OTHER setups on the bench, not duplicate the SIGNAL post. If runner_ups returns an empty list, leave brief.runner_ups=[] — the publisher will skip.
 - report: fetch_todays_report_summary(scan_date)
-- callback (wins/losses): fetch_closing_trades(scan_date), then for each trade entry_date call fetch_original_tweet_id(entry_date)
-- scorecard: fetch_weekly_ledger(scan_date)
+- callback (wins/losses): FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=5) to learn which tickers we've publicly named (callbacks should ONLY discuss tickers the X audience has seen). THEN call fetch_closing_trades(scan_date, restrict_tickers=<comma-joined ticker list>). For each closing trade in the result, call find_originating_post_for_ticker(ticker) to get the QRT id for win posts.
+- scorecard: FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=10) — the public scorecard recaps ONLY trades on tickers the audience has publicly seen us name. THEN call fetch_weekly_ledger(week_ending=scan_date, restrict_tickers=<comma-joined ticker list>). Pass result.data through verbatim — items already include outcome_emoji, direction_short, pct_signed.
 
 === STEP 2: Output post_brief as a JSON dict ===
 
@@ -158,8 +159,9 @@ Required keys in post_brief:
 - pick: null if no daily pick today. Otherwise a dict with: ticker, direction (BULLISH|BEARISH), score, contract_type (CALL|PUT, derived from direction), strike, expiration (YYYY-MM-DD), mid, moneyness_pct, vol_oi, dte.
 - runner_ups: list of {ticker, direction, score, vol_oi} — only populated for teaser post_type; else [].
 - report_summary: {title, headline, top_bullets} — only for report post_type; else null.
-- closing_trades: {wins: [...], losses: [...]} — only for callback; else null.
-- weekly_ledger: {trades, wins_count, losses_count, net_return_pct} — only for scorecard; else null.
+- watchlist: list of {ticker, direction, score, dollar_vol_m, vol_oi_ratio} — only populated for watchlist post_type; else [].
+- closing_trades: {wins: [...], losses: [...], total: N} — only for callback; else null. Each item already includes ticker, direction, entry_date, entry_price, exit_price, pct_signed (e.g. "+80%"), exit_reason_display (e.g. "target hit"). Pass them through to the writer verbatim — DO NOT re-derive percentages.
+- weekly_ledger: {trades: [...], wins, losses, net_return_pct} — only for scorecard; else null. Each trade item already includes outcome_emoji ("✅"/"❌"), direction_short ("BULL"/"BEAR"), pct_signed ("+80%"/"-60%"). Pass them through verbatim — DO NOT re-derive.
 - qrt_tweet_id: tweet_id of the original call being QRT'd (callback post_type only); else null.
 - image_direction: 1-2 sentences describing what the post card image should show (for the writer to refine).
 
@@ -169,7 +171,10 @@ DO NOT draft the tweet text. The writer handles formatting.""",
             tools.fetch_todays_report_summary,
             tools.fetch_closing_trades,
             tools.fetch_runner_ups,
+            tools.fetch_watchlist,
+            tools.fetch_recently_posted_tickers,
             tools.fetch_original_tweet_id,
+            tools.find_originating_post_for_ticker,
             tools.fetch_weekly_ledger,
         ],
         output_key="post_brief",
@@ -196,14 +201,15 @@ Prior reviewer notes: {review?}
 1. Pick the template that matches {post_type} and fill it in EXACTLY. Preserve emoji, punctuation, line breaks.
 2. Use {scan_date} in the header. NEVER substitute any other date.
 3. NEVER include a ticker that is not in the brief. If brief.pick is null for post_type=signal, switch to the STANDBY template — and the STANDBY template has NO ticker anywhere. Do NOT append "($SPY)" or "$SPY flow" or any index ticker as filler. Empty is empty.
-4. Always end with the disclaimer line exactly as shown (`⚠️ Paper-trade. Not financial advice.` for signal/standby/teaser/report, `⚠️ Paper-trade. Not advice.` for win/loss/scorecard). Exact characters, no paraphrasing.
-5. Never include URLs. Never include hashtags. Never use "buy", "sell", "act now", "for you".
+4. Disclaimer rule (Evan 2026-04-28): ONLY win / loss / callback / scorecard end with `⚠️ Paper-trade. Not advice.` (exact characters, no paraphrasing). signal / standby / teaser / report ship WITHOUT any disclaimer line — the canonicalizer strips disclaimer-ish trailers for those types.
+5. Never include hashtags. Never use "buy", "sell", "act now", "for you". The ONLY URL allowed in any tweet body is the canonical report click-through `https://gammarips.com/reports/<scan_date>` — and only on REPORT post_type per the template below. No other URLs anywhere.
 6. mid_total_cost = round(mid * 100). Format with comma thousands: `$2,693`.
 7. contract_emoji: 📗 for CALL (BULLISH), 📕 for PUT (BEARISH).
 8. expiration_display: convert YYYY-MM-DD to "Mon DD" (e.g., "2026-05-15" → "May 15").
 9. Slots in the templates below are written as <slot_name>. Replace each <slot_name> with the corresponding value from the brief. The literal tokens {post_type}, {scan_date}, {post_brief}, {voice_rules} at the top of this prompt are already resolved — do NOT repeat them as braces in the output; use the values directly.
 10. FORBIDDEN additions regardless of instinct: do NOT prepend/append generic tickers ($SPY, $QQQ, $IWM, $DIA) to soften an empty state. Do NOT add commentary like "Markets held flat" or "Flow was muted" unless that sentence comes verbatim from a tool result. If you would normally "fill in" a quiet day with context, STOP and just ship the STANDBY template verbatim.
 11. If {post_type} is explicitly "standby", ALWAYS use the STANDBY template — ignore any pick data in brief.pick even if it's non-null. Standby is a caller assertion.
+11b. If {post_type} is explicitly "watchlist", ALWAYS use the WATCHLIST template. brief.pick is fetched ONLY so the planner could exclude the paid daily pick from the watchlist; do NOT render brief.pick on the watchlist post — that would re-leak the paid alpha. Render only brief.watchlist[].
 12. For TEASER runner-ups: if a runner-up's vol_oi is null / None / missing, OMIT the `V/OI <x>` segment for that row entirely. Render that row as `$<ticker> <emoji> <direction> — Score <score>` instead (drop the V/OI column, keep the Score column). Never print the literal string `V/OI None`.
 13. Round all V/OI values to 2 decimal places: `V/OI: 7.33`, not `V/OI: 7.3333`.
 
@@ -217,13 +223,6 @@ $<ticker> <direction> (Score: <score>)
 💰 Mid: $<mid> (~$<mid_total_cost>/contract) | <moneyness_pct>% OTM
 📊 V/OI: <vol_oi> | DTE: <dte> | V5_3_TARGET_80
 
-Entry Routine:
-• 10:00 AM ET — Buy 1 contract at market
-• Stop: -60% | Target: +80% (GTC)
-• Hold max 3 days → close 3:50 PM day 3
-
-⚠️ Paper-trade. Not financial advice.
-
 --- STANDBY (when brief.pick is null for a signal post_type, OR post_type=standby) ---
 🛑 GammaRips Standby — <scan_date>
 
@@ -231,7 +230,17 @@ No V5.3 signal cleared the gate stack overnight.
 Scanner saw flow. Nothing met our thresholds.
 Zero picks is a pick.
 
-⚠️ Paper-trade. Not financial advice.
+--- WATCHLIST (3 high-dollar-volume setups; NO contract details, NO entry/exit. Discovery-only.) ---
+Render brief.watchlist[0..2]. emoji: 📗 BULL → CALL, 📕 BEAR → PUT.
+direction_label: BULL or BEAR (5 chars). Round dollar_vol_m to 1 decimal: "$167M".
+
+📡 Today's flow magnets — <scan_date>
+
+$<t1_ticker> <t1_emoji> <t1_direction_label> — Score <t1_score> | $<t1_dollar_vol_m>M flow
+$<t2_ticker> <t2_emoji> <t2_direction_label> — Score <t2_score> | $<t2_dollar_vol_m>M flow
+$<t3_ticker> <t3_emoji> <t3_direction_label> — Score <t3_score> | $<t3_dollar_vol_m>M flow
+
+Curated daily pick → email subscribers only.
 
 --- TEASER (runner-ups — NO entry/exit, this is the key differentiator vs signal) ---
 📡 Overnight flow — <scan_date>
@@ -243,8 +252,6 @@ $<t3_ticker> <t3_emoji> <t3_direction> — V/OI <t3_voi> | Score <t3_score>
 
 One fires the daily pick. Rest sit on the bench.
 
-⚠️ Paper-trade. Not financial advice.
-
 --- REPORT (morning overnight brief compressed) ---
 📝 Overnight Brief — <scan_date>
 
@@ -252,85 +259,56 @@ One fires the daily pick. Rest sit on the bench.
 • <bullet_1>
 • <bullet_2>
 
-⚠️ Paper-trade. Not financial advice.
+🔗 https://gammarips.com/reports/<scan_date>
 
---- WIN (callback, paired with QRT of original signal post) ---
-✅ CALLED IT — <win_pct_signed>% on $<ticker> <direction>
+--- WIN (callback when brief.closing_trades.wins is non-empty; QRT brief.qrt_tweet_id if present) ---
+Pull the FIRST item from brief.closing_trades.wins and render:
+
+✅ CALLED IT — <pct_signed> on $<ticker> <direction>
 
 Entry: $<entry_price> mid (<entry_date>)
-Exit: $<exit_price> (<scan_date>, <exit_reason>)
+Exit: $<exit_price> (<scan_date>, <exit_reason_display>)
 
 ⚠️ Paper-trade. Not advice.
 
---- LOSS (callback, NEUTRAL single — no QRT, no defensive commentary) ---
-❌ STOPPED OUT — <loss_pct_signed>% on $<ticker> <direction>
+--- LOSS (callback when brief.closing_trades.wins is empty AND brief.closing_trades.losses is non-empty; NEUTRAL single — no QRT, no defensive commentary) ---
+Pull the FIRST item from brief.closing_trades.losses and render:
+
+❌ STOPPED OUT — <pct_signed> on $<ticker> <direction>
 
 Entry: $<entry_price> (<entry_date>)
-Exit: $<exit_price> (<scan_date>, stop hit)
+Exit: $<exit_price> (<scan_date>, <exit_reason_display>)
 
-V5.3: stop wins over target on ambiguous bars. Trade the system, not the pick.
+Trade the system, not the pick.
 
 ⚠️ Paper-trade. Not advice.
 
---- SCORECARD (Fridays only, first tweet of a 3-tweet thread) ---
+--- SCORECARD (Fridays only, single tweet) ---
+N = brief.weekly_ledger.trades.length. wins = brief.weekly_ledger.wins.
+For each trade in brief.weekly_ledger.trades render one line VERBATIM from the brief:
+  "<trade.outcome_emoji> $<trade.ticker> <trade.direction_short> <trade.pct_signed>"
+
 📊 Week ending <scan_date>
 
-<N> signals fired:
-<for each trade in brief.weekly_ledger.trades, render one line: "<outcome_emoji> $<ticker> <direction_short> <return_pct_signed>%">
+<N> trades closed:
+<line for each trade>
 
-<wins_count> of <N> hit target. Net: +<net_return_pct>% per $500 unit.
+<wins> of <N> wins. Net: <net_return_pct>% across all trades.
 
 ⚠️ Paper-trade. Not advice.
-🧵
-
-(outcome_emoji: ✅ for wins, ❌ for losses. direction_short: BULL or BEAR.)
-
-=== IMAGE PROMPT GUIDANCE ===
-The image_prompt drives Nano Banana to generate an EDITORIAL image. The brand
-LOGO is composited deterministically by code afterward — DO NOT mention logos,
-text, tickers, or watermarks in the image_prompt. Tweet copy carries the data;
-the image carries the MOOD/THEME.
-
-Per post_type, build image_prompt as 2-4 sentences themed as follows. Use your
-own world knowledge of what each ticker's company DOES to choose visual cues
-(semiconductors, AI, biotech, energy, retail, mobile ads, EVs, etc.).
-
-- signal: "Editorial image evoking the business and industry of $<ticker>.
-  <ticker> operates in <sector — derive from your knowledge>. Visual concept:
-  <one specific imagery suggestion that evokes that industry>. Disciplined,
-  institutional tone. Brand palette."
-- standby: "Editorial image of quiet markets. The scanner is monitoring without
-  trading — patient observation, not paralysis. Subdued atmosphere. Brand palette."
-- teaser: "Editorial image of diversified opportunity flow — multiple sectors
-  scanned, one chosen. Visualize abundance + selectivity. Brand palette."
-- report: "Editorial image driven by today's market theme:
-  <brief.report_summary.headline>. Sector-evocative composition. Brand palette."
-- win: "Editorial image evoking confident follow-through in $<ticker>'s industry.
-  Vindication, not celebration. Brand palette."
-- loss: "Editorial image evoking trade discipline — the system worked, the trade
-  didn't. Reflective, not defeated. Themed around $<ticker>'s industry. Brand palette."
-- scorecard: "Editorial image of a market week observed — decisions made, results
-  measured. Reflective, ledger-like. Brand palette."
-
-NEVER ask for: text, words, numbers, tickers, prices, logos, watermarks,
-or labels rendered IN the image. Avoid: rocket-ship hype, generic city skylines,
-trading terminals with code, stock photo cliches.
 
 === OUTPUT ===
 Return a JSON dict with EXACTLY these keys:
 {
   "text": "<the rendered tweet template>",
-  "image_prompt": "<2-4 sentences per the IMAGE PROMPT GUIDANCE above>",
   "qrt_tweet_id": <pass through brief.qrt_tweet_id, or null>,
   "in_reply_to_tweet_id": null,
   "ticker": "<TICKER without $ — for signal/win/loss only; null otherwise>",
   "direction": "<BULLISH or BEARISH — for signal/win/loss only; null otherwise>"
 }
 
-The `ticker` / `direction` fields drive the deterministic PIL overlay on
-signal/win/loss images (large $TICKER + colored direction badge for feed-scroll
-readability). If post_type is signal and brief.pick is null (standby fallback)
-OR post_type is teaser/report/standby/scorecard, set both to null.
+Posts ship text-only — no image_prompt is required. The `ticker` / `direction`
+fields are kept for downstream logging only.
 
 Char budgets (hard): signal=400, standby=280, teaser=300, report=280, win=200, loss=200, scorecard=400.""",
         output_key="post_draft",
@@ -362,7 +340,7 @@ Decision rules:
 SPECIAL CASES — do NOT REVISE for these; they are correct:
 - **post_type=standby**: The post has NO ticker and NO cashtag BY DESIGN. That is correct. Do NOT demand a cashtag. The caller explicitly requested standby — honor it regardless of whether underlying pick data exists.
 - **post_type=report**: May or may not include a cashtag depending on market theme. Either is fine.
-- **Disclaimer wording**: Canonical is `⚠️ Paper-trade. Not financial advice.` for signal/standby/teaser/report and `⚠️ Paper-trade. Not advice.` for win/loss/callback/scorecard. Either canonical string is correct. DO NOT suggest alternatives like "Not advice." / "#NotAdvice" / "Not a recommendation." — the canonicalizer already enforced the right one.
+- **Disclaimer wording**: ONLY win/loss/callback/scorecard end with `⚠️ Paper-trade. Not advice.` (the canonicalizer enforces it). signal/standby/teaser/report ship WITHOUT a disclaimer — do NOT REVISE for missing disclaimer on those types.
 - **No hashtags**: # anything in the body is wrong. We never use hashtags on X.
 
 Be generous on aesthetic judgment. Lean APPROVE. Only REVISE for concrete rubric failures or actual voice/clarity issues. You are not a thesaurus.""",
@@ -427,6 +405,102 @@ class Publisher(BaseAgent):
                 )
                 return
 
+        # No-content guard for teaser: when the enrichment gate stack only
+        # passes one signal (the daily pick), runner_ups after exclusion is
+        # empty. Without this, the writer drifts to a 0/1-row teaser that
+        # duplicates the SIGNAL post — exactly the MDB 2026-04-29 incident.
+        if post_type == "teaser":
+            brief = state.get("post_brief", {}) or {}
+            runner_ups = brief.get("runner_ups") if isinstance(brief, dict) else None
+            if not runner_ups:
+                logger.info("teaser fired but no runner-ups today — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error="no_runners_today",
+                )
+                noop = {"status": "skipped", "reason": "no_runners_today"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
+        # No-content guard for scorecard: when no trades on publicly-named
+        # tickers closed this week, skip rather than post an empty thread.
+        # First real-fire window is post-watchlist-launch (5/8 onward) — until
+        # then the public ledger restricts to ~0 rows.
+        if post_type == "scorecard":
+            brief = state.get("post_brief", {}) or {}
+            wl = brief.get("weekly_ledger") if isinstance(brief, dict) else None
+            trades = (wl or {}).get("trades") if isinstance(wl, dict) else None
+            if not trades:
+                logger.info("scorecard fired but no posted-ticker closes this week — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error="no_scorecard_trades",
+                )
+                noop = {"status": "skipped", "reason": "no_scorecard_trades"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
+        # No-content guard for watchlist: same shape as teaser. If enrichment
+        # only emitted the paid pick (or nothing), the discovery feed has
+        # nothing to surface — skip rather than render an empty card.
+        if post_type == "watchlist":
+            brief = state.get("post_brief", {}) or {}
+            wl = brief.get("watchlist") if isinstance(brief, dict) else None
+            if not wl:
+                logger.info("watchlist fired but no setups today — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error="no_watchlist_today",
+                )
+                noop = {"status": "skipped", "reason": "no_watchlist_today"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
+        # No-content guard for report: 8:30 ET cron fires before
+        # overnight-report-generator may have written today's report doc, or
+        # the doc exists but is empty. Without this, the writer drifts to
+        # the STANDBY template and we get a duplicate Standby on the feed
+        # (Evan 2026-04-28 incident). Detect via empty post_brief.report_summary.
+        if post_type == "report":
+            brief = state.get("post_brief", {}) or {}
+            if isinstance(brief, dict):
+                summary = brief.get("report_summary")
+            else:
+                summary = None
+            has_summary = bool(summary) and bool(
+                (summary.get("headline") or "").strip()
+                if isinstance(summary, dict) else False
+            )
+            if not has_summary:
+                logger.info("report fired but no overnight report content — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error="no_report_today",
+                )
+                noop = {"status": "skipped", "reason": "no_report_today"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
         # Loop exhausted without APPROVE → log rejection
         if review.get("status") != "APPROVE":
             logger.warning("Loop ended without APPROVE — logging rejected.")
@@ -445,33 +519,19 @@ class Publisher(BaseAgent):
             return
 
         # Happy path — canonicalize the draft BEFORE publish/log.
-        # Deterministic guards: disclaimer lock, $SPY-filler strip on standby,
-        # V/OI None suppression. See compliance.canonicalize_draft_text.
+        # Deterministic guards: disclaimer lock (performance posts only),
+        # $SPY-filler strip on standby, V/OI None suppression.
         raw_text = draft.get("text", "")
         text = compliance.canonicalize_draft_text(raw_text, post_type)
-        image_prompt = draft.get("image_prompt", "")
         qrt_id = draft.get("qrt_tweet_id") or None
         reply_id = draft.get("in_reply_to_tweet_id") or None
 
-        # Image gen (non-blocking — ship text-only on error)
-        # Ticker/direction drive a deterministic PIL overlay on signal/win/loss
-        # images. Writer populates them; null on standby/teaser/report/scorecard.
-        image_bytes = None
-        if image_prompt:
-            ticker = draft.get("ticker") or None
-            direction = draft.get("direction") or None
-            img_result = tools.generate_image(
-                image_prompt, post_type, ticker=ticker, direction=direction,
-            )
-            if img_result.get("status") == "success":
-                image_bytes = img_result.get("image_bytes")
-            else:
-                logger.warning(f"Image gen failed — text-only post. {img_result.get('message')}")
-
-        # Publish
+        # Text-only posts (Evan 2026-04-28). Editorial images were retired —
+        # tweet copy carries the data and the PIL ticker overlays didn't read
+        # well in-feed. No image_bytes is ever passed to publish_to_x now.
         post_result = tools.publish_to_x(
             text=text,
-            image_bytes=image_bytes,
+            image_bytes=None,
             quote_tweet_id=qrt_id,
             in_reply_to_tweet_id=reply_id,
         )

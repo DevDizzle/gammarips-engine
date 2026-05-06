@@ -141,31 +141,46 @@ def fetch_todays_report_summary(scan_date: str) -> dict:
     }
 
 
-def fetch_closing_trades(scan_date: str) -> dict:
-    """Query `forward_paper_ledger` for trades that closed today.
+def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
+    """Query `forward_paper_ledger` for V5.3 trades that closed today.
+
+    Returns each row pre-shaped for the WIN/LOSS writer template: derived
+    `exit_price` (entry_price * (1 + realized_return_pct)), `pct_signed`
+    string ("+80%" / "-60%"), and human-readable `exit_reason_display`.
 
     Args:
-        scan_date: The EXIT date (YYYY-MM-DD). A trade entered 2026-04-21 and closed
-            2026-04-24 is returned when scan_date='2026-04-24'.
+        scan_date: The EXIT date (YYYY-MM-DD).
+        restrict_tickers: Comma-separated tickers to restrict the result to
+            (typically the tickers we've publicly posted on X in the past
+            lookback window — gathered via fetch_recently_posted_tickers).
+            Empty string means "no filter, return all closes".
 
     Returns:
         dict: {"status": "success", "data": {"wins": [...], "losses": [...]}}
-              Each item: ticker, direction, entry_date, entry_price, realized_return_pct, exit_reason.
     """
+    tickers = [t.strip().upper() for t in (restrict_tickers or "").split(",") if t.strip()]
     query = f"""
         SELECT
             scan_date AS entry_date,
             ticker, direction,
-            entry_price, realized_return_pct, exit_reason
+            ROUND(entry_price, 2) AS entry_price,
+            ROUND(realized_return_pct, 2) AS realized_return_pct,
+            exit_reason
         FROM `{LEDGER_TABLE}`
         WHERE DATE(exit_timestamp) = @scan_date
           AND exit_reason IS NOT NULL
+          AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
+          AND policy_version = 'V5_3_TARGET_80'
+          AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
     """
     try:
         job = _bq().query(
             query,
             job_config=bigquery.QueryJobConfig(
-                query_parameters=[bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date),
+                    bigquery.ArrayQueryParameter("tickers", "STRING", tickers),
+                ]
             ),
         )
         rows = [dict(r) for r in job.result()]
@@ -173,31 +188,67 @@ def fetch_closing_trades(scan_date: str) -> dict:
         logger.error(f"fetch_closing_trades failed: {exc}")
         return {"status": "error", "message": str(exc)}
 
-    wins = [r for r in rows if (r.get("realized_return_pct") or 0) > 0]
-    losses = [r for r in rows if (r.get("realized_return_pct") or 0) <= 0]
+    _exit_reason_display = {
+        "TARGET": "target hit",
+        "STOP": "stop hit",
+        "TIMEOUT": "3-day exit",
+    }
+    enriched: list[dict] = []
+    for r in rows:
+        ep = r.get("entry_price")
+        ret = r.get("realized_return_pct")
+        exit_price = round(ep * (1.0 + ret), 2) if (ep is not None and ret is not None) else None
+        pct_signed = (
+            f"{'+' if ret >= 0 else ''}{int(round(ret * 100))}%"
+            if ret is not None else None
+        )
+        enriched.append({
+            **r,
+            "exit_price": exit_price,
+            "pct_signed": pct_signed,
+            "exit_reason_display": _exit_reason_display.get(
+                r.get("exit_reason") or "", r.get("exit_reason") or ""
+            ),
+        })
+
+    wins = [r for r in enriched if (r.get("realized_return_pct") or 0) > 0]
+    losses = [r for r in enriched if (r.get("realized_return_pct") or 0) <= 0]
     return {
         "status": "success",
-        "data": _jsonable({"wins": wins, "losses": losses, "total": len(rows)}),
+        "data": _jsonable({"wins": wins, "losses": losses, "total": len(enriched)}),
     }
 
 
-def fetch_runner_ups(scan_date: str, n: int) -> dict:
-    """Query `overnight_signals_enriched` for top-N runner-up signals (excluding daily pick).
+def fetch_watchlist(scan_date: str, n: int, exclude_ticker: str = "") -> dict:
+    """Query `overnight_signals_enriched` for top-N high-dollar-volume setups.
+
+    Used for the public X "watchlist" post — drives discovery via popular
+    names without leaking the paid V5.3 daily pick. Ranks by total option
+    dollar volume (call+put) which biases toward broad-attention tickers
+    (CAT, MS, MELI, BE…) rather than small-cap unusual-activity names.
 
     Args:
-        scan_date: Date in YYYY-MM-DD format.
-        n: Number of runner-ups to return (2-5 typical).
+        scan_date: YYYY-MM-DD.
+        n: Top-N to return (typically 3).
+        exclude_ticker: Daily-pick ticker to omit so the watchlist never
+            duplicates the paid email.
 
     Returns:
-        dict: {"status": "success", "data": [{ticker, direction, overnight_score, vol_oi_ratio, moneyness_pct}, ...]}
+        dict: {"status": "success", "data": [{ticker, direction, score,
+              dollar_vol_m, vol_oi_ratio}, ...]}
+              Empty list = "no qualifying setups today" — publisher skips.
     """
     query = f"""
         SELECT
-            ticker, direction, overnight_score, volume_oi_ratio AS vol_oi_ratio,
-            recommended_spread_pct, is_premium_signal
+            ticker,
+            direction,
+            ROUND(overnight_score, 1) AS score,
+            ROUND((COALESCE(call_dollar_volume, 0) + COALESCE(put_dollar_volume, 0)) / 1e6, 2) AS dollar_vol_m,
+            ROUND(volume_oi_ratio, 2) AS vol_oi_ratio
         FROM `{ENRICHED_TABLE}`
         WHERE scan_date = @scan_date
-        ORDER BY overnight_score DESC
+          AND (@exclude_ticker = '' OR ticker != @exclude_ticker)
+        ORDER BY (COALESCE(call_dollar_volume, 0) + COALESCE(put_dollar_volume, 0)) DESC
         LIMIT @n
     """
     try:
@@ -207,6 +258,139 @@ def fetch_runner_ups(scan_date: str, n: int) -> dict:
                 query_parameters=[
                     bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date),
                     bigquery.ScalarQueryParameter("n", "INT64", max(n, 1)),
+                    bigquery.ScalarQueryParameter("exclude_ticker", "STRING", exclude_ticker or ""),
+                ]
+            ),
+        )
+        rows = [dict(r) for r in job.result()]
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"fetch_watchlist failed: {exc}")
+        return {"status": "error", "message": str(exc)}
+
+    return {"status": "success", "data": _jsonable(rows)}
+
+
+def fetch_recently_posted_tickers(scan_date: str, lookback_days: int = 5) -> dict:
+    """Scan recent x_posts (watchlist + signal types) for tickers we publicly named.
+
+    Callbacks should ONLY post about tickers the X audience has seen us
+    name — otherwise we'd surface paper-trade outcomes for tickers no
+    follower has context for.
+
+    Args:
+        scan_date: Today's date (YYYY-MM-DD); look back from here.
+        lookback_days: Calendar days to walk back. 5 covers Mon-Fri callbacks
+            paired with prev-week posts under the V5.3 3-day hold.
+
+    Returns:
+        dict: {"status": "success", "tickers": ["BE", "STX", ...]} unique upper-case.
+    """
+    import re
+    from datetime import datetime, timedelta
+
+    end = datetime.strptime(scan_date, "%Y-%m-%d").date()
+    start = end - timedelta(days=lookback_days)
+    cashtag_re = re.compile(r"\$([A-Z]{1,5})\b")
+
+    found: set[str] = set()
+    try:
+        col = _fs().collection("x_posts")
+        # Doc IDs are `{date}_{post_type}` — Firestore string range works lexically.
+        docs = (
+            col.where("scan_date", ">=", start.isoformat())
+               .where("scan_date", "<=", end.isoformat())
+               .stream()
+        )
+        for d in docs:
+            data = d.to_dict() or {}
+            if data.get("post_type") not in ("watchlist", "signal"):
+                continue
+            if data.get("dry_run"):
+                continue
+            for m in cashtag_re.finditer(data.get("text") or ""):
+                found.add(m.group(1).upper())
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"fetch_recently_posted_tickers failed: {exc}")
+        return {"status": "error", "message": str(exc), "tickers": []}
+
+    return {"status": "success", "tickers": sorted(found)}
+
+
+def find_originating_post_for_ticker(ticker: str, lookback_days: int = 5) -> dict:
+    """Find the most recent x_post that publicly mentioned `ticker` for QRT.
+
+    Used by win-callback to QRT the originating watchlist or signal post.
+    Walks back lookback_days, returns the first non-dry-run match.
+
+    Returns:
+        dict: {"status": "success", "tweet_id": "..."} or {"status": "empty"}
+    """
+    import re
+    from datetime import datetime, timedelta
+
+    cashtag_re = re.compile(rf"\$\b{re.escape(ticker.upper().lstrip('$'))}\b")
+    end = datetime.now(ET).date()
+    start = end - timedelta(days=lookback_days)
+    try:
+        docs = (
+            _fs().collection("x_posts")
+                 .where("scan_date", ">=", start.isoformat())
+                 .where("scan_date", "<=", end.isoformat())
+                 .stream()
+        )
+        candidates: list[tuple[str, str]] = []  # (scan_date, tweet_id)
+        for d in docs:
+            data = d.to_dict() or {}
+            if data.get("post_type") not in ("watchlist", "signal"):
+                continue
+            tid = data.get("tweet_id")
+            if not tid or str(tid).startswith("dry_run_") or data.get("dry_run"):
+                continue
+            if cashtag_re.search(data.get("text") or ""):
+                candidates.append((data.get("scan_date") or "", tid))
+        if not candidates:
+            return {"status": "empty"}
+        candidates.sort(reverse=True)  # newest first
+        return {"status": "success", "tweet_id": candidates[0][1]}
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"find_originating_post_for_ticker failed: {exc}")
+        return {"status": "error", "message": str(exc)}
+
+
+def fetch_runner_ups(scan_date: str, n: int, exclude_ticker: str = "") -> dict:
+    """Query `overnight_signals_enriched` for top-N runner-up signals.
+
+    Args:
+        scan_date: Date in YYYY-MM-DD format.
+        n: Number of runner-ups to return (2-5 typical).
+        exclude_ticker: Ticker to omit (typically today's daily pick — the teaser
+            should show OTHER signals, not duplicate the SIGNAL post). Empty
+            string means no exclusion.
+
+    Returns:
+        dict: {"status": "success", "data": [...]} with 0..n entries.
+              Empty list is a valid result and means "no runner-ups today" —
+              callers should treat as a skip signal for the teaser publish.
+    """
+    fetch_n = max(n, 1)
+    query = f"""
+        SELECT
+            ticker, direction, overnight_score, volume_oi_ratio AS vol_oi_ratio,
+            recommended_spread_pct, is_premium_signal
+        FROM `{ENRICHED_TABLE}`
+        WHERE scan_date = @scan_date
+          AND (@exclude_ticker = '' OR ticker != @exclude_ticker)
+        ORDER BY overnight_score DESC
+        LIMIT @n
+    """
+    try:
+        job = _bq().query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date),
+                    bigquery.ScalarQueryParameter("n", "INT64", fetch_n),
+                    bigquery.ScalarQueryParameter("exclude_ticker", "STRING", exclude_ticker or ""),
                 ]
             ),
         )
@@ -235,26 +419,42 @@ def fetch_original_tweet_id(original_scan_date: str) -> dict:
     return {"status": "success", "tweet_id": tweet_id}
 
 
-def fetch_weekly_ledger(week_ending: str) -> dict:
-    """Query the past 5 trading days' closes for the Friday scorecard.
+def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
+    """Query the past 5 trading days' V5.3 closes for the Friday scorecard.
+
+    The scorecard reflects the PUBLIC track record — only trades on tickers
+    the X audience has seen us name should appear. Pass `restrict_tickers`
+    populated from `fetch_recently_posted_tickers(scan_date, lookback=10)`.
+
+    Filters: V5_3_TARGET_80 only, drops INVALID_LIQUIDITY/SKIPPED. Each row
+    pre-shaped for the writer template (pct_signed, outcome_emoji,
+    direction_short).
 
     Args:
         week_ending: Friday date in YYYY-MM-DD format.
+        restrict_tickers: Comma-separated tickers to restrict to. Empty = all
+            V5.3 closes (use only for internal/admin scorecards — public X
+            scorecards must restrict).
 
     Returns:
-        dict: {"status": "success", "data": {"trades": [...], "wins": N, "losses": N, "net_return_pct": X}}
+        dict: {"status": "success", "data": {"trades": [...], "wins": N,
+              "losses": N, "net_return_pct": X (display %, sum of trade %s)}}
     """
     end = datetime.strptime(week_ending, "%Y-%m-%d").date()
-    # Look back 7 calendar days (covers Mon-Fri with buffer)
     start = end - timedelta(days=7)
+    tickers = [t.strip().upper() for t in (restrict_tickers or "").split(",") if t.strip()]
     query = f"""
         SELECT
             ticker, direction, scan_date AS entry_date,
             DATE(exit_timestamp) AS exit_date,
-            realized_return_pct, exit_reason
+            ROUND(realized_return_pct, 2) AS realized_return_pct,
+            exit_reason
         FROM `{LEDGER_TABLE}`
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
+          AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
+          AND policy_version = 'V5_3_TARGET_80'
+          AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
         ORDER BY exit_timestamp
     """
     try:
@@ -264,6 +464,7 @@ def fetch_weekly_ledger(week_ending: str) -> dict:
                 query_parameters=[
                     bigquery.ScalarQueryParameter("start", "DATE", start.isoformat()),
                     bigquery.ScalarQueryParameter("end", "DATE", end.isoformat()),
+                    bigquery.ArrayQueryParameter("tickers", "STRING", tickers),
                 ]
             ),
         )
@@ -272,13 +473,30 @@ def fetch_weekly_ledger(week_ending: str) -> dict:
         logger.error(f"fetch_weekly_ledger failed: {exc}")
         return {"status": "error", "message": str(exc)}
 
-    wins = sum(1 for r in rows if (r.get("realized_return_pct") or 0) > 0)
-    losses = len(rows) - wins
-    net = sum((r.get("realized_return_pct") or 0) for r in rows)
+    enriched: list[dict] = []
+    for r in rows:
+        ret = r.get("realized_return_pct")
+        if ret is None:
+            continue
+        is_win = ret > 0
+        pct_int = int(round(ret * 100))
+        enriched.append({
+            **r,
+            "outcome_emoji": "✅" if is_win else "❌",
+            "direction_short": "BULL" if (r.get("direction") or "").upper().startswith("BULL") else "BEAR",
+            "pct_signed": f"{'+' if pct_int >= 0 else ''}{pct_int}%",
+        })
+
+    wins = sum(1 for r in enriched if (r.get("realized_return_pct") or 0) > 0)
+    losses = len(enriched) - wins
+    net_pct_display = round(
+        sum((r.get("realized_return_pct") or 0) for r in enriched) * 100, 1
+    )
     return {
         "status": "success",
         "data": _jsonable(
-            {"trades": rows, "wins": wins, "losses": losses, "net_return_pct": net}
+            {"trades": enriched, "wins": wins, "losses": losses,
+             "net_return_pct": net_pct_display}
         ),
     }
 
