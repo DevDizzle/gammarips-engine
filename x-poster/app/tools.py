@@ -239,6 +239,11 @@ def fetch_watchlist(scan_date: str, n: int, exclude_ticker: str = "") -> dict:
               Empty list = "no qualifying setups today" — publisher skips.
     """
     query = f"""
+        WITH effective AS (
+            SELECT MAX(scan_date) AS d
+            FROM `{ENRICHED_TABLE}`
+            WHERE scan_date <= @scan_date
+        )
         SELECT
             ticker,
             direction,
@@ -246,7 +251,7 @@ def fetch_watchlist(scan_date: str, n: int, exclude_ticker: str = "") -> dict:
             ROUND((COALESCE(call_dollar_volume, 0) + COALESCE(put_dollar_volume, 0)) / 1e6, 2) AS dollar_vol_m,
             ROUND(volume_oi_ratio, 2) AS vol_oi_ratio
         FROM `{ENRICHED_TABLE}`
-        WHERE scan_date = @scan_date
+        WHERE scan_date = (SELECT d FROM effective)
           AND (@exclude_ticker = '' OR ticker != @exclude_ticker)
         ORDER BY (COALESCE(call_dollar_volume, 0) + COALESCE(put_dollar_volume, 0)) DESC
         LIMIT @n
@@ -374,11 +379,16 @@ def fetch_runner_ups(scan_date: str, n: int, exclude_ticker: str = "") -> dict:
     """
     fetch_n = max(n, 1)
     query = f"""
+        WITH effective AS (
+            SELECT MAX(scan_date) AS d
+            FROM `{ENRICHED_TABLE}`
+            WHERE scan_date <= @scan_date
+        )
         SELECT
             ticker, direction, overnight_score, volume_oi_ratio AS vol_oi_ratio,
             recommended_spread_pct, is_premium_signal
         FROM `{ENRICHED_TABLE}`
-        WHERE scan_date = @scan_date
+        WHERE scan_date = (SELECT d FROM effective)
           AND (@exclude_ticker = '' OR ticker != @exclude_ticker)
         ORDER BY overnight_score DESC
         LIMIT @n
