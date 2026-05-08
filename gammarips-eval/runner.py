@@ -165,7 +165,7 @@ class EvalRunner:
     def _fetch_signal_performance(self, scan_date: date) -> dict[str, dict]:
         """Map ticker -> {peak_return_pct, win_tier, ...} for a scan_date."""
         query = f"""
-            SELECT ticker, peak_return AS peak_return_pct, win_tier, peak_price_3d, entry_price
+            SELECT ticker, peak_return AS peak_return_pct, tier AS win_tier
             FROM `{self.project_id}.{self.dataset}.signal_performance`
             WHERE scan_date = '{scan_date.isoformat()}'
         """

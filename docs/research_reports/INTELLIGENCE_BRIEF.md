@@ -2,6 +2,58 @@
 
 > **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`. Operator cheat: `../../CHEAT-SHEET.md`.
 
+## 2026-05-06 update — Full literature audit of V5.3 stack (12 parameters across 3 services)
+
+Triggered by the meta-principle adopted in this session: **for structural questions (microstructure, IV crush, term structure, vol risk premium, informed-flow horizon), cite literature; reserve our N=1,563 cohort for selection-style questions specific to our scanner's output.** Three parallel literature scans audited every parameter in the V5.3 stack against peer-reviewed and serious-practitioner sources. Verdict per parameter:
+
+| Parameter | Service | Verdict | Strongest citation | Recommended action |
+|---|---|---|---|---|
+| `overnight_score >= 1` | enrichment-trigger | Partial (composite is overfit-bait, `>=1` is benign) | Novy-Marx 2015 NBER 21329 | Hold at `>=1`. Do NOT raise without per-flag IC analysis on live ledger. |
+| `spread <= 10%` | enrichment-trigger | **Likely harming EV — too loose** | Muravyev & Pearson 2020 RFS; Mayhew 2002 JoF | **Tighten to `<= 8%`**. 10% admits exactly the thin / single-MM contracts where Cremers-Weinbaum predicts the options-flow signal flips off. Highest-confidence recalibration. |
+| `directional UOA $ > $500K` | enrichment-trigger | Direction supported, threshold arbitrary | Easley/O'Hara/Srinivas 1998 JoF; Pan & Poteshman 2006 RFS | Replace flat $500K with **percentile-of-trailing-30d-call-dollar-volume** (e.g., >95th pct of own history) or market-cap-conditional. Easley-O'Hara framework defines "unusual" relative-to-self, not absolute. |
+| `V/OI > 2.0` | signal-notifier | Partial — direction right, threshold heuristic | Pan & Poteshman 2006 RFS; Johnson & So 2012 JFE | Hold at 2.0. Add open-vs-close discrimination if feasible (Pan-Poteshman's signal lives in *opening* trades). Don't tighten without re-cut. |
+| `moneyness 5-15% OTM` | signal-notifier | **Likely harming EV — upper bound is deep-OTM territory** | Augustin et al. 2022 J. Fin. Markets; Aretz et al. 2023 RoF | **Tighten upper bound to ~10% OTM** (or delta 0.20–0.40). Aretz et al.: ITM calls +7% / DOTM calls −27% systematic spread. At 9 DTE / 15% OTM, delta is ~0.10–0.15 — pure lottery zone. Highest-confidence recalibration after spread. |
+| `VIX <= VIX3M` | signal-notifier | Coin flip (regime intuition sound, long-call P&L evidence mixed) | Cheng 2019 RFS; Johnson 2017 RFS | Keep as-is. Consider buffer (`VIX < 0.95 × VIX3M`) to reduce borderline-day skips. Log skipped-day counterfactual P&L. |
+| `LIMIT 1` per day | signal-notifier | Rock-solid for current bankroll | Kelly 1956; Sinclair 2020 *Positional Option Trading* | Keep. Revisit only when bankroll ≥ $10k AND 50+ closed trades verify rank-2..5 EV. |
+| **Earnings-overlap exclusion** | signal-notifier | Rock-solid (just adopted) | De Silva/Smith/So 2026 RoF | **Adopted today** (separate brief entry). |
+| Entry = 10:00 ET | forward-paper-trader | Partial — defensibly inside post-open window | Heston/Korajczyk/Sadka 2010 JoF; Gao/Han/Li/Zhou 2018 JFE | Hold. 09:45 defensible; 09:30 worse (open-auction option spread spike); past 10:30 starts eating gap-fade window. |
+| **Stop = −60% on option premium** | forward-paper-trader | **Unsupported as premium-level rule — likely harming EV** | Kaminski & Lo 2014 JFM; Han/Zhou/Zhu CICF WP | **No peer-reviewed paper supports fixed-% stops on option premium** (because option price is non-linear in underlying). Literature points to **underlying-based stops** (~−2.5–3% adverse on stock for calls, +2.5–3% for puts). Highest-confidence recalibration of the trader. |
+| Target = +80% on option premium | forward-paper-trader | Coin flip — direction right, magnitude folk | Han et al.; trend-following York DP 1211 | Asymmetric-target *direction* is right for noisy serial-correlation signals. Magnitude is folk; **sweep target ∈ {+40, +60, +80, +100, +150}** on closed ledger when N>30. |
+| Hold = 3 trading days | forward-paper-trader | **Rock-solid** | Pan & Poteshman 2006 RFS; Johnson & So 2012 JFE | Hold at 3. Possibly 2 (alpha peaks day-1/day-2 per Pan-Poteshman); never longer. |
+| Exit = 15:50 ET | forward-paper-trader | Supported | Mu et al. 2025 J. Futures Mkts; option L-shape spread literature | Hold. 15:55 fine; 15:30 leaves intraday-momentum on the table (Gao et al.: predictability peaks last half-hour). |
+
+**Headline (priority-ranked recalibrations):**
+
+1. **`spread <= 10%` → `spread <= 8%`** (enrichment-trigger). Cleanest evidence; lowest blast radius; one-line change.
+2. **`moneyness <= 0.15` → `moneyness <= 0.10`** (signal-notifier). Aretz et al. 2023 RoF empirically documents the EV cliff in deep-OTM long calls.
+3. **`-60% premium stop` → underlying-based stop** (forward-paper-trader). Largest design change — touches the trader, requires `gammarips-review`, conflicts with the "phone-executable" CHEAT-SHEET routine (operator can arm a −60% option-premium GTC stop on Robinhood; an underlying-based stop requires a contingent order which Robinhood doesn't expose). Phase 2 candidate; not a quick win.
+4. **`UOA $ > $500K` → trailing-30d percentile** (enrichment-trigger). Theoretically cleaner; requires backfilling per-ticker dollar-volume history. Phase 2.
+
+**What stays unchanged:** hold = 3 days (rock-solid), exit = 15:50 (supported), `VIX ≤ VIX3M` (coin flip but defensible), `V/OI > 2` (heuristic but works), `LIMIT 1` (correct for bankroll), `overnight_score >= 1` (benign).
+
+**Methodological note for these findings:** Same epistemic class as the earnings rule. Recommendations 1 and 2 are *exclusion-style tightenings* (kicking out parameter regions where literature explicitly documents EV decay) and do NOT require labeled_v1 backtesting. Recommendations 3 and 4 are larger redesigns; #3 in particular changes the operator routine, so user UX trumps marginal EV.
+
+**Hypotheses added to backlog:** **H10** (earnings-overlap exclusion) — **adopted + deployed 2026-05-06**; **H11** (spread tightening 10% → 8%) — **adopted + deployed 2026-05-06**; **H12** (moneyness upper-bound 15% → 10%) — **adopted + deployed 2026-05-06**; **H13** (premium-stop → underlying-stop redesign) — Phase 2 (breaks Robinhood phone-executable routine); **H14** (UOA $ → trailing-percentile) — Phase 2.
+
+H11/H12 deploy decision rationale: `docs/DECISIONS/2026-05-06-lit-audit-h11-h12-spread-moneyness.md`. Both are exclusion-style parameter tightenings, no labeled_v1 backtesting required per the methodological note in Hard Constraints below.
+
+Full per-gate detail and citations: `2026-05-06-literature-audit-v5-3-stack.md` (TBD if user requests; not yet written — the table above is the operative reference).
+
+## 2026-05-06 update — Earnings-overlap exclusion adopted as literature-anchored rule (no backtest)
+
+V5.3 picked CDW BULL (260515C00125000, 8.6% OTM, 9 DTE) for 2026-05-06 entry. All gates cleared (V/OI 92.16, VIX 18.29 ≤ VIX3M 21.05, score 8). CDW reported pre-market: revenue beat (+9.2% YoY, +3.8% vs. consensus) but adjusted op income missed by 18.1%; stock gapped −5.5% to $129.27 by the open. Trade was dead on arrival — the V/OI 92x was earnings-event positioning, not informed directional flow.
+
+**Decision: adopt earnings-overlap exclusion at signal-notifier as a hard rule.** Exclude any ticker whose scheduled earnings date falls inside `entry_day → entry_day+3`. This is a theory-driven exclusion filter (same epistemic class as the existing `VIX ≤ VIX3M` backwardation gate), not a selection filter — it does not require labeled_v1 backtesting. The literature has settled this at scale we cannot match on a 1,563-row regime-confounded cohort:
+
+- **De Silva, Smith & So (2026, *Review of Finance*) "Losing is Optional"** — retail-flagged long-options trades through earnings lose **5–9% on average per event, 10–14% on high-vol names**. Sample population maps directly onto our setup (large-cap, OTM, short-dated, held through print).
+- **Cao & Han (2013, *JFE*)** — long delta-hedged options on high-idiosyncratic-vol names earn ~−1.4%/month cross-sectionally; earnings concentrate this exposure into a binary event. Already in our evidence base as the volatility-idiosyncratic trap.
+- **IV crush magnitude:** 30–60% in front-month on liquid single names (Dubinsky & Johannes 2006). Worse on OTM short-dated strikes — nearly pure vega.
+- **No literature subset supports our trade structure through earnings.** Boundary conditions (Gao/Xing/Zhang 2018 small-cap pre-EA straddles) (a) require closing *before* the print, (b) target small-caps with transaction-cost edge, and (c) the post-2011 update (Khan & Khan SSRN 4832160) finds the edge has compressed to negative even there. We sit in the worst quadrant on every axis: liquid, OTM 5–15%, ~9 DTE, held through.
+
+**Methodological note (added to Hard Constraints below):** Two filter classes carry different evidentiary bars. *Selection filters* (rank/pick winners from our cohort) need labeled_v1 screen + bootstrap + walk-forward + forward OOS — high overfitting risk. *Exclusion filters* (kick out known-broken setups, e.g., earnings overlap, VIX backwardation) are theory-driven and literature-anchored — deploy on mechanism, not on our backtest. Do not conflate the two. Do not backtest exclusion filters on labeled_v1 to "validate" them; the literature has better data than we do.
+
+**Implementation status:** Rule adopted; signal-notifier code change applied 2026-05-06 (FMP `/v3/earning_calendar`, top-10 walk, window `[scan_date, entry_day + 2 trading days]`, fail-closed on calendar fetch failure / non-list payload / all-candidates-overlap). `gammarips-review` audit complete (APPROVE WITH CONDITIONS — three remediations landed in same PR: FMP non-list payload guard, window widened to scan_date for AMC-contamination coverage, TRADING-STRATEGY.md ORDER BY drift fixed). See `docs/DECISIONS/2026-05-06-earnings-overlap-exclusion.md`.
+
 ## 2026-04-17 update — V5.3 Target 80 deployed; V4 retired; cohort scan confirms exit-policy failure
 
 Session produced three outcomes:
@@ -81,6 +133,11 @@ These are the live experiments. See `STRATEGY_PLAYBOOK.md` for the full mechanic
 - **Multiple-comparison risk.** Any new filter or feature search MUST end with a bootstrap CI + walk-forward halving check. The `filt_rrr` autopsy in `FINDINGS_LEDGER.md` is the canonical example of why.
 - **Label-leakage discipline.** Never include outcome columns as features. Full list in `.claude/agents/gammarips-researcher.md`.
 - **Single source of truth.** Analysis reads from `forward_paper_ledger` and `overnight_signals_enriched`. Historical research uses `signals_labeled_v1` (frozen).
+- **Selection filters vs. exclusion filters carry different evidentiary bars** (codified 2026-05-06).
+  - *Selection filters* — rank/pick winners from our cohort (e.g., a new top-of-rank composite, an "earnings-momentum" feature). Need labeled_v1 screen + bootstrap + walk-forward + forward OOS in live ledger. High overfitting risk (Novy-Marx 2015). Default substrate: our cohort, with strict multiple-comparison discipline.
+  - *Exclusion filters* — kick out known-broken parameter regions (e.g., earnings overlap, VIX backwardation, deep-OTM moneyness). Theory-driven, literature-anchored. Default substrate: peer-reviewed evidence; deploy on mechanism, not on our backtest. Do NOT backtest exclusion filters on labeled_v1 to "validate" them — the literature has decades and millions of trades; we have 1,563 rows in one regime.
+  - Do not conflate the two. The CDW post-mortem and full-stack literature audit (both in 2026-05-06 entries above) are the canonical examples.
+- **`signals_labeled_v1` is a screen, not a validator.** Useful for killing bad ideas cheaply (negative-EV on a long-options-graveyard regime ⇒ almost certainly garbage). NOT useful for confirming good ones (regime-confounded; positive-EV could be artifact). The `filt_rrr` autopsy is the canonical example: +8.28% OOS on labeled_v1 → collapse on forward.
 
 ## What you'll find in the rest of this directory
 

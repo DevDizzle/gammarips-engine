@@ -50,10 +50,11 @@ DISCLAIMER_REQUIRED: frozenset[str] = frozenset(
 
 
 URL_PATTERN = re.compile(r"https?://|www\.", re.IGNORECASE)
-# Canonical click-through to the daily report on gammarips.com — allowed in
-# tweet bodies for report/signal post types so users can read the full brief.
+# Whitelisted URLs allowed in tweet bodies:
+#   1. Per-day report click-through: https://gammarips.com/reports/<YYYY-MM-DD>
+#   2. Site root for sub-conversion on signal posts (Path B anchor model).
 ALLOWED_URL_PATTERN = re.compile(
-    r"https://gammarips\.com/reports/\d{4}-\d{2}-\d{2}\b"
+    r"https://gammarips\.com(?:/reports/\d{4}-\d{2}-\d{2}|/?)\b"
 )
 CASHTAG_PATTERN = re.compile(r"\$[A-Z]{1,5}\b")
 

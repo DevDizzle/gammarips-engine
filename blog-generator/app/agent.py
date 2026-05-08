@@ -36,7 +36,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from app import tools
-from gammarips_content import voice_rules
+from gammarips_content import compliance, voice_rules
 
 logger = logging.getLogger(__name__)
 
@@ -64,25 +64,50 @@ class ReviewResult(BaseModel):
 
 
 # --- Callbacks -------------------------------------------------------------
-async def seed_voice_rules(ctx: CallbackContext) -> None:
-    """Load brand voice rules into state before the first agent runs."""
-    if "voice_rules" not in ctx.state:
-        ctx.state["voice_rules"] = voice_rules.render_for_prompt()
+async def seed_voice_rules(callback_context: CallbackContext) -> None:
+    """Load brand voice rules into state before the first agent runs.
+
+    ADK invokes callbacks with keyword arg `callback_context=...`, so the
+    parameter name MUST be `callback_context` (not `ctx`). Mismatching the
+    name yields TypeError "got an unexpected keyword argument".
+    """
+    if "voice_rules" not in callback_context.state:
+        callback_context.state["voice_rules"] = voice_rules.render_for_prompt()
 
 
-async def score_rubric_before_reviewer(ctx: CallbackContext) -> None:
+async def score_rubric_before_reviewer(callback_context: CallbackContext) -> None:
     """Run deterministic rubric check on the current markdown before reviewer LLM reads it.
 
     Uses blog-mode (is_blog=True) in gammarips_content.compliance, plus the
     blog-specific extras layered in score_blog_rubric (word count, H2 count,
-    disclaimer block, internal link).
+    disclaimer block, internal link, CTA-match-with-schedule).
     """
-    markdown = ctx.state.get("post_markdown", "") or ""
+    markdown = callback_context.state.get("post_markdown", "") or ""
     if not isinstance(markdown, str):
         # Writer may have written structured output; coerce defensively.
         markdown = str(markdown)
-    result = tools.score_blog_rubric(markdown=markdown)
-    ctx.state["rubric_check"] = result
+
+    # Belt-and-suspenders: deterministically strip the writer's paraphrased
+    # disclaimer trailer and append the canonical blockquote. Gemini drifts
+    # on the long literal block; this is the same canonicalize-before-judge
+    # pattern x-poster uses for short post disclaimers.
+    if markdown.strip():
+        canonical = compliance.canonicalize_blog_disclaimer(markdown)
+        if canonical != markdown:
+            callback_context.state["post_markdown"] = canonical
+            markdown = canonical
+
+    # Pull the schedule slot's expected CTA so the rubric can hard-fail
+    # writer drift (e.g. `webapp_visit` → `pro_trial`).
+    outline = callback_context.state.get("post_outline", {}) or {}
+    if isinstance(outline, dict):
+        slot = outline.get("schedule_slot") or {}
+    else:
+        slot = {}
+    expected_cta = slot.get("cta") if isinstance(slot, dict) else None
+
+    result = tools.score_blog_rubric(markdown=markdown, expected_cta=expected_cta)
+    callback_context.state["rubric_check"] = result
 
 
 # --- Agent factories --------------------------------------------------------
@@ -181,7 +206,16 @@ Requirements:
 - End with the EXACT literal disclaimer block (inside a blockquote):
     > Paper-trading performance, educational content only. Not investment
     > advice. Past performance is not a guarantee of future results.
-- End with a tier-matched CTA paragraph per `post_outline.schedule_slot.cta`.
+- CTA contract — NON-NEGOTIABLE: the front-matter `cta` field MUST equal
+  `post_outline.schedule_slot.cta` verbatim. Do NOT substitute. The closing
+  paragraph must invite the action implied by THAT exact CTA value:
+    * `webapp_visit` → "See today's pick at gammarips.com" tone. NEVER mention
+      "Pro Trial", "Starter Trial", "Founder pricing", or any paid tier.
+    * `starter_trial` → invite the $19/mo Starter tier specifically. Do NOT
+      upsell to Pro.
+    * `pro_trial` → invite the Pro tier specifically.
+  If the schedule slot says `webapp_visit`, this is a top-of-funnel post —
+  drive to the site, NOT to a paid tier.
 - Specific dollar amounts and specific times. "$500 per trade", "10:00 AM ET",
   "3 trading days", "-60% / +80%" — not "a lot" or "about $500".
 - Publisher framing only. NO "buy this", "act now", "for you", second-person
@@ -263,20 +297,34 @@ judgment — it's a 1,500 word post, not a manifesto.
 
 # --- Custom workflow agents ------------------------------------------------
 class EscalationChecker(BaseAgent):
-    """Stops the LoopAgent when review.status == APPROVE."""
+    """Stops the LoopAgent only when review.APPROVE AND deterministic rubric passes.
+
+    Defense-in-depth: Gemini occasionally returns APPROVE on the final iteration
+    even when `rubric_check.passed` is False (e.g. paraphrased disclaimer
+    sneaks through). Trusting the LLM here would publish a non-compliant post.
+    Re-check the structured rubric as the actual gate.
+    """
 
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         review = ctx.session.state.get("review", {}) or {}
         status = review.get("status") if isinstance(review, dict) else None
+        rubric = ctx.session.state.get("rubric_check", {}) or {}
+        rubric_passed = bool(rubric.get("passed")) if isinstance(rubric, dict) else False
         # Track iterations for observability (each pass through the loop increments).
         ctx.session.state["iterations"] = ctx.session.state.get("iterations", 0) + 1
-        if status == "APPROVE":
-            logger.info("Reviewer APPROVED — escalating loop exit.")
+        if status == "APPROVE" and rubric_passed:
+            logger.info("Reviewer APPROVED + rubric passed — escalating loop exit.")
             yield Event(author=self.name, actions=EventActions(escalate=True))
         else:
-            logger.info(f"Reviewer returned {status!r} — loop continues.")
+            if status == "APPROVE" and not rubric_passed:
+                logger.warning(
+                    f"Reviewer APPROVED but rubric FAILED ({rubric.get('failures')}) — "
+                    "ignoring approval, continuing loop."
+                )
+            else:
+                logger.info(f"Reviewer returned {status!r} — loop continues.")
             yield Event(author=self.name)
 
 
@@ -326,32 +374,56 @@ class Publisher(BaseAgent):
         # Reviewer score — rubric_check passed? Convert to a pseudo-score for observability.
         reviewer_score = 10.0 if rubric.get("passed") else 0.0
 
-        # Loop exhausted without APPROVE → log rejection.
-        if review.get("status") != "APPROVE":
-            logger.warning("Loop ended without APPROVE — logging rejected.")
+        # Publish gate (mirror EscalationChecker): require BOTH reviewer
+        # APPROVE AND deterministic rubric pass. Either side missing →
+        # reject and log instead of publishing a non-compliant post.
+        review_approved = review.get("status") == "APPROVE"
+        rubric_passed = bool(rubric.get("passed"))
+        # ADK only persists in-session state via EventActions(state_delta=...).
+        # Mutating `state["publish_result"]` directly is invisible to the
+        # session_service after the run ends — fast_api_app.get_session would
+        # see no publish_result. Always yield a state_delta event.
+        if not (review_approved and rubric_passed):
+            why = (
+                f"review={review.get('status')!r}"
+                f" rubric_passed={rubric_passed}"
+                f" rubric_failures={rubric.get('failures')}"
+            )
+            logger.warning(f"Loop ended without clean APPROVE — logging rejected. {why}")
             notes = review.get("notes", "") if isinstance(review, dict) else ""
+            if rubric.get("failures"):
+                rf = "; ".join(rubric.get("failures", []))
+                notes = f"{notes}\n[rubric] {rf}".strip()
             if not dry_run and slug:
                 tools.log_rejected(slug=slug, notes=notes)
-            state["publish_result"] = {
+            rejected = {
                 "status": "rejected",
                 "slug": slug,
                 "iterations": iterations,
                 "reviewer_notes": notes,
                 "markdown": markdown,
             }
-            yield Event(author=self.name)
+            state["publish_result"] = rejected
+            yield Event(
+                author=self.name,
+                actions=EventActions(state_delta={"publish_result": rejected}),
+            )
             return
 
         # Dry run → do not write to Firestore
         if dry_run:
-            state["publish_result"] = {
+            dry = {
                 "status": "dry_run",
                 "slug": slug,
                 "markdown": markdown,
                 "iterations": iterations,
                 "reviewer_score": reviewer_score,
             }
-            yield Event(author=self.name)
+            state["publish_result"] = dry
+            yield Event(
+                author=self.name,
+                actions=EventActions(state_delta={"publish_result": dry}),
+            )
             return
 
         # Happy path — Firestore write.
@@ -365,14 +437,18 @@ class Publisher(BaseAgent):
             reviewer_score=reviewer_score,
             iterations=iterations,
         )
-        state["publish_result"] = {
+        published = {
             "status": publish_out.get("status", "unknown"),
             "slug": slug,
             "iterations": iterations,
             "reviewer_score": reviewer_score,
             "error": publish_out.get("message"),
         }
-        yield Event(author=self.name)
+        state["publish_result"] = published
+        yield Event(
+            author=self.name,
+            actions=EventActions(state_delta={"publish_result": published}),
+        )
 
 
 # --- Root pipeline ----------------------------------------------------------

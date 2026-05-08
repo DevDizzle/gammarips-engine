@@ -17,10 +17,12 @@ from gammarips_content.voice_rules import (
     RETIRED_ALIASES,
 )
 
-# Reddit-specific char budgets. Trade-idea has more room than a tweet but
-# still needs to read like a comment, not a blog post.
+# Reddit-specific char budgets. Distraction-frame: short reads better than
+# long. Trade-idea floor was 400 (anti-low-effort) but the user's content
+# strategy is "trades + receipts, no education", so genuinely tight posts
+# (~230 chars) need to pass. See feedback_reddit_short_distraction.md.
 CHAR_BUDGETS: dict[str, tuple[int, int]] = {
-    "trade_idea": (400, 1500),
+    "trade_idea": (200, 1500),
     "pnl_receipt": (200, 700),
 }
 

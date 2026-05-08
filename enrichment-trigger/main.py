@@ -213,15 +213,22 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     FROM `{SIGNALS_TABLE}`
     WHERE scan_date = '{scan_date}'
       AND overnight_score >= {MIN_SCORE}
-      AND recommended_spread_pct <= 0.10
+      AND recommended_spread_pct <= 0.08
       AND (
         (direction = 'BULLISH' AND call_uoa_depth > 500000)
         OR (direction = 'BEARISH' AND put_uoa_depth > 500000)
       )
     ORDER BY overnight_score DESC
     """
+    # spread_pct tightened 0.10 -> 0.08 on 2026-05-06 per H11 (lit-audit).
+    # Muravyev & Pearson 2020 RFS: 10% relative quoted spread -> ~5-6% effective
+    # round-trip cost; on +80/-60 bracket that's ~7% of premium move lost to
+    # friction. Cremers & Weinbaum 2010: options-flow signal degrades when
+    # options market is the less-liquid venue (>10% spread is the canonical
+    # marker). 8% is the literature-supported retail-execution defensible band
+    # for 5-15% OTM 9-DTE single-name contracts.
     rows = list(bq_client.query(query).result())
-    logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, spread<=10%%, UOA>$500K) for {scan_date}")
+    logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, spread<=8%%, UOA>$500K) for {scan_date}")
     return [dict(r) for r in rows], scan_date
 
 

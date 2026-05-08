@@ -1,0 +1,28 @@
+# gcloud source uploads — keep _gammarips_content_vendor/ even though .gitignore
+# excludes it (deploy.sh stages it from ../libs/gammarips_content/ before deploy).
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.venv*/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ty/
+.pyre/
+.DS_Store
+.idea/
+.vscode/
+out/
+tmp*
+*.egg-info/
+build/
+dist/
+.coverage
+.coverage.*
+htmlcov/
+node_modules/

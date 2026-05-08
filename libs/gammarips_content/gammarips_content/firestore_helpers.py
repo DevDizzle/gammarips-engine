@@ -38,13 +38,21 @@ def x_post_doc_id(scan_date: str, post_type: str, thread_tweet_index: int | None
 def fetch_original_tweet_id(db: firestore.Client, original_scan_date: str) -> str | None:
     """Look up the tweet_id of the original signal post for a given scan_date.
 
-    Used by win/loss callback posts that QRT the original.
+    Used by win/loss callback posts that QRT the original. Returns None for
+    dry-run / placeholder IDs so callers don't try to QRT a fake id (Tweepy
+    will 400 on `dry_run_*` strings).
     """
     doc_id = x_post_doc_id(original_scan_date, "signal")
     snap = db.collection("x_posts").document(doc_id).get()
     if not snap.exists:
         return None
-    return snap.to_dict().get("tweet_id")
+    data = snap.to_dict()
+    if data.get("dry_run"):
+        return None
+    tweet_id = data.get("tweet_id")
+    if not tweet_id or str(tweet_id).startswith("dry_run_"):
+        return None
+    return tweet_id
 
 
 def already_posted(db: firestore.Client, scan_date: str, post_type: str) -> bool:
@@ -89,5 +97,7 @@ def fetch_todays_pick(db: firestore.Client, scan_date: str) -> dict[str, Any] | 
 
 
 def fetch_todays_report(db: firestore.Client, scan_date: str) -> dict[str, Any] | None:
-    snap = db.collection("overnight_reports").document(scan_date).get()
+    # overnight-report-generator writes to `daily_reports/{date}`. Earlier docs
+    # in `overnight_reports/` were a parallel-write artifact that drifted out.
+    snap = db.collection("daily_reports").document(scan_date).get()
     return snap.to_dict() if snap.exists else None

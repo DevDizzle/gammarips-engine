@@ -29,7 +29,15 @@ PROJECT_ID = "profitscout-fida8"
 DATASET = "profit_scout"
 ENRICHED_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals_enriched"
 PERFORMANCE_TABLE = f"{PROJECT_ID}.{DATASET}.signal_performance"
+LEDGER_TABLE = f"{PROJECT_ID}.{DATASET}.forward_paper_ledger"
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip()
+
+# Park watchdog — one-shot Mailgun alerts on engine lifecycle gates.
+# Currently watches the 30-trade gate (Evan's documented return trigger).
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "").strip()
+MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "").strip()
+PARK_RECIPIENT = os.getenv("PARK_RECIPIENT", "evan@gammarips.com").strip()
+PARK_GATE_30_TRADES = 30
 
 # X posting moved to `x-poster/` service (2026-04-24). This service now
 # only tracks signal performance to BQ/Firestore. No X credentials needed.
@@ -106,6 +114,80 @@ def classify_win(peak_return_pct: float, direction: str) -> str:
         return "no_decision"
     else:
         return "loss"
+
+
+def send_park_email(subject: str, body_text: str) -> bool:
+    """Mailgun send to operator for park-mode lifecycle alerts. Returns True on success."""
+    if not (MAILGUN_API_KEY and MAILGUN_DOMAIN):
+        logger.info("Mailgun not configured; skipping park alert send.")
+        return False
+    url = f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages"
+    auth = ("api", MAILGUN_API_KEY)
+    data = {
+        "from": f"GammaRips Park Watchdog <mailgun@{MAILGUN_DOMAIN}>",
+        "to": [PARK_RECIPIENT],
+        "subject": subject,
+        "text": body_text,
+    }
+    try:
+        resp = requests.post(url, auth=auth, data=data, timeout=10)
+        resp.raise_for_status()
+        logger.info(f"Park alert sent: {subject}")
+        return True
+    except Exception as e:
+        logger.error(f"Park alert email failed: {e}")
+        return False
+
+
+def check_park_gates(bq_client, fs_client):
+    """One-shot park alerts. Idempotent via Firestore flags.
+
+    Currently watches the 30-trade gate — the user's documented return trigger.
+    Reset by deleting the Firestore flag at park_watchdog/gate_30_alerted.
+    """
+    flag_ref = fs_client.collection("park_watchdog").document("gate_30_alerted")
+    flag_snap = flag_ref.get()
+    if flag_snap.exists and flag_snap.to_dict().get("alerted"):
+        return  # one-shot — already fired
+
+    try:
+        query = f"""
+            SELECT COUNT(*) AS n
+            FROM `{LEDGER_TABLE}`
+            WHERE outcome IS NOT NULL
+              AND policy_version = 'V5_3_TARGET_80'
+        """
+        row = next(iter(bq_client.query(query).result()))
+        count = int(row["n"])
+    except Exception as e:
+        logger.warning(f"30-trade gate count query failed (non-fatal): {e}")
+        return
+
+    logger.info(f"V5.3 closed-trade count: {count}/{PARK_GATE_30_TRADES}")
+    if count < PARK_GATE_30_TRADES:
+        return
+
+    subject = "[GammaRips] 30-trade gate reached — return trigger active"
+    body_text = (
+        f"V5.3 ledger has crossed the {PARK_GATE_30_TRADES} closed paper trades threshold.\n\n"
+        f"Closed count: {count}\n"
+        f"Policy: V5.3 Target 80\n\n"
+        f"You parked GammaRips with this as your return trigger. The track-record\n"
+        f"narrative is ready to ship. Time to come back and:\n\n"
+        f"1. Pull aggregate stats from forward_paper_ledger.\n"
+        f"2. Publish the 30-trade-in-the-books blog post (Wk 9 of the 90-day plan).\n"
+        f"3. Open the paid funnel hard via the newsletter to 211+ users.\n"
+        f"4. Move the @gammarips X cadence into recap-led mode.\n\n"
+        f"This email fires exactly once. Reset the flag in Firestore at\n"
+        f"park_watchdog/gate_30_alerted to re-arm.\n"
+    )
+
+    if send_park_email(subject, body_text):
+        flag_ref.set({
+            "alerted": True,
+            "count_at_alert": count,
+            "alerted_at": firestore.SERVER_TIMESTAMP,
+        })
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -225,6 +307,14 @@ def track_signal_performance():
     }
 
     logger.info(f"Performance tracking complete: {json.dumps(summary)}")
+
+    # Park watchdog — non-blocking. One-shot lifecycle alerts (30-trade gate etc.).
+    # Lives here because win-tracker already runs daily and reads the same ledger.
+    try:
+        check_park_gates(bq_client, fs_client)
+    except Exception as e:
+        logger.warning(f"Park gate check failed (non-fatal): {e}")
+
     return jsonify(summary), 200
 
 

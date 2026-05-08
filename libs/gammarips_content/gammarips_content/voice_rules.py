@@ -99,5 +99,10 @@ def render_for_prompt() -> str:
     lines += [f"- {a}" for a in RETIRED_ALIASES]
     lines += ["", "## Banned recommendation phrasing"]
     lines += [f"- {p}" for p in BANNED_RECOMMENDATION_PHRASES]
-    lines += ["", f"## Disclaimer (required in every post)", f"- Short form: {DISCLAIMER_SHORT}"]
+    lines += [
+        "",
+        "## Disclaimer (only on trade-performance posts)",
+        f"- Short form (win/loss/callback/scorecard only): {DISCLAIMER_SHORT}",
+        "- Forward-looking posts (signal/standby/teaser/report) ship WITHOUT a disclaimer.",
+    ]
     return "\n".join(lines)

@@ -38,8 +38,16 @@ gcloud run deploy reddit-poster \
   --min-instances=0 \
   --max-instances=2 \
   --service-account="406581297632-compute@developer.gserviceaccount.com" \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DRY_RUN=${DRY_RUN},DEFAULT_SUBREDDITS=${DEFAULT_SUBREDDITS},GCS_DRAFTS_BUCKET=${GCS_DRAFTS_BUCKET}" \
-  --set-secrets="REDDIT_CLIENT_ID=REDDIT_CLIENT_ID:latest,REDDIT_CLIENT_SECRET=REDDIT_CLIENT_SECRET:latest,REDDIT_USERNAME=REDDIT_USERNAME:latest,REDDIT_PASSWORD=REDDIT_PASSWORD:latest"
+  --set-env-vars="^@^PROJECT_ID=profitscout-fida8@DRY_RUN=${DRY_RUN}@DEFAULT_SUBREDDITS=${DEFAULT_SUBREDDITS}@GCS_DRAFTS_BUCKET=${GCS_DRAFTS_BUCKET}" \
+  --clear-secrets
+
+# NOTE on Reddit credentials: previously this script also passed
+#   --set-secrets="REDDIT_CLIENT_ID=...,REDDIT_CLIENT_SECRET=...,REDDIT_USERNAME=...,REDDIT_PASSWORD=..."
+# but those Secret Manager entries were never created (the one-time setup
+# block at the top of this file was never run). Since the operating mode is
+# DRY_RUN (drafts to GCS, manual cross-posting), the creds aren't needed at
+# runtime — `reddit_client()` only fires when DRY_RUN=false. Re-add the line
+# if/when live posting is enabled and the four secrets exist.
 
 # ---------------------------------------------------------------------------
 # Cloud Scheduler — DOCUMENTATION ONLY. DO NOT auto-run from this script.

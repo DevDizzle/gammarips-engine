@@ -46,6 +46,11 @@ def fetch_todays_pick(scan_date: str) -> dict | None:
 def fetch_recent_close(now_utc: datetime | None = None) -> dict | None:
     """Return the most-recent signal_performance doc closed in the last 24h.
     If multiple closed in the window, pick the highest peak_return.
+
+    Enriches the returned dict with the running V5.3 cohort tally
+    (`wins_so_far`, `closed_so_far`) so the receipt template can render
+    "cohort so far: 1/1 wins". Source: `cohort_stats/current` Firestore doc
+    written by signal-notifier on every run.
     """
     now_utc = now_utc or datetime.now(timezone.utc)
     cutoff = now_utc - timedelta(hours=24)
@@ -64,7 +69,14 @@ def fetch_recent_close(now_utc: datetime | None = None) -> dict | None:
     if not rows:
         return None
     rows.sort(key=lambda r: float(r.get("peak_return") or 0), reverse=True)
-    return rows[0]
+    perf = rows[0]
+
+    cohort_snap = fs().collection("cohort_stats").document("current").get()
+    if cohort_snap.exists:
+        cohort = cohort_snap.to_dict() or {}
+        perf["wins_so_far"] = cohort.get("trades_won")
+        perf["closed_so_far"] = cohort.get("trades_closed")
+    return perf
 
 
 # --- Subreddit selection (round-robin) ------------------------------------

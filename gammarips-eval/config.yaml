@@ -12,10 +12,7 @@ service_evaluators:
   enrichment:
     - flow_intent_accuracy
     - calibration
-  agent_arena:
-    - consensus_return_agreement
-    - calibration
-    - quality
+  # agent_arena removed 2026-05-04 — service deprecated, no longer evaluated.
   report_generator:
     - report_factuality
     - quality

@@ -221,7 +221,7 @@ Prior reviewer notes: {review?}
 2. Use {scan_date} in the header. NEVER substitute any other date.
 3. NEVER include a ticker that is not in the brief. If brief.pick is null for post_type=signal, switch to the STANDBY template — and the STANDBY template has NO ticker anywhere. Do NOT append "($SPY)" or "$SPY flow" or any index ticker as filler. Empty is empty.
 4. Disclaimer rule (Evan 2026-04-28): ONLY win / loss / callback / scorecard end with `⚠️ Paper-trade. Not advice.` (exact characters, no paraphrasing). signal / standby / teaser / report ship WITHOUT any disclaimer line — the canonicalizer strips disclaimer-ish trailers for those types.
-5. Never include hashtags. Never use "buy", "sell", "act now", "for you". The ONLY URL allowed in any tweet body is the canonical report click-through `https://gammarips.com/reports/<scan_date>` — and only on REPORT post_type per the template below. No other URLs anywhere.
+5. Never include hashtags. Never use "buy", "sell", "act now", "for you". URL whitelist is strict: REPORT post_type uses `https://gammarips.com/reports/<scan_date>`. SIGNAL post_type uses the bare landing page `https://gammarips.com` (Path B anchor — withholds contract details, drives subs). All other post_types: no URLs anywhere.
 6. mid_total_cost = round(mid * 100). Format with comma thousands: `$2,693`.
 7. contract_emoji: 📗 for CALL (BULLISH), 📕 for PUT (BEARISH).
 8. expiration_display: convert YYYY-MM-DD to "Mon DD" (e.g., "2026-05-15" → "May 15").
@@ -235,12 +235,15 @@ Prior reviewer notes: {review?}
 === TEMPLATES (fill <slot> placeholders from brief; drop lines whose data is missing) ===
 
 --- SIGNAL (when brief.pick is not null) ---
-🔥 GammaRips Signal — <scan_date>
+Path B anchor: name the ticker + direction + score, withhold contract/strike/
+expiration/mid/V/OI/DTE. Goal is (a) plant a public timestamped anchor that
+later wins/losses can QRT as receipts, (b) drive sub conversion via the URL,
+NOT to broadcast the curated pick — that stays paid-only via email/WhatsApp.
 
-$<ticker> <direction> (Score: <score>)
-<contract_emoji> <contract_type> $<strike> | Exp: <expiration_display>
-💰 Mid: $<mid> (~$<mid_total_cost>/contract) | <moneyness_pct>% OTM
-📊 V/OI: <vol_oi> | DTE: <dte> | V5_3_TARGET_80
+📍 V5.3 pick today — $<ticker> <direction> (Score <score>)
+
+Contract, entry, stop, target → email subscribers only.
+https://gammarips.com
 
 --- STANDBY (when brief.pick is null for a signal post_type, OR post_type=standby) ---
 🛑 GammaRips Standby — <scan_date>

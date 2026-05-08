@@ -7,14 +7,17 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 | Service | What it does | Why it exists |
 |---|---|---|
 | `overnight-scanner` | Pulls raw options activity data from Polygon each evening. Detects unusual options activity (UOA) — large directional call/put volume, spread quality, technicals. | Ingests the raw universe. You'd see ~500 tickers mentioned per night. |
-| `enrichment-trigger` | Filters scanner output to signals with `overnight_score >= 1 AND spread <= 10% AND directional UOA > $500k`. Adds features: premium flags, technicals, V/OI ratio, moneyness %, VIX3M. | Turns raw noise into tradeable candidates. ~80 survive per day. |
-| `signal-notifier` | Applies V5.3 quality filters (V/OI > 2, moneyness 5–15% OTM, VIX ≤ VIX3M), ranks by directional UOA $vol, emails you the **top 1** at 9 AM ET. | Your inbox is the signal. One pick per day or nothing. |
+| `enrichment-trigger` | Filters scanner output to signals with `overnight_score >= 1 AND spread <= 8% AND directional UOA > $500k`. Adds features: premium flags, technicals, V/OI ratio, moneyness %, VIX3M. | Turns raw noise into tradeable candidates. Spread tightened from 10% to 8% on 2026-05-06 (lit-audit H11). |
+| `signal-notifier` | Applies V5.3 quality filters (V/OI > 2, moneyness 5–10% OTM, VIX ≤ VIX3M, no earnings during hold window), ranks by directional V/OI, emails you the **top 1** at **07:30 ET**. Also writes `cohort_stats/current` (public-stats panel) and the canonical `todays_pick/{scan_date}` doc. | Your inbox is the signal. One pick per day or nothing. Cron moved 09:00 → 07:30 ET on 2026-05-06. |
 | `forward-paper-trader` | Simulates V5.3 execution (10 AM entry, −60% stop, +80% target, 3-day hold, 15:50 exit) on every enriched signal. Writes to `forward_paper_ledger`. | Paper P&L baseline. Runs in parallel with your real trades so we can compare mechanical execution vs your discretion. |
 | `win-tracker` | For every enriched signal, tracks the underlying STOCK's 3-day peak price movement. Writes to `signal_performance`. Posts "strong" wins to X/Twitter. | Answers "did the direction call work?" independent of whether the option trade worked. |
 | `agent-arena` | Multi-LLM debate service. Different AI models argue for/against signals. Writes to `agent_arena_*` tables. | Research tool. Not currently gating your trades — monitoring only. |
 | `overnight-report-generator` | Uses Gemini to write an editorial summary of each night's scan for the webapp. | User-facing narrative layer. Not part of the trading loop. |
 | `gammarips-eval` | Evaluates LLM quality against labeled outcomes. Writes to `llm_eval_results_v1`. | Monitoring only. Non-gating. |
 | `gammarips-mcp`, `gammarips-webapp` | The public-facing web surface. | Consumer-facing UI for the research. |
+| `x-poster` | ADK multi-agent publisher for `@gammarips` X account. 5 schedulers/day (report, signal/standby, teaser, callback, scorecard). Text-only since 2026-04-28. Disclaimer only on win/loss/callback/scorecard. | The brand voice on X. Win/loss callbacks are the realized-P&L credibility loop. |
+| `blog-generator` | ADK multi-agent weekly blog publisher. Mon 05:00 ET cron → `POST /generate` → `blog_posts/{slug}` in Firestore → webapp renders. 13-row schedule per the 90-day plan. | Long-form SEO + cornerstone content. The blog is the hub; X / Reddit / email are spokes. |
+| `content-drafter` (planned) | Extends `blog-generator` with `/draft_reddit` + `/draft_email` endpoints. Drafts to GCS, digest emails to Evan. Never auto-posts to Reddit; can blast email to Firestore `users` collection (211 entries) on approval. | Reddit + email surfaces of the 4-surface ship-and-park plan. |
 
 ## BigQuery tables (`profitscout-fida8.profit_scout.*`)
 
@@ -29,6 +32,20 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 | `agent_arena_consensus`, `agent_arena_picks`, `agent_arena_rounds` | Multi-LLM debate artifacts. | `agent-arena` | Research/monitoring only. Not in the trading loop. |
 | `llm_eval_results_v1`, `llm_traces_v1` | LLM evaluation output and prompt/response traces. | `gammarips-eval`, shared `libs/trace_logger` | Observability into LLM quality. Not in the trading loop. |
 | `temp_perf_updates` | Staging table for win-tracker perf updates. | `win-tracker` internal | Ignore. |
+
+## Firestore collections (`profitscout-fida8` `(default)` database)
+
+| Collection | What's in it | Who writes it | Why you care |
+|---|---|---|---|
+| `todays_pick/{date}` | One doc per scan_date AND per entry_day (dual-write since 2026-04-28). Fields: `ticker`, `direction`, `recommended_contract`, `score`, `vix3m_at_enrich`, `policy_version`. | `signal-notifier` (writes both keys) | Source of truth for "today's V5.3 pick" across webapp, gamma-bot, MCP, x-poster. |
+| `overnight_reports/{date}` | Daily overnight editorial brief (markdown). | `overnight-report-generator` | x-poster `report` planner reads this; if missing the report cron skips. |
+| `x_posts/{date}_{type}` | Logged tweet record: text, tweet_id, image_url, iterations, error, dry_run, posted_at. | x-poster Publisher | Win/loss QRT lookup uses this to find the original signal tweet. |
+| `blog_schedule/current` | 13-row 90-day plan. Each row: `slug`, `week_num`, `title_candidate`, `persona`, `keywords`, `cta` (webapp_visit / starter_trial / pro_trial), `type`, `cross_channel`, `status` (pending / published). | `scripts/seed_schedule.py` (run with `PROJECT_ID=profitscout-fida8`) | blog-generator planner + future content-drafter cross-channel coordination. |
+| `blog_config/voice_rules` | Snapshotted voice rules + retired aliases + banned phrases + disclaimer strings. | seed script | Backup source for voice rules in case the lib version drifts. |
+| `blog_posts/{slug}` | Published blog markdown + metadata: title, description, keywords, cta, reviewer_score, iterations, status (published / rejected / dry_run), reading_time_min, published_at. | blog-generator Publisher (only on `dry_run=False AND APPROVE AND rubric.passed`) | Webapp `/blog/[slug]` renders directly from this. |
+| `users` | Webapp signups. 211 docs (2026-04-28). All have `email`. Other fields: displayName, isAnonymous, isSubscribed, plan, uid, daysActive, usageCount, createdAt, stripeCustomerId. | webapp signup flow | Email blast audience for content-drafter `/draft_email`. |
+| `email_subscribers` | Legacy (2 docs). | (unused) | Not used by current pipeline. |
+| `eval_reports/{iso_week}` | Weekly LLM eval markdown digest. | gammarips-eval | Monitoring. |
 
 ## Governance
 
