@@ -46,3 +46,21 @@ Operator's read after seeing Phase 3 wired end-to-end ("I don't care at all abou
 - `signal-ranker-00004-5nt`: scorer_v3 + picker_v2, IAM-only, DRY_RUN=true. Will need DRY_RUN flipped to false once Phase 4 IC eval is wired (currently no `signal_ranker_runs` writes).
 - `forward-paper-trader-00030-8ct`: still has the V5.4 sidecar. Phase 2 of the handoff retags POLICY_VERSION to V5_4_AGENT_RANKER and removes the sidecar.
 - `todays_v5_4_pick/2026-05-07` Firestore doc exists (the WFC pick). Becomes a stale artifact — next-session work optionally cleans it up.
+
+## Status — DEPLOYED 2026-05-09 (Saturday)
+
+Promotion executed end-to-end within the weekday-cron gap (Sat 5/9 + Sun 5/10 are no-fire days). No operator/subscriber emails were affected. Engine commits `3e83caf` (V5.4 promotion) + `8eec742` (content copy sweep). Webapp commit `512fb567`.
+
+| Surface | Pre-promotion | Post-promotion |
+|---|---|---|
+| `signal-notifier` | `00019-gsw` (dual-path) | `00020-rqq` (V5.4-only fail-closed) |
+| `forward-paper-trader` | `00030-8ct` (sidecar) | `00031-2bv` (`POLICY_VERSION=V5_4_AGENT_RANKER`, no sidecar) |
+| `win-tracker` | `00010-rkn` (V5.3 gate) | `00011-5l9` (V5.4 gate, `COUNT(DISTINCT scan_date)` heuristic) |
+| `signal-ranker` | `00004-5nt` (DRY_RUN=true) | unchanged — Phase 4 flips DRY_RUN |
+| Webapp | `74290ba6` (V5.3 copy) | `512fb567` (V5.4 copy, Firebase App Hosting auto-deployed) |
+| `cohort_stats/current` Firestore | V5.3 era (`cohort_start: 2026-05-07`, `policy_version: V5_3_TARGET_80`) | Manually patched 2026-05-09 to V5.4 (`cohort_start: 2026-05-08`, `policy_version: V5_4_AGENT_RANKER`, all stats 0). Will self-rewrite on first signal-notifier cron. |
+| `park_watchdog/gate_30_alerted` Firestore | (doc never existed — V5.3 never reached 30 closes) | (still does not exist; watchdog naturally re-armed on V5.4) |
+
+Pre-deploy `gammarips-review` audit verdict: GREEN. Audit covered fail-closed correctness, V5.3 residue scan, lookahead/leakage check, ledger-write integrity, win-tracker gate semantics, and doc/code consistency.
+
+**First live verification:** Mon 2026-05-11 07:30 ET (signal-notifier cron). Hold window: entry 5/11 → exit 5/14. First `signal_performance` write expected 5/14 16:30 ET.
