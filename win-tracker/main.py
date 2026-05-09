@@ -151,11 +151,18 @@ def check_park_gates(bq_client, fs_client):
         return  # one-shot — already fired
 
     try:
+        # 30-pick gate (V5.4 cohort, post-2026-05-08 retirement of V5.3).
+        # The trader simulates EVERY enriched signal as V5_4_AGENT_RANKER for
+        # research; counting raw closed rows would fire spuriously (~80/day).
+        # Approximation: COUNT(DISTINCT scan_date) where the ledger has at
+        # least one closed V5.4 row. One scan_date == one V5.4 pick day.
+        # Better fix is on the EXEC-PLAN backlog: signal-notifier writes a
+        # todays_pick_history BQ table that this query JOINs against.
         query = f"""
-            SELECT COUNT(*) AS n
+            SELECT COUNT(DISTINCT scan_date) AS n
             FROM `{LEDGER_TABLE}`
-            WHERE outcome IS NOT NULL
-              AND policy_version = 'V5_3_TARGET_80'
+            WHERE realized_return_pct IS NOT NULL
+              AND policy_version = 'V5_4_AGENT_RANKER'
         """
         row = next(iter(bq_client.query(query).result()))
         count = int(row["n"])
@@ -163,15 +170,15 @@ def check_park_gates(bq_client, fs_client):
         logger.warning(f"30-trade gate count query failed (non-fatal): {e}")
         return
 
-    logger.info(f"V5.3 closed-trade count: {count}/{PARK_GATE_30_TRADES}")
+    logger.info(f"V5.4 closed-trade count: {count}/{PARK_GATE_30_TRADES}")
     if count < PARK_GATE_30_TRADES:
         return
 
     subject = "[GammaRips] 30-trade gate reached — return trigger active"
     body_text = (
-        f"V5.3 ledger has crossed the {PARK_GATE_30_TRADES} closed paper trades threshold.\n\n"
+        f"V5.4 ledger has crossed the {PARK_GATE_30_TRADES} closed paper trades threshold.\n\n"
         f"Closed count: {count}\n"
-        f"Policy: V5.3 Target 80\n\n"
+        f"Policy: V5.4 Agent Ranker\n\n"
         f"You parked GammaRips with this as your return trigger. The track-record\n"
         f"narrative is ready to ship. Time to come back and:\n\n"
         f"1. Pull aggregate stats from forward_paper_ledger.\n"

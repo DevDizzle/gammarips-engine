@@ -11,7 +11,7 @@ Core scoring and overnight signal generation.
 Scanner-facing package / service wrapper for market-wide overnight options flow scanning.
 
 ### `enrichment-trigger/`
-Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 1`, `recommended_spread_pct <= 0.10`, directional UOA > $500K. Writes to `overnight_signals_enriched`. Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime.
+Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, directional UOA > $500K. Writes to `overnight_signals_enriched`. Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime.
 
 ### `overnight-report-generator/`
 Daily report generation for the overnight signal set.
@@ -22,7 +22,7 @@ Multi-model debate / consensus service for ranking or adjudicating signal qualit
 ### `forward-paper-trader/`
 Cloud Run service for forward paper-trading and IV cache maintenance. Single container, two endpoints:
 
-- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V5.3 Target 80** policy (`10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit`; STOP wins on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V5_3_TARGET_80`. No trader-side filters — signal-quality gates live in `enrichment-trigger` and `signal-notifier`.
+- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V5.4 Agent Ranker** policy (Target-80 trader mechanics inherited from V5.3 unchanged) (`10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit`; STOP wins on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V5_4_AGENT_RANKER`. No trader-side filters — signal-quality gates live in `enrichment-trigger` and `signal-notifier`.
 - **`POST /cache_iv`** — daily IV cache refresh (Cloud Scheduler `polygon-iv-cache-daily`, 16:30 ET Mon-Fri). Pulls trailing-30-day watchlist, fetches each underlying's options chain via Polygon, computes ATM ~30-DTE IV, appends to `polygon_iv_history`.
 - **`benchmark_context.py`** — non-blocking helper module. Hosts: FRED VIX CSV fetcher, Polygon options-chain fetcher, ATM IV extractor, HV-20d compute, SPY minute-bar cache, price-at-timestamp locators, and BigQuery IV rank query. Every function returns `None` on failure — benchmarking cannot block a trade.
 
@@ -53,12 +53,12 @@ Shared content lib vendored at deploy time into `x-poster` + `blog-generator` (a
 ## Data flow
 
 1. Overnight scanner produces signal candidates in `overnight_signals`.
-2. `enrichment-trigger` enriches signals with `overnight_score >= 1`, `recommended_spread_pct <= 0.10`, and directional UOA > $500K. Writes to `overnight_signals_enriched`. ~70 tickers/day.
+2. `enrichment-trigger` enriches signals with `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, and directional UOA > $500K. Writes to `overnight_signals_enriched`. ~70 tickers/day.
 3. Optional report/arena layers add synthesis.
-4. `signal-notifier` layers V5.3 quality gates (`volume_oi_ratio > 2`, `moneyness_pct` 5–15%, `VIX <= VIX3M`), ranks by directional UOA $vol, and emails **at most one** signal per day.
-5. `forward-paper-trader` simulates the **V5.3 Target 80** policy on all enriched signals (no trader-side filters), writes to `forward_paper_ledger`.
+4. `signal-notifier` layers the gate stack (`volume_oi_ratio > 2`, `moneyness_pct` 5–15%, `VIX <= VIX3M`), and emails **at most one** signal per day.
+5. `forward-paper-trader` simulates the **V5.4 Agent Ranker** policy (Target-80 trader mechanics inherited from V5.3 unchanged) on all enriched signals (no trader-side filters), writes to `forward_paper_ledger`.
 6. Win tracker measures post-entry stock-level outcomes (3-day peak) into `signal_performance`.
-7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until V5.3 has 4+ weeks of paper + real P&L evidence.
+7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until the V5.4 cohort hits 30 closes.
 
 **IV cache:** `polygon-iv-cache-daily` hits `POST /cache_iv` at 16:30 ET Mon-Fri, snapshotting ATM 30-DTE IV into `polygon_iv_history`. Read by `benchmark_context.fetch_iv_rank_from_bq` at trade time.
 

@@ -1,7 +1,7 @@
-# GammaRips Cheat Sheet — V5.3
+# GammaRips Cheat Sheet — V5.4
 
 ## What this system does
-Scans overnight unusual options activity → emails you the top 1 trade per day (with a clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM → stop + target pre-set → sell at 3:50 PM day-3 if neither hit. Public live-stats panel (`cohort_stats/current` Firestore doc) reflects the cohort starting 2026-05-07 (post-lit-audit reset).
+Scans overnight unusual options activity → an LLM agent ranker (Scorer + Picker) chooses one trade per day with a written justification → emails you the pick (with a clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM → stop + target pre-set → sell at 3:50 PM day-3 if neither hit. Public live-stats panel (`cohort_stats/current` Firestore doc) reflects the V5.4 cohort starting 2026-05-08 (forward_paper_ledger truncated when V5.3 was retired).
 
 ## Your daily routine
 | Time | Action |
@@ -20,7 +20,7 @@ Scans overnight unusual options activity → emails you the top 1 trade per day 
 - Timeout: 3:50 PM on day 3 (3 full trading days held)
 
 ## The signal filter (what reaches your inbox)
-Enrichment layer applies these gates; only signals passing ALL get ranked:
+Hard gates run UPSTREAM of the agent ranker. Only signals passing ALL get into the candidate pool:
 1. Overnight score >= 1
 2. Spread <= 8% (tightened from 10% on 2026-05-06 per lit-audit H11)
 3. Directional UOA > $500k
@@ -31,7 +31,7 @@ Enrichment layer applies these gates; only signals passing ALL get ranked:
 8. Recommended contract volume >= 100 (it traded yesterday in size)
 9. **No earnings near hold window** — exclude any ticker reporting in `[scan_date, entry_day+2 trading days]`. Window includes scan_date to catch AMC prints that contaminate the V/OI signal pre-entry. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*: retail loses 5–9% per event). Fail-closed if FMP earnings calendar is unreachable OR returns a non-list payload (quota-exhausted).
 
-Top 1 by directional V/OI sent by email — but if rank-1 has earnings overlap, the engine falls to rank-2, etc. (top-10 candidate pool). If all 10 have earnings overlap, the day is skipped.
+Top 10 gate-clean candidates fed to the V5.4 agent ranker. Scorer (`gemini-3-flash-preview`, scorer_v3) grades each on three rubrics (1-10): `flow_conviction` (60% weight), `regime_alignment` (25%, must cite the daily report), `narrative_coherence` (15%). HEDGING-tagged flow is hard-capped at flow_conviction ≤4. Top-5 by composite go to the Picker (`gemini-3.1-pro-preview`, picker_v2) — single high-stakes call that returns one ticker + runner-up + justification + confidence enum (`high`/`medium`/`low`). Picker reads top-5 candidate enriched data + Scorer reasoning prose (no raw rubric scores) + the daily report markdown + 14d ledger summary. **No abstain.** **Fail-closed on any error** — no fallback ranker; signal-ranker uptime is the SLO.
 
 ## Math
 - Deep Research modeled EV +1.8% to +3.2% per trade post-upgrade
@@ -52,7 +52,7 @@ Top 1 by directional V/OI sent by email — but if rank-1 has earnings overlap, 
 - If EV < 0 → pause, rerun Deep Research angle
 
 ## Services (reference only)
-`overnight-scanner → enrichment-trigger → signal-notifier (email) → forward-paper-trader (ledger)`
+`overnight-scanner → enrichment-trigger → signal-notifier ← signal-ranker (V5.4 picker) → email + Firestore todays_pick → forward-paper-trader (ledger)`
 
 ## Source of truth
-This file + `docs/TRADING-STRATEGY.md` + `docs/DECISIONS/2026-04-17-v5-3-target-80.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.
+This file + `docs/TRADING-STRATEGY.md` + `docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.

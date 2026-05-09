@@ -58,6 +58,13 @@ See `docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md#pre-launch-checklist`.
 - DRY_RUN flag honored on first deploy
 
 ## Open
-- Composite formula: weighted sum vs weighted geometric mean
-- Picker confidence: enum vs float
-- Whether Picker sees raw rubric scores or only Scorer prose (recommended: prose only, prevents min-maxing)
+
+All three pre-Phase-2 questions resolved 2026-05-08 (same day as spec-lock, post-Phase-0 schema approval):
+
+| Question | Resolution | Rationale |
+|---|---|---|
+| Composite formula | **Weighted sum:** `composite = 0.6*flow + 0.25*regime + 0.15*narrative` | Linear, matches literature anchors directly, easy to debug. Geometric mean deferred — revisit only if eval shows interaction effects. At v0, "10/3/3 beats 7/7/7" is intended — flow dominates by design. |
+| Picker confidence | **Enum** `"high" \| "medium" \| "low"` (stored STRING) | Cleaner prompt instruction, no false-precision float hallucinations. Map to {0.8, 0.5, 0.2} for IC analysis if needed. |
+| Picker input | **Scorer reasoning prose only** — no raw rubric scores / composite | Prevents Picker from rubber-stamping the loudest single-rubric scorer. Picker integrates evidence itself rather than min-maxing the composite. |
+
+Remaining open call (deferred to Phase 3): operator email format — side-by-side cards vs separate V5.3 / V5.4 sections.

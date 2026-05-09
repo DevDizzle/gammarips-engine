@@ -1,9 +1,7 @@
 # TRADING-STRATEGY.md
 
 ## Status
-**V5.3 "Target 80"** is the only active strategy (adopted 2026-04-17). V4 retired same day. V3 retired 2026-04-16. For the one-page operator view, see [`CHEAT-SHEET.md`](../CHEAT-SHEET.md). For the rationale, see [`docs/DECISIONS/2026-04-17-v5-3-target-80.md`](DECISIONS/2026-04-17-v5-3-target-80.md). Earlier V1-V4 history lives in `docs/archive/`.
-
-**V5.4 "Agent Ranker" is in active development** (spec locked 2026-05-08, no code yet). V5.4 replaces V5.3's deterministic SQL ranker with a Scorer→Picker LLM pair while inheriting V5.3's hard gates (V/OI floor, moneyness, OI/vol floors, VIX ≤ VIX3M, earnings overlap exclusion) upstream unchanged. V5.3 keeps running in production in parallel via a second `forward_paper_ledger` row tagged `policy_version=V5_4_AGENT_RANKER`. No ledger truncation. V5.3 retires only when V5.4 wins on N≥30 head-to-head closes. Spec: [`docs/DECISIONS/2026-05-08-v5-4-locked-spec.md`](DECISIONS/2026-05-08-v5-4-locked-spec.md). Plan: [`docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md`](EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md).
+**V5.4 "Agent Ranker"** is the only active strategy (promoted 2026-05-08; V5.3 retired same day; `forward_paper_ledger` TRUNCATED — 246 rows wiped). V5.4 replaces V5.3's deterministic SQL ranker with a Scorer→Picker LLM pair (`gemini-3-flash-preview` + `gemini-3.1-pro-preview`) hosted at the `signal-ranker` Cloud Run service. Trader execution mechanics are unchanged from V5.3 — V5.4 is a *picker* change, not a *trader* change. **Fail-closed on V5.4 error: no V5.3 fallback exists.** For the one-page operator view, see [`CHEAT-SHEET.md`](../CHEAT-SHEET.md). For the retirement decision, see [`docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md`](DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md). For the V5.4 agent-ranker design, see [`docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md`](EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md). For the V5.4 promotion, see [`docs/EXEC-PLANS/2026-05-08-v5-4-promotion.md`](EXEC-PLANS/2026-05-08-v5-4-promotion.md). Earlier V1-V5.3 history lives in `docs/archive/`.
 
 ## Objective
 Generate at most one high-conviction options alert per trading day, execute it mechanically by phone with pre-defined stop and target orders at entry, and hold for up to 3 trading days. Minimize decisions; maximize routine adherence.
@@ -19,9 +17,9 @@ Generate at most one high-conviction options alert per trading day, execute it m
 | Exit precedence | On ambiguous bars, STOP wins over TARGET (conservative) |
 | Direction | Calls on `BULLISH`, puts on `BEARISH` |
 | Ledger | `profitscout-fida8.profit_scout.forward_paper_ledger` |
-| Policy labels | `policy_version = V5_3_TARGET_80`, `policy_gate = ENRICHMENT_ONLY_NO_TRADER_GATE` |
+| Policy labels | `policy_version = V5_4_AGENT_RANKER`, `policy_gate = ENRICHMENT_ONLY_NO_TRADER_GATE` |
 
-The trader applies **no additional gates**. Every enriched signal for the day is simulated and ledgered, which preserves the research dataset. Human alerting is handled by `signal-notifier`, which applies the V5.3 filter stack and emails at most one signal.
+The trader applies **no additional gates**. Every enriched signal for the day is simulated and ledgered, which preserves the research dataset for IC analysis. Human alerting is handled by `signal-notifier`, which applies the gate stack, calls the V5.4 agent ranker, and emails the single picked ticker. The "official V5.4 pick" is identified externally via ticker JOIN to Firestore `todays_pick/{scan_date}` — there is no special policy_version tag distinguishing the picked row from the broad-research rows in the ledger.
 
 ## Signal filter stack
 Enrichment (`enrichment-trigger`) enforces:
@@ -34,7 +32,8 @@ Notifier (`signal-notifier`) layers on top of that:
 - `moneyness_pct BETWEEN 0.05 AND 0.10` (5-10% OTM; tightened from 0.15 on 2026-05-06 per H12 lit-audit; Aretz et al. 2023 RoF, Augustin et al. 2022 J. Fin. Mkts)
 - `VIX <= VIX3M` regime gate (fail-closed if either is NULL)
 - **Earnings-overlap exclusion** (added 2026-05-06): exclude any ticker whose scheduled earnings date falls in `[scan_date, entry_day + 2 trading days]`. Window includes `scan_date` to catch AMC-scan_date contamination (V/OI signal generated under known-imminent earnings positioning, then prints before our 10:00 entry_day open). Literature-anchored hard rule (De Silva, Smith & So 2026 *Review of Finance*; Cao & Han 2013 JFE) — retail loses 5–9% on average per earnings event holding long single-leg through the print, 10–14% on high-vol names. Fail-closed if FMP earnings calendar is unreachable OR returns a non-list payload (quota-exhausted: HTTP 200 + error dict). See `docs/DECISIONS/2026-05-06-earnings-overlap-exclusion.md`.
-- Deterministic 4-key `ORDER BY` then `LIMIT 10` (post-2026-05-01 `voi-first` ranker): `(1) COALESCE(directional V/OI, 0) DESC, (2) recommended_spread_pct ASC, (3) overnight_score DESC, (4) ticker ASC`. Lead key is direction-aware (`call_vol_oi_ratio` for BULLISH, `put_vol_oi_ratio` for BEARISH) per `docs/DECISIONS/2026-05-01-ranker-v2-voi-first.md`. Every tiebreaker is necessary for determinism. Selection: walk the ranked list and take the first ticker NOT reporting earnings in the window. If all 10 have earnings overlap → skip the day with `skip_reason=earnings_overlap_all_candidates`.
+- Deterministic 4-key `ORDER BY` then `LIMIT 10` (the candidate pool): `(1) COALESCE(directional V/OI, 0) DESC, (2) recommended_spread_pct ASC, (3) overnight_score DESC, (4) ticker ASC`. Lead key is direction-aware. Earnings-overlap exclusion removes any ticker reporting in the hold window from the pool. Surviving candidates (≤10) are passed to the V5.4 agent ranker.
+- **V5.4 agent ranker** (`signal-ranker` Cloud Run service): Scorer fanout (`gemini-3-flash-preview`, scorer_v3 — HEDGING `flow_conviction` ≤4 hard cap) grades each candidate on three rubrics 1-10. Composite weights 60/25/15 flow / regime / narrative (weighted sum). Top-5 by composite go to the Picker (`gemini-3.1-pro-preview`, picker_v2 — enum confidence). Picker reads top-5 candidate enriched data + Scorer reasoning prose (no raw rubric scores) + the daily report markdown + 14d ledger summary. Returns one ticker + runner-up + justification + confidence. **No abstain.** **No V5.3 fallback** — signal-ranker uptime is the SLO; on any error (timeout, 5xx, picker out-of-set), `signal-notifier` fails CLOSED (no email, empty-state `todays_pick`). Decision lock: `docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md`.
 
 If nothing clears the stack, nothing is emailed.
 
@@ -48,12 +47,13 @@ Schema of `todays_pick/{scan_date}`:
 - `ticker, direction, recommended_contract, recommended_strike, recommended_expiration, recommended_mid_price, recommended_dte` — the pick
 - `overnight_score, vol_oi_ratio, moneyness_pct, call_dollar_volume, put_dollar_volume, vix3m_at_enrich, vix_now_at_decision` — the gate-evidence fields (for the "why today's pick" panel)
 - `decided_at: TIMESTAMP, effective_at: ISO8601 string` — decision time and the 10:00 ET day-1 simulated entry time
-- `policy_version: "V5_3_TARGET_80"` — pinned. Never gets mutated; a new version string means a different policy.
+- `policy_version: "V5_4_AGENT_RANKER"` — pinned. Never gets mutated; a new version string means a different policy.
+- `v5_4_run_id, v5_4_runner_up, v5_4_justification, v5_4_confidence, v5_4_scorer_prompt_version, v5_4_picker_prompt_version, v5_4_scorer_model, v5_4_picker_model` — agent-ranker provenance, present on every `has_pick=True` doc post-2026-05-08 promotion. Webapp / email / x-poster / blog newsletter render `v5_4_justification` as the "Why we picked it" prose under the contract card.
 
-**Simulated entry at 10:00 ET day-1 in `forward-paper-trader` models realistic operator slippage; real-money execution is the operator's responsibility and discretionary.** The paper ledger is the control — it takes every V5.3 pick regardless of arena verdict or operator skip. When we start publishing real-money track record as a marketing claim (Phase 5+), every claim must be labeled with the filter used (e.g., "paper: full-coverage +X%" vs "arena-filtered: took only TAKE-votes, +Y%").
+**Simulated entry at 10:00 ET day-1 in `forward-paper-trader` models realistic operator slippage; real-money execution is the operator's responsibility and discretionary.** The paper ledger is the V5.4 cohort baseline. Pre-2026-05-08 V5.3 ledger rows were truncated; the V5.4 cohort starts fresh from 2026-05-08.
 
 ## Feature enrichment (`overnight_signals_enriched`)
-Three V5.3 columns added on top of the existing schema (all NULLABLE; old rows get NULL and are excluded by the notifier's fail-closed filter):
+Three V5.2-era columns added on top of the existing schema (all NULLABLE; old rows get NULL and are excluded by the notifier's fail-closed filter). These remain V5.4's canonical inputs:
 - `volume_oi_ratio` — `recommended_volume / NULLIF(recommended_oi, 0)` at the focal strike
 - `moneyness_pct` — `abs(recommended_strike - underlying_price) / underlying_price`. Falls back to Polygon scan_date close when `underlying_price` is missing.
 - `vix3m_at_enrich` — FRED `VXVCLS` close at or before `scan_date`, cached once per invocation
@@ -68,21 +68,22 @@ Every executed ledger row still writes three parallel P&L streams:
 
 Plus regime context: `VIX_at_entry` (FRED VIXCLS), `vix_5d_delta_entry`, `hv_20d_entry`, `iv_rank_entry` / `iv_percentile_entry` from `polygon_iv_history`.
 
-## Live cohort + public stats surface (added 2026-05-06)
-- **Cohort start date:** `LIVE_COHORT_START_DATE = "2026-05-07"`. Constant lives in `signal-notifier/main.py`. Pre-cohort `forward_paper_ledger` rows were truncated 2026-05-06 — they were generated under pre-audit filter set (looser spread, looser moneyness, no earnings exclusion) and are not a clean baseline.
-- **Stats Firestore doc:** `cohort_stats/current`, single source of truth for the public webapp social-proof panel. Schema and refresh cadence in `docs/DECISIONS/2026-05-06-paper-trader-reset-and-stats-surface.md`.
+## Live cohort + public stats surface
+- **Cohort start date:** `LIVE_COHORT_START_DATE = "2026-05-08"`. Constant lives in `signal-notifier/main.py`. The full `forward_paper_ledger` was TRUNCATED 2026-05-08 when V5.3 was retired — V5.4 cohort starts fresh from 2026-05-08.
+- **Stats Firestore doc:** `cohort_stats/current`, single source of truth for the public webapp social-proof panel. Schema and refresh cadence in `docs/DECISIONS/2026-05-06-paper-trader-reset-and-stats-surface.md` (pre-promotion baseline) updated for V5.4 in `docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md`.
 - **Refresh trigger:** `signal-notifier/run_notifier()` calls `compute_and_write_cohort_stats()` once per daily cron run. Ad-hoc refresh via `POST /refresh_stats` (no email side-effects).
 - **Webapp deep-link:** operator email + WhatsApp messages include `https://gammarips.com/signals/{TICKER}` so subscribers click through to the per-ticker rationale page.
 
 ## Validation posture
-- **Paper + real parallel** from deploy. User elected to begin real-money trading at $500/trade in parallel with paper ledger. `gammarips-review` must audit V5.3 before deploy.
+- **Paper + real parallel** from deploy. User elected to begin real-money trading at $500/trade in parallel with paper ledger. `gammarips-review` must audit V5.4 before each new deploy.
 - **No knob-twiddling during paper.** If EV is negative after 4 weeks, revisit Deep Research; don't tune filters.
 - **Do not modify `signals_labeled_v1` or `scripts/research/`** — both are frozen for reproducibility.
 - **Do not treat bearish dominance as a flaw.** It reflects regime.
 - **Do not add execution gates to the trader.** Signal-quality gates live in enrichment and notifier, not in `forward-paper-trader`.
+- **Do not add a V5.3 fallback for V5.4 errors.** Fail-closed is intentional — signal-ranker uptime is the SLO.
 
-## Phase 2 backlog (NOT in V5.3)
-Deferred until V5.3 accumulates paper EV evidence:
+## Phase 2 backlog (NOT in V5.4)
+Deferred until V5.4 accumulates paper EV evidence:
 - Sweep / block detection (needs tick-level trade classification)
 - Aggressor side (bid vs ask lift, needs millisecond trade data)
 - GEX / dealer positioning

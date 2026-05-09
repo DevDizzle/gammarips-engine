@@ -37,6 +37,9 @@ V5.3's ranker is a 4-key SQL `ORDER BY` (`directional V/OI DESC → spread ASC �
 | Decision | Value | Rationale |
 |---|---|---|
 | Composite weights v0 | **60% flow_conviction / 25% regime_alignment / 15% narrative_coherence** | Pan-Poteshman 2006 RFS (flow alpha peaks day 1-2 at our exact horizon); Hu 2014 + Cheng 2019 (regime is a multiplier on flow, not independent edge); Tetlock 2007 + Engelberg et al. 2012 (news mostly priced in by 10:00 ET entry, coherence-check role only). In-house corroboration: `enrichment_quality_score` was anti-predictive in `FINDINGS_LEDGER.md`. Equal-weighting is **not** defensible at this horizon. Re-weight after N=30 V5.4 closed trades via IC decomposition. |
+| Composite formula v0 | **Weighted sum:** `composite = 0.6*flow + 0.25*regime + 0.15*narrative` | Resolved 2026-05-08 (post-spec-lock). Linear, matches literature anchors directly, easy to debug. Geometric mean deferred — revisit only if eval shows interaction effects (i.e. a low single-rubric score should disqualify regardless of flow strength). At v0, "10/3/3 beats 7/7/7" is the intended behavior — flow conviction dominates by design. |
+| Picker confidence shape v0 | **Enum:** `"high" \| "medium" \| "low"` (stored as STRING) | Resolved 2026-05-08. Cleaner prompt instruction, less surface for hallucinated false-precision floats. If eval needs a continuous signal later, map enum→{0.8, 0.5, 0.2} or revisit. |
+| Picker input shape v0 | **Scorer reasoning prose only** — no raw rubric scores or composite | Resolved 2026-05-08. Picker reads each top-5 candidate's 2-3 sentence Scorer reasoning + full enriched BQ row + report + 14d ledger. Withholds raw rubric numbers to prevent rubber-stamping the loudest single-rubric scorer. Picker integrates evidence itself rather than min-maxing the composite. |
 | Scorer model | `gemini-3-flash-preview` | Repeated 5-10× per day, structured 1-10 output. Flash is plenty. Matches production fleet. |
 | Picker model | `gemini-3.1-pro-preview` | Single high-stakes reasoning call/day with full context (top-5 + Scorer outputs + report + 14d ledger). Pro tier earns its keep. x-poster CLAUDE.md recommends for new agents. |
 | Picker contract | **No abstain.** Given ≥1 candidate from V5.3 gates → return exactly one ticker. | V5.4 inherits V5.3's skip_reasons by being downstream. The product is a pick. |
@@ -258,12 +261,14 @@ Picker reads this Firestore doc directly. Already populated by `overnight-report
 - [ ] Service deployed with default compute SA (per `feedback_default_compute_sa.md`)
 - [ ] DRY_RUN flag honored in signal-ranker for first deploy (writes to BQ only, signal-notifier skips the second ledger row)
 
-## Open questions for next session
+## Open questions
 
-- Composite formula: weighted **sum** (current spec) vs weighted **geometric mean** (penalizes low single-dimension scores more aggressively). Recommended default: weighted sum until eval shows actual interaction effects.
-- Picker confidence: enum (`high|medium|low`) or float 0-1? Enum is cleaner for prompt; float is friendlier for downstream IC. **Recommended:** enum at v1, revisit if eval needs continuous.
-- Whether Picker sees raw rubric scores or only Scorer reasoning prose. **Recommended:** prose only (prevents min-maxing the loudest rubric).
-- Email format: side-by-side cards vs separate sections. Operator preference call.
+Three of the four pre-Phase-2 questions are resolved; the email-format call surfaces in Phase 3.
+
+- ~~Composite formula: weighted sum vs geometric mean.~~ **Resolved 2026-05-08: weighted sum.**
+- ~~Picker confidence: enum vs float.~~ **Resolved 2026-05-08: enum (`high|medium|low`).**
+- ~~Picker input: raw scores vs prose.~~ **Resolved 2026-05-08: Scorer reasoning prose only.**
+- Email format (Phase 3): side-by-side cards vs separate sections. Operator preference call — punted to Phase 3 wiring time.
 
 ## References
 

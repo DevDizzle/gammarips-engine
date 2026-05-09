@@ -8,8 +8,8 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 |---|---|---|
 | `overnight-scanner` | Pulls raw options activity data from Polygon each evening. Detects unusual options activity (UOA) — large directional call/put volume, spread quality, technicals. | Ingests the raw universe. You'd see ~500 tickers mentioned per night. |
 | `enrichment-trigger` | Filters scanner output to signals with `overnight_score >= 1 AND spread <= 8% AND directional UOA > $500k`. Adds features: premium flags, technicals, V/OI ratio, moneyness %, VIX3M. | Turns raw noise into tradeable candidates. Spread tightened from 10% to 8% on 2026-05-06 (lit-audit H11). |
-| `signal-notifier` | Applies V5.3 quality filters (V/OI > 2, moneyness 5–10% OTM, VIX ≤ VIX3M, no earnings during hold window), ranks by directional V/OI, emails you the **top 1** at **07:30 ET**. Also writes `cohort_stats/current` (public-stats panel) and the canonical `todays_pick/{scan_date}` doc. | Your inbox is the signal. One pick per day or nothing. Cron moved 09:00 → 07:30 ET on 2026-05-06. |
-| `forward-paper-trader` | Simulates V5.3 execution (10 AM entry, −60% stop, +80% target, 3-day hold, 15:50 exit) on every enriched signal. Writes to `forward_paper_ledger`. | Paper P&L baseline. Runs in parallel with your real trades so we can compare mechanical execution vs your discretion. |
+| `signal-notifier` | Applies the gate stack (V/OI > 2, moneyness 5–10% OTM, VIX ≤ VIX3M, no earnings during hold window), ranks by directional V/OI, emails you the **top 1** at **07:30 ET**. Also writes `cohort_stats/current` (public-stats panel) and the canonical `todays_pick/{scan_date}` doc. | Your inbox is the signal. One pick per day or nothing. Cron moved 09:00 → 07:30 ET on 2026-05-06. |
+| `forward-paper-trader` | Simulates V5.4 execution (10 AM entry, −60% stop, +80% target, 3-day hold, 15:50 exit) on every enriched signal. Writes to `forward_paper_ledger`. | Paper P&L baseline. Runs in parallel with your real trades so we can compare mechanical execution vs your discretion. |
 | `win-tracker` | For every enriched signal, tracks the underlying STOCK's 3-day peak price movement. Writes to `signal_performance`. Posts "strong" wins to X/Twitter. | Answers "did the direction call work?" independent of whether the option trade worked. |
 | `agent-arena` | Multi-LLM debate service. Different AI models argue for/against signals. Writes to `agent_arena_*` tables. | Research tool. Not currently gating your trades — monitoring only. |
 | `overnight-report-generator` | Uses Gemini to write an editorial summary of each night's scan for the webapp. | User-facing narrative layer. Not part of the trading loop. |
@@ -27,7 +27,7 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 | `overnight_signals_enriched` | Filtered + feature-added signals. 80-ish rows/day passing the enrichment gate. Has all the features the notifier and trader use (premium flags, technicals, V/OI, moneyness, VIX3M). | `enrichment-trigger` | This is the table the notifier reads to decide what to email you. |
 | `signal_performance` | Stock-level 3-day outcomes: peak move %, tier bucket (strong/solid/directional/no_decision/loss), `is_final` flag. 2,664 rows since Feb 18. | `win-tracker` | Answers "did the signal pick the right direction?" Use for directional accuracy analysis. |
 | `signals_labeled_v1` | **FROZEN research dataset.** 2,162 option-level simulated trades (Feb 18 – Apr 6) with entry, target, stop, exit, realized return. Built by `scripts/research/` (frozen). | One-shot research script (do not rebuild) | Historical validation backbone. Do not modify. Read-only use only. |
-| `forward_paper_ledger` | Paper P&L for every enriched signal. Tagged by `policy_version` — V4 rows from pre-2026-04-17, V5.3 rows going forward. | `forward-paper-trader` | Your live paper scoreboard. Compare V5.3 EV here to your real P&L to see if discretion adds value. |
+| `forward_paper_ledger` | Paper P&L for every enriched signal. Tagged by `policy_version` — all V5.4 rows post-2026-05-08; V5.3 ledger rows truncated when V5.4 was promoted. | `forward-paper-trader` | Your live paper scoreboard. Compare V5.4 EV here to your real P&L to see if discretion adds value. |
 | `polygon_iv_history` | Daily ATM-30D implied volatility snapshot per ticker in the scan universe. | `forward-paper-trader` `/cache_iv` endpoint (daily 16:30 ET) | Backfills `iv_rank_entry`/`iv_percentile_entry` on ledger rows. |
 | `agent_arena_consensus`, `agent_arena_picks`, `agent_arena_rounds` | Multi-LLM debate artifacts. | `agent-arena` | Research/monitoring only. Not in the trading loop. |
 | `llm_eval_results_v1`, `llm_traces_v1` | LLM evaluation output and prompt/response traces. | `gammarips-eval`, shared `libs/trace_logger` | Observability into LLM quality. Not in the trading loop. |
@@ -37,7 +37,7 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 
 | Collection | What's in it | Who writes it | Why you care |
 |---|---|---|---|
-| `todays_pick/{date}` | One doc per scan_date AND per entry_day (dual-write since 2026-04-28). Fields: `ticker`, `direction`, `recommended_contract`, `score`, `vix3m_at_enrich`, `policy_version`. | `signal-notifier` (writes both keys) | Source of truth for "today's V5.3 pick" across webapp, gamma-bot, MCP, x-poster. |
+| `todays_pick/{date}` | One doc per scan_date AND per entry_day (dual-write since 2026-04-28). Fields: `ticker`, `direction`, `recommended_contract`, `score`, `vix3m_at_enrich`, `policy_version`. | `signal-notifier` (writes both keys) | Source of truth for "today's GammaRips pick" across webapp, gamma-bot, MCP, x-poster. |
 | `overnight_reports/{date}` | Daily overnight editorial brief (markdown). | `overnight-report-generator` | x-poster `report` planner reads this; if missing the report cron skips. |
 | `x_posts/{date}_{type}` | Logged tweet record: text, tweet_id, image_url, iterations, error, dry_run, posted_at. | x-poster Publisher | Win/loss QRT lookup uses this to find the original signal tweet. |
 | `blog_schedule/current` | 13-row 90-day plan. Each row: `slug`, `week_num`, `title_candidate`, `persona`, `keywords`, `cta` (webapp_visit / starter_trial / pro_trial), `type`, `cross_channel`, `status` (pending / published). | `scripts/seed_schedule.py` (run with `PROJECT_ID=profitscout-fida8`) | blog-generator planner + future content-drafter cross-channel coordination. |
@@ -51,12 +51,12 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 
 | Term | What it means |
 |---|---|
-| `policy_version` | Tag on every ledger row identifying which strategy produced it. V5.3 rows get `V5_3_TARGET_80`; older V4 rows retain `V4_NO_GATE_SPREAD_ONLY`. **Never reuse a label across strategies** — keeps the cohorts clean. |
-| `policy_gate` | Describes the filter applied. V5.3 uses `ENRICHMENT_ONLY_NO_TRADER_GATE` — meaning the trader applies no filters, all gates live upstream. |
+| `policy_version` | Tag on every ledger row identifying which strategy produced it. V5.4 rows get `V5_4_AGENT_RANKER`; pre-2026-05-08 V5.3 rows were truncated when V5.4 was promoted. **Never reuse a label across strategies** — keeps the cohorts clean. |
+| `policy_gate` | Describes the filter applied. V5.4 inherits `ENRICHMENT_ONLY_NO_TRADER_GATE` — meaning the trader applies no filters, all gates live upstream. |
 | `scan_date` | The date the scanner ran (overnight). Signals for `scan_date = X` are traded on `X+1 trading day`. |
 | `enriched_at` | Timestamp the enrichment step completed. For a `scan_date` of Monday, `enriched_at` is typically Tuesday 05:30 ET. |
 | Frozen files | `scripts/research/*` and `signals_labeled_v1` are immutable for reproducibility. Everything else can evolve. |
-| Phase 2 backlog | Sweep/block detection, aggressor side, GEX, trailing stops — all deferred until V5.3 accumulates 4+ weeks of live evidence. |
+| Phase 2 backlog | Sweep/block detection, aggressor side, GEX, trailing stops — all deferred until the V5.4 cohort hits 30 closes. |
 
 ## Subagents (Claude Code)
 
@@ -72,7 +72,7 @@ Plain-English reference. Not schemas. Use this to remember what each thing is fo
 |---|---|
 | `CHEAT-SHEET.md` (root) | You want to know what to do today. |
 | `docs/TRADING-STRATEGY.md` | You want the canonical policy spec. |
-| `docs/DECISIONS/2026-04-17-v5-3-target-80.md` | You want the rationale behind V5.3. |
+| `docs/DECISIONS/2026-04-17-v5-3-target-80.md` | You want the V5.3 → V5.4 lineage. |
 | `docs/GLOSSARY.md` (this file) | You forgot what a service or table is for. |
 | `docs/ARCHITECTURE.md` | You're touching code and need the data-flow map. |
 | `docs/DATA-CONTRACTS.md` | You need the actual BQ schemas. |

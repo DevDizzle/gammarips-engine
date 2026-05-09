@@ -1,35 +1,64 @@
 # Next Session Prompt
 
-**Last session wrapped:** 2026-05-08 — **V5.4 agent-ranker spec LOCKED.** Full implementation plan exists; no code written yet. Operator pushed back on shadow-mode framing — paper-trading IS the OOS venue per G-Stack DoD, V5.4 goes live to paper from day one alongside V5.3. Side win: regenerated the social-preview OG image at `gammarips-webapp/public/og-image.png` via `gemini-3-pro-image-preview` (old image still pitched the deprecated agent-arena copy). Two literature/research subagents settled the open questions: composite weights are **60% flow / 25% regime / 15% narrative** (anchored on Pan-Poteshman 2006, Hu 2014, Cheng 2019, Tetlock 2007, Engelberg 2012); Vertex AI Prompt Optimizer is GA but its preview-model-target restriction means we use it post-launch with `gemini-2.5-pro` as tuning target and transfer.
+**Last session wrapped:** 2026-05-08 (Friday late) — **V5.4 promotion code DONE across both repos. UNCOMMITTED + UNDEPLOYED.** This session executed the entire promotion code rewrite. The only steps left are: review diff → commit → deploy → Monday 5/11 07:30 ET first-cron verify. Cron is weekday-only (`30 7 * * 1-5`), so Sat 5/9 + Sun 5/10 are no-cron days — comfortable window to ship without operator-email duplication risk.
 
-**Prior sessions:** 2026-05-07 receipt-only content strategy + NVAX trade #1 of post-lit-audit cohort; 2026-05-06 lit-audit deploys + ledger truncation + cohort_stats live-stats panel; 2026-04-30 content surfaces live; 2026-04-17 V5.3 adopted.
-**Current policy:** V5.3 "Target 80" running unchanged. NVAX (entered 5/7) closed sometime around 5/12.
-**V5.4 status (2026-05-08):** spec locked, no code. Plan in [`docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md`](docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md), decision in [`docs/DECISIONS/2026-05-08-v5-4-locked-spec.md`](docs/DECISIONS/2026-05-08-v5-4-locked-spec.md).
+**State at handoff time:**
+- `forward_paper_ledger` TRUNCATED (246 V5.3 rows wiped earlier in session) — empty.
+- gammarips-engine repo: 28 files modified, 4 new files (decision doc, exec plan, V5.4 BQ DDL script, signal-ranker service tree). All UNCOMMITTED.
+- gammarips-webapp repo: 20 files modified. All UNCOMMITTED. Firebase App Hosting auto-deploys on `main` push.
+- No services redeployed since session 2 (`signal-notifier-00019-gsw`, `signal-ranker-00004-5nt`, `forward-paper-trader-00030-8ct`). Tomorrow morning's wiring goes live ONLY if the next session redeploys.
+
+**Prior sessions:** 2026-05-08 (early) V5.4 spec LOCKED + Phases 0/1/2/2.5/3 built + deployed as DRY_RUN shadow; 2026-05-07 receipt-only content strategy + NVAX trade #1 of post-lit-audit cohort; 2026-05-06 lit-audit deploys + ledger truncation + cohort_stats live-stats panel; 2026-04-30 content surfaces live; 2026-04-17 V5.3 adopted (now retired).
+**Current policy:** V5.4 Agent Ranker is the only active strategy; V5.3 retired same day. Decision lock: [`docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md`](docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md). Promotion EXEC-PLAN: [`docs/EXEC-PLANS/2026-05-08-v5-4-promotion.md`](docs/EXEC-PLANS/2026-05-08-v5-4-promotion.md).
+**V5.4 build status:** Phases 0/1/2/2.5/3 LIVE in production. Promotion code DONE but undeployed. Phase 4 (gammarips-eval rubric IC) NOT YET BUILT — defer until ≥10 V5.4 closes.
 
 ---
 
 ## TL;DR for the next session
 
-**Primary task: start V5.4 implementation, Phase 0 first.**
+**Primary task: review → commit → deploy the V5.4 promotion before Monday 5/11 07:30 ET.**
 
-1. **Read** [`docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md`](docs/EXEC-PLANS/2026-05-08-v5-4-agent-ranker-plan.md) **end-to-end before writing code.** It is self-contained — every locked decision, every model string, every schema column, every phase deliverable is in there.
-2. **Phase 0 — `signal_ranker_runs` BQ table** is the first concrete deliverable (1 day). Write the one-shot creation script under `scripts/ledger_and_tracking/create_signal_ranker_runs.py` matching the schema in the EXEC-PLAN. Per [`.claude/rules/scripts-ledger.md`](.claude/rules/scripts-ledger.md), this is a one-shot DDL — do not re-run without explicit user approval after first execution.
-3. **Phase 1 — enrichment thesis flow-context plumb** (½ day) is independent and a free win even if V5.4 stalls. Modify the per-ticker thesis prompt at `enrichment-trigger/main.py:276` to accept a same-day flow-context struct (sector mix, dominant direction, candidate count, VIX vs VIX3M state) computed from the day's enriched signals. Keep existing news grounding intact.
-4. **Phase 2 — `signal-ranker` Cloud Run service** (3 days) is the meat. Mirror x-poster's shape. Two prompt files at v1. ParallelAgent (Scorer fanout) + deterministic top-5 cutter + LlmAgent (Picker). Default compute SA. Endpoint `POST /rank` (NOT `/run` — ADK reserves it).
-5. **Pre-launch: invoke `gammarips-review`** for lookahead / leakage / fallback audit. Required per CLAUDE.md G-Stack rules.
-6. **Operating cadence reminder:** Park is still active. Win-tracker emails `evan@gammarips.com` on V5.3 30-closed-trades gate. NVAX trade pipeline + receipt loop continues on autopilot during V5.4 build.
+The code rewrite is finished across both repos. What's left is the safety net + push.
 
-**Locked decisions (don't relitigate without strong reason):**
-- Composite weights v0: **60/25/15** flow/regime/narrative
-- Scorer = `gemini-3-flash-preview`; Picker = `gemini-3.1-pro-preview` (note: there is no GA `gemini-3-pro` text model; `gemini-3-pro-image-preview` is image-only and was the source of the operator's mis-naming in the planning conversation)
-- No abstain in Picker. V5.4 inherits V5.3 skip_reasons by being downstream.
-- No `forward_paper_ledger` truncation. V5.3 + V5.4 cohabit via `policy_version`.
-- Light-touch prompt versioning (semantic int per row, not SHA-hash) — see memory `feedback_modern_model_intent.md`.
+1. **Verify the diff is sane** — `git diff` in each repo. Spot-check `signal-notifier/main.py` (V5.4-only flow with fail-closed), `forward-paper-trader/main.py` (POLICY_VERSION → V5_4_AGENT_RANKER, sidecar removed), `win-tracker/main.py` (gate switched to V5_4_AGENT_RANKER + COUNT(DISTINCT scan_date) heuristic), webapp landing/faq/pricing.
+2. **Pre-deploy: invoke `gammarips-review`** on the gammarips-engine diff. Mandatory per CLAUDE.md G-Stack rules (signal-notifier + trader changes are strategy-touching). Specifically test: V5.4 fail-closed paths (no V5.3 fallback drift), no zombie code referencing the retired V5.4 sidecar / shadow block, win-tracker gate semantics (won't fire spuriously on day 1 with the DISTINCT scan_date heuristic).
+3. **Commit** in 2-3 atomic commits — engine: (a) decision + exec-plan + scripts (already had `?? signal-ranker/`), (b) signal-notifier + trader + win-tracker rewrites, (c) docs + content services + voice_rules sweep. Webapp: one commit.
+4. **Deploy** in this order:
+   - `signal-notifier` (`cd signal-notifier && bash deploy.sh`) — biggest blast radius, lands first so trader has the right Firestore handoff.
+   - `forward-paper-trader` (`cd forward-paper-trader && bash deploy.sh`) — POLICY_VERSION change.
+   - `win-tracker` (`cd win-tracker && bash deploy.sh`) — gate switch.
+   - `x-poster` + `blog-generator` + `reddit-poster` — copy changes only; redeploy not strictly needed unless you want them on the new code immediately. Defer if low-priority.
+   - Webapp: push to `main` → Firebase App Hosting auto-deploys.
+5. **Reset park_watchdog flag** so the gate fires when V5.4 hits 30 closes:
+   `gcloud firestore documents delete park_watchdog/gate_30_alerted --project=profitscout-fida8` (or set `{alerted: false}`).
+6. **Mon 5/11 07:30 ET first-cron verify:**
+   - `todays_pick/2026-05-08` (or whatever scan_date) Firestore doc has V5.4 pick + `policy_version: "V5_4_AGENT_RANKER"` + `v5_4_run_id` + `v5_4_justification` + `v5_4_confidence`.
+   - Operator + paid subscriber emails BOTH show the V5.4 pick + "Why we picked it" justification block (single email path).
+   - 16:30 ET trader writes ~80 rows tagged `V5_4_AGENT_RANKER` to `forward_paper_ledger`.
+   - Webapp banner, x-poster signal post, gamma-bot, MCP all read `todays_pick` and reflect V5.4 automatically.
+7. **Phase 4 (deferred 2 weeks)** — gammarips-eval rubric IC. Flip `signal-ranker DRY_RUN=false` so `signal_ranker_runs` populates the per-row provenance trace. Build the IC join `signal_ranker_runs ⨝ forward_paper_ledger ON (candidate_ticker, entry_day)`. Wait until N≥10 V5.4 closes.
 
-**Open questions for next session to resolve before code:**
-- Composite formula (weighted sum vs weighted geometric mean) — recommended sum at v0
-- Picker confidence shape (enum vs float) — recommended enum at v1
-- Picker input: Scorer reasoning prose only vs raw scores too — recommended prose only (prevents min-max on loudest rubric)
+**Locked decisions (don't relitigate):**
+- V5.3 is RETIRED. **No fallback.** signal-ranker uptime is the SLO.
+- Full TRUNCATE TABLE was performed (246 rows wiped). LIVE_COHORT_START_DATE = "2026-05-08".
+- Subscribers get V5.4 from the first post-deploy cron — single email path.
+- All other V5.4 spec inherited: 60/25/15 weighted sum, scorer_v3 (HEDGING ≤4 hard cap), picker_v2 (enum confidence, prose-only Scorer input).
+
+**Live revisions (services are the OLD code at handoff time — promotion deploys this weekend):**
+- `signal-notifier-00019-gsw` — V5.3 + V5.4 dual-path. Promotion deploy replaces with V5.4-only.
+- `signal-ranker-00004-5nt` — Scorer + Picker, IAM-only, DRY_RUN=true. No change in promotion. Flip DRY_RUN in Phase 4.
+- `forward-paper-trader-00030-8ct` — V5.4 sidecar. Promotion deploy retags POLICY_VERSION + removes sidecar.
+
+**Cron weekend gap (no operator-email duplicate risk):**
+- Sat 5/9 — `1-5` weekday cron does NOT fire.
+- Sun 5/10 — does NOT fire.
+- Mon 5/11 07:30 ET — first auto-fire after promotion deploy.
+
+**Known follow-ups (NOT blockers for Monday):**
+- `todays_pick_history` BQ table — optional Phase 2 add-on so cohort_stats / win-tracker can JOIN cleanly instead of relying on `COUNT(DISTINCT scan_date)` heuristic.
+- Stale `todays_v5_4_pick/{2026-05-04, 2026-05-07}` Firestore docs from earlier tests — collection retired; clean up if desired.
+- DESIGN_SPEC files in `x-poster/` + `blog-generator/` still have V5.3 lineage references — historical, not user-facing, leave.
+- `docs/LAUNCH-DAY-2026-04-21.md` — historical launch doc, leave.
 
 ---
 
@@ -38,7 +67,9 @@
 | Service | Revision | Status |
 |---|---|---|
 | `x-poster` | `00031-c2b` | LIVE, DRY_RUN=false. **5/7: SIGNAL post = Path B anchor** (withholds contract, drives subs via gammarips.com URL). URL whitelist extended to allow `https://gammarips.com` root. |
-| `signal-notifier` | `00015-7fp` | LIVE. **5/7: FMP earnings calendar migrated** to `/stable/earnings-calendar` (legacy `/api/v3/*` retired by FMP 2025-08-31). API key moved to `apikey:` header (was leaking in error log URL echoes). |
+| `signal-notifier` | `00019-gsw` | LIVE. **5/8: V5.4 shadow path wired** — calls `signal-ranker /rank` after V5.3 SQL pick, writes `todays_v5_4_pick/{scan_date}` Firestore, includes V5.4 block in operator email only (paid subs unchanged). 5/7: FMP earnings calendar migrated to `/stable/earnings-calendar`. |
+| `signal-ranker` | `00004-5nt` | **NEW 5/8.** ADK Scorer fanout (`gemini-3-flash-preview`, scorer_v3) + Picker (`gemini-3.1-pro-preview`, picker_v2). IAM-only invokers. POST `/rank` returns pick + runner-up + justification + confidence. DRY_RUN=true (no `signal_ranker_runs` writes yet). |
+| `forward-paper-trader` | `00030-8ct` | LIVE. **5/8: V5.4 sidecar added** — reads `todays_v5_4_pick/{target_date}` after V5.3 simulation, mirrors picked-ticker's V5.3 row to `forward_paper_ledger` with `policy_version=V5_4_AGENT_RANKER`. V5.3 mechanics (entry 10:00, stop -60%, target +80%, 3-day hold) unchanged. |
 | `reddit-poster` | `00004-2qd` | **LIVE 5/7, DRY_RUN=true.** Templates rewritten to distraction-frame (~230 chars, no methodology, no citations). Drafts to `gs://gammarips-reddit-drafts/{date}/` for manual cross-posting. Reddit creds NOT wired (DRY_RUN doesn't need them). |
 | `blog-generator` | `00019-bwk` | LIVE, DRY_RUN=false. `/blast_latest` auto-blast (kill-switch via `blast_killswitch/<date>`). `/weekly_intel` GA4+GSC+ledger intel (GA4/GSC degrade until creds land). |
 | `win-tracker` | `00010-rkn` | LIVE. **30-trade gate watcher armed.** One-shot email to `evan@gammarips.com` when V5.3 ledger crosses 30 closed trades. Idempotent via `park_watchdog/gate_30_alerted`. |

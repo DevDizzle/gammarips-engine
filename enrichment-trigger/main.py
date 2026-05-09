@@ -66,8 +66,33 @@ ENRICHED_SIGNALS_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals_enriched"
 # V5.2 feature helpers (VIX3M regime, focal-strike V/OI, moneyness)
 # =====================================================================
 
-# Cache both values for the lifetime of a single Cloud Run invocation.
+# Cache values for the lifetime of a single Cloud Run invocation.
 _VIX3M_CACHE: dict = {"value": "unset", "as_of": None}
+_VIX_CACHE: dict = {"value": "unset", "as_of": None}
+
+
+def _parse_fred_csv_for_date(text: str, scan_date: str) -> float | None:
+    """Return the most recent close on or before scan_date from a FRED CSV."""
+    rows = [ln.split(",") for ln in text.strip().splitlines()[1:]]
+    try:
+        target = datetime.strptime(scan_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    best: tuple[date, float] | None = None
+    for r in rows:
+        if len(r) < 2:
+            continue
+        dstr, vstr = r[0].strip(), r[1].strip()
+        if not dstr or vstr in ("", "."):
+            continue
+        try:
+            d = datetime.strptime(dstr, "%Y-%m-%d").date()
+            v = float(vstr)
+        except ValueError:
+            continue
+        if d <= target and (best is None or d > best[0]):
+            best = (d, v)
+    return best[1] if best else None
 
 
 def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
@@ -81,37 +106,14 @@ def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
     the signal) when this value is NULL, so a missing VIX3M never silently
     weakens the regime gate.
     """
-    cached = _VIX3M_CACHE.get("value")
-    if cached != "unset":
-        return cached
-
-    def _parse(text: str) -> float | None:
-        rows = [ln.split(",") for ln in text.strip().splitlines()[1:]]
-        try:
-            target = datetime.strptime(scan_date, "%Y-%m-%d").date()
-        except ValueError:
-            return None
-        best: tuple[date, float] | None = None
-        for r in rows:
-            if len(r) < 2:
-                continue
-            dstr, vstr = r[0].strip(), r[1].strip()
-            if not dstr or vstr in ("", "."):
-                continue
-            try:
-                d = datetime.strptime(dstr, "%Y-%m-%d").date()
-                v = float(vstr)
-            except ValueError:
-                continue
-            if d <= target and (best is None or d > best[0]):
-                best = (d, v)
-        return best[1] if best else None
+    if _VIX3M_CACHE.get("as_of") == scan_date and _VIX3M_CACHE.get("value") != "unset":
+        return _VIX3M_CACHE.get("value")
 
     try:
         url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXVCLS"
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
-        val = _parse(resp.text)
+        val = _parse_fred_csv_for_date(resp.text, scan_date)
         _VIX3M_CACHE["value"] = val
         _VIX3M_CACHE["as_of"] = scan_date
         if val is None:
@@ -123,6 +125,35 @@ def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
         logger.warning(f"VIX3M: FRED fetch failed: {e}. Storing NULL.")
         _VIX3M_CACHE["value"] = None
         _VIX3M_CACHE["as_of"] = scan_date
+        return None
+
+
+def fetch_vix_for_scan_date(scan_date: str) -> float | None:
+    """Return the VIX (1-month) close on or before `scan_date` from FRED VIXCLS.
+
+    Used only for the cross-cutting flow-context regime label fed to the
+    per-ticker thesis prompt — V5.4 Phase 1. Not consumed by any execution
+    gate. None on failure; consumer renders "unknown regime".
+    """
+    if _VIX_CACHE.get("as_of") == scan_date and _VIX_CACHE.get("value") != "unset":
+        return _VIX_CACHE.get("value")
+
+    try:
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        val = _parse_fred_csv_for_date(resp.text, scan_date)
+        _VIX_CACHE["value"] = val
+        _VIX_CACHE["as_of"] = scan_date
+        if val is None:
+            logger.warning(f"VIX: FRED VIXCLS returned no usable rows on/before {scan_date}")
+        else:
+            logger.info(f"VIX: {val:.2f} on/before {scan_date} (FRED VIXCLS)")
+        return val
+    except Exception as e:
+        logger.warning(f"VIX: FRED fetch failed: {e}. Storing NULL.")
+        _VIX_CACHE["value"] = None
+        _VIX_CACHE["as_of"] = scan_date
         return None
 
 
@@ -191,6 +222,83 @@ def compute_v5_2_features(sig: dict, scan_date: str, polygon_key: str) -> dict:
 
 
 # =====================================================================
+# V5.4 Phase 1: cross-cutting flow context for thesis prompt
+# =====================================================================
+
+
+def compute_flow_context(signals: list[dict], scan_date: str) -> dict:
+    """Compute the same-day flow-context struct fed to the thesis prompt.
+
+    Captures cross-cutting frame (sector mix, dominant direction, candidate
+    count, VIX/VIX3M regime) so per-ticker theses can reason about whether a
+    name is part of a sector rotation theme or an idiosyncratic setup, and
+    whether the regime favors directional risk-taking.
+
+    Pure summarization of `signals` + cached FRED reads; no leakage paths
+    (everything is dated <= scan_date close).
+    """
+    total = len(signals)
+    bull = sum(1 for s in signals if s.get("direction") == "BULLISH")
+    bear = sum(1 for s in signals if s.get("direction") == "BEARISH")
+    if bull > bear * 1.5:
+        dominant = "BULLISH"
+    elif bear > bull * 1.5:
+        dominant = "BEARISH"
+    else:
+        dominant = "MIXED"
+
+    sector_counts: dict[str, int] = {}
+    for s in signals:
+        sec = (s.get("sector") or "Unknown") or "Unknown"
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+    top_sectors = sorted(sector_counts.items(), key=lambda kv: kv[1], reverse=True)[:3]
+
+    vix = fetch_vix_for_scan_date(scan_date)
+    vix3m = fetch_vix3m_for_scan_date(scan_date)
+    if vix is None or vix3m is None:
+        regime = "unknown"
+    elif vix <= vix3m:
+        regime = "calm (VIX <= VIX3M, term structure in contango)"
+    else:
+        regime = "stressed (VIX > VIX3M, term structure inverted)"
+
+    return {
+        "total_candidates": total,
+        "bullish_count": bull,
+        "bearish_count": bear,
+        "dominant_direction": dominant,
+        "top_sectors": top_sectors,
+        "vix": vix,
+        "vix3m": vix3m,
+        "regime": regime,
+    }
+
+
+def render_flow_context_block(flow_context: dict | None) -> str:
+    """Render flow_context as a prompt block. Empty string if context is None."""
+    if not flow_context:
+        return ""
+    fc = flow_context
+    sectors_str = ", ".join(f"{name} ({n})" for name, n in fc["top_sectors"]) or "none tagged"
+    if fc["vix"] is not None and fc["vix3m"] is not None:
+        vol_line = f"VIX {fc['vix']:.2f} vs VIX3M {fc['vix3m']:.2f} → {fc['regime']}"
+    else:
+        vol_line = f"VIX/VIX3M unavailable → regime unknown"
+    return f"""
+CROSS-CUTTING CONTEXT (today's overnight scan, all gate-passing candidates):
+- {fc['total_candidates']} candidates passed enrichment gates today \
+({fc['bullish_count']} bullish, {fc['bearish_count']} bearish — dominant: {fc['dominant_direction']})
+- Top sectors: {sectors_str} (concentration matters — broad rotation vs single-name idiosyncratic)
+- Volatility regime: {vol_line}
+
+Use this frame to assess whether this ticker is part of a sector/regime theme \
+or an isolated idiosyncratic setup. The thesis should explicitly note when \
+the name's flow direction agrees or disagrees with the dominant scan direction \
+or when it sits inside the most-concentrated sector cluster.
+"""
+
+
+# =====================================================================
 # STEP 1: Get today's high-score tickers from overnight_signals
 # =====================================================================
 
@@ -209,7 +317,8 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
            recommended_delta, recommended_gamma, recommended_theta, recommended_vega,
            recommended_iv, recommended_volume, recommended_oi, recommended_dte,
            call_dollar_volume, put_dollar_volume, call_uoa_depth, put_uoa_depth,
-           call_active_strikes, put_active_strikes, call_vol_oi_ratio, put_vol_oi_ratio
+           call_active_strikes, put_active_strikes, call_vol_oi_ratio, put_vol_oi_ratio,
+           sector
     FROM `{SIGNALS_TABLE}`
     WHERE scan_date = '{scan_date}'
       AND overnight_score >= {MIN_SCORE}
@@ -243,6 +352,7 @@ def fetch_and_analyze_news(
     flow_volume: float = 0,
     scan_date: str | None = None,
     run_id: str | None = None,
+    flow_context: dict | None = None,
 ) -> dict | None:
     """
     Use Gemini with Google Search grounding to fetch and analyze
@@ -273,13 +383,14 @@ def fetch_and_analyze_news(
         # Google Search grounding tool
         search_tool = types.Tool(google_search=types.GoogleSearch())
 
+        _xcut = render_flow_context_block(flow_context)
         prompt = f"""You are a senior institutional options flow analyst. Search for the latest news about {ticker} stock from the past 24 hours. Use at most 2 Google Search queries total.
 
 CONTEXT:
 - Stock moved {price_change_pct:+.1f}% recently
 - Institutional options flow direction: {direction}
 - Flow volume: ${flow_volume:,.0f}
-
+{_xcut}
 CRITICAL ANALYSIS: You must assess whether this options flow is DIRECTIONAL (a new bet on future movement) or HEDGING (protecting existing positions after a move already happened). This distinction is everything.
 
 Key signals of HEDGING flow (not tradeable):
@@ -493,7 +604,8 @@ def _load_cached_news(bucket, ticker: str, scan_date: str, max_age_hours: int = 
 
 def fetch_and_analyze_news_batch(
     signals: list[dict],
-    gcs_client: storage.Client
+    gcs_client: storage.Client,
+    flow_context: dict | None = None,
 ) -> dict:
     """
     Fetch + analyze news for all tickers using Gemini grounded search.
@@ -525,6 +637,7 @@ def fetch_and_analyze_news_batch(
         analysis = fetch_and_analyze_news(
             ticker, direction, move_pct, flow_vol,
             scan_date=today, run_id=_run_id,
+            flow_context=flow_context,
         )
 
         # Store result in GCS for audit trail + cache for downstream/retries
@@ -1287,9 +1400,20 @@ def enrichment_trigger():
     tickers = list(set(s["ticker"] for s in signals))
     logger.info(f"Enriching {len(tickers)} tickers for {scan_date}")
 
+    # V5.4 Phase 1: cross-cutting flow context. Cached FRED reads — primes
+    # _VIX_CACHE / _VIX3M_CACHE so the existing call in write_enriched_signals
+    # is a cache hit (no extra FRED traffic).
+    flow_context = compute_flow_context(signals, scan_date)
+    logger.info(
+        f"Flow context: {flow_context['total_candidates']} candidates "
+        f"({flow_context['bullish_count']}B/{flow_context['bearish_count']}S, "
+        f"dom={flow_context['dominant_direction']}), "
+        f"top_sectors={flow_context['top_sectors']}, regime={flow_context['regime']}"
+    )
+
     # Step 2: Fetch & Analyze News (Gemini Grounded Search)
     # Replaces the old two-step Polygon + Gemini process
-    news_results = fetch_and_analyze_news_batch(signals, gcs_client)
+    news_results = fetch_and_analyze_news_batch(signals, gcs_client, flow_context=flow_context)
 
     # Step 3: Fetch technicals
     technicals = {}

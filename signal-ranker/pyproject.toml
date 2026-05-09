@@ -1,0 +1,45 @@
+[project]
+name = "signal-ranker"
+version = "0.1.0"
+description = "V5.4 agent-ranker. Scorer fanout + Picker LLM that replaces V5.3's deterministic SQL ranker at the picker layer."
+authors = [
+    {name = "GammaRips", email = "evan@gammarips.com"},
+]
+dependencies = [
+    "google-adk>=1.15.0,<2.0.0",
+    "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
+    "google-cloud-logging>=3.12.0,<4.0.0",
+    "google-cloud-aiplatform>=1.130.0",
+    "google-cloud-firestore>=2.19.0",
+    "google-cloud-bigquery>=3.27",
+    "fastapi>=0.115.8,<1.0.0",
+    "uvicorn~=0.34.0",
+    "pydantic>=2.7,<3.0.0",
+]
+requires-python = ">=3.10,<3.14"
+
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4,<9.0.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = ["E501", "B006"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+asyncio_default_fixture_loop_scope = "function"

@@ -24,7 +24,9 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 nyse = mcal.get_calendar("NYSE")
 est = pytz.timezone("America/New_York")
 
-# Config block for V5.3 — Target 80
+# Trader execution config — same mechanics under V5.3 → V5.4 (V5.4 is a
+# picker change, not a trader change). Constants here MUST mirror what
+# signal-notifier displays in operator email + WhatsApp.
 # See docs/DECISIONS/2026-04-17-v5-3-target-80.md and CHEAT-SHEET.md
 #
 # V5.3 philosophy: one rule set, one position, pre-defined exits.
@@ -48,7 +50,7 @@ STOP_PCT = 0.60    # -60% on option premium
 TARGET_PCT = 0.80  # +80% on option premium
 ENTRY_HHMM = "10:00"  # 10:00 ET on day-1
 EXIT_HHMM = "15:50"   # 15:50 ET on day-3
-POLICY_VERSION = "V5_3_TARGET_80"
+POLICY_VERSION = "V5_4_AGENT_RANKER"
 POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
 LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 
@@ -198,7 +200,7 @@ def get_regime_context(target_date: date):
         return None, None, None
 
 def run_forward_paper_trading(target_date: date = None):
-    """V5.3 forward paper trading — Target 80.
+    """Forward paper trading — Target 80 mechanics under V5.4 picker.
 
     Execution policy (frozen; change only with a new decision doc):
       - Entry:  10:00 ET on D+1 (first trading day after scan_date)
@@ -206,11 +208,15 @@ def run_forward_paper_trading(target_date: date = None):
       - Target: +80% on option premium
       - Hold:   3 trading days; exit at 15:50 ET on day-3 if neither fires
       - Ambiguous bar: STOP wins over TARGET (conservative)
-      - Writes to forward_paper_ledger with policy_version=V5_3_TARGET_80
+      - Writes to forward_paper_ledger with policy_version=V5_4_AGENT_RANKER
+        (V5.3 retired 2026-05-08; the trader simulates EVERY enriched signal
+        as research dataset; the "official pick" is identified externally
+        via ticker JOIN to Firestore todays_pick/{scan_date}).
 
     The trader applies NO additional gates. Signal quality filters live
-    upstream in enrichment-trigger (spread <= 10%, UOA > $500K, V/OI > 2,
-    moneyness 5-15%) and in signal-notifier (VIX <= VIX3M, LIMIT 1).
+    upstream in enrichment-trigger (spread <= 8%, UOA > $500K, score >= 1)
+    and in signal-notifier (V/OI > 2, moneyness 5-10%, VIX <= VIX3M,
+    earnings overlap, V5.4 picker).
 
     No knobs are exposed at the HTTP layer. To change any of this, edit the
     constants at the top of this file and write a decision note.
@@ -219,7 +225,7 @@ def run_forward_paper_trading(target_date: date = None):
         # Default to today if not provided
         target_date = datetime.now(est).date()
 
-    logger.info(f"Running V5.3 Forward Paper Trading for signals generated on {target_date} "
+    logger.info(f"Running V5.4 Forward Paper Trading for signals generated on {target_date} "
                 f"(entry={ENTRY_HHMM} ET day-1, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "
                 f"hold_days={HOLD_DAYS}, exit={EXIT_HHMM} ET day-{HOLD_DAYS}, ledger={LEDGER_TABLE})")
     
