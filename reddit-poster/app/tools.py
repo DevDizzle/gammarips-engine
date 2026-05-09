@@ -47,7 +47,7 @@ def fetch_recent_close(now_utc: datetime | None = None) -> dict | None:
     """Return the most-recent signal_performance doc closed in the last 24h.
     If multiple closed in the window, pick the highest peak_return.
 
-    Enriches the returned dict with the running V5.3 cohort tally
+    Enriches the returned dict with the running V5.4 cohort tally
     (`wins_so_far`, `closed_so_far`) so the receipt template can render
     "cohort so far: 1/1 wins". Source: `cohort_stats/current` Firestore doc
     written by signal-notifier on every run.

@@ -44,7 +44,7 @@ def test_compliance_rejects_ai_slop():
         "**$XYZ — BULLISH**\n\nThis trade is a real game-changer for the "
         "options ecosystem. Catalyst: heavy call flow.\n\n"
         "10:00 ET entry day-1, -60% stop, +80% target, 3-day hold.\n\n"
-        "Tracking V5.3 / Target-80 paper bracket. "
+        "Tracking V5.4 paper bracket (-60% / +80% / 3-day hold). "
         "Full ledger at gammarips.com/track-record"
     )
     result = compliance.score(body, "trade_idea")

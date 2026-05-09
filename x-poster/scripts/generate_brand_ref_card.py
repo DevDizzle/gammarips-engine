@@ -42,9 +42,9 @@ Design requirements:
 - Colors: off-white (#E7E9EA) text, accent green (#00BA7C) for bullish markers, accent red (#F4212E) for bearish markers
 
 Layout (3 zones):
-1. TOP-LEFT ZONE (upper 20%): Wordmark "🔥 GammaRips" — flame emoji at 36px, brand name in bold 42px off-white. Below it, subtle 16px off-white label "V5.3 SIGNAL ENGINE"
+1. TOP-LEFT ZONE (upper 20%): Wordmark "🔥 GammaRips" — flame emoji at 36px, brand name in bold 42px off-white. Below it, subtle 16px off-white label "V5.4 AGENT RANKER"
 2. CENTER ZONE (middle 60%): A 2x2 grid of placeholder data cells with subtle divider lines. The grid should have clear negative space where specific data (ticker, direction, contract, flow stats) will be composited per-post. Add soft rounded borders (#253341) around each cell, 24px padding.
-3. BOTTOM-RIGHT ZONE (lower 20%): Watermark "V5_3_TARGET_80" in 18px off-white, 35% opacity. To the left of it, space for a disclaimer bar.
+3. BOTTOM-RIGHT ZONE (lower 20%): Watermark "V5_4_AGENT_RANKER" in 18px off-white, 35% opacity. To the left of it, space for a disclaimer bar.
 
 Composition rules:
 - Clean, institutional trading-terminal aesthetic (think Bloomberg meets modern SaaS)

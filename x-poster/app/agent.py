@@ -240,7 +240,7 @@ expiration/mid/V/OI/DTE. Goal is (a) plant a public timestamped anchor that
 later wins/losses can QRT as receipts, (b) drive sub conversion via the URL,
 NOT to broadcast the curated pick — that stays paid-only via email/WhatsApp.
 
-📍 V5.3 pick today — $<ticker> <direction> (Score <score>)
+📍 GammaRips pick today — $<ticker> <direction> (Score <score>)
 
 Contract, entry, stop, target → email subscribers only.
 https://gammarips.com
@@ -248,7 +248,7 @@ https://gammarips.com
 --- STANDBY (when brief.pick is null for a signal post_type, OR post_type=standby) ---
 🛑 GammaRips Standby — <scan_date>
 
-No V5.3 signal cleared the gate stack overnight.
+No GammaRips signal cleared the gate stack overnight.
 Scanner saw flow. Nothing met our thresholds.
 Zero picks is a pick.
 

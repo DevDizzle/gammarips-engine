@@ -294,7 +294,7 @@ def _render_newsletter_html(
     `gemini-3-flash-preview` the blog pipeline uses — do NOT change it.
 
     The writer is fed REAL data — daily_reports headlines from the past
-    week and V5.3 ledger closes — so it summarizes what actually happened
+    week and ledger closes — so it summarizes what actually happened
     rather than inventing tickers.
     """
     from google import genai
@@ -346,7 +346,7 @@ def _render_newsletter_html(
             f"exit_reason: {featured_trade.get('exit_reason','')}"
         )
     else:
-        ft_block = "(no winning V5.3 trade closed this week — SKIP the Featured trade section entirely)"
+        ft_block = "(no winning trade closed this week — SKIP the Featured trade section entirely)"
 
     theme_hint = (theme or "weekly").strip() or "weekly"
 
@@ -363,9 +363,9 @@ no external CSS). Width 600px. Dark text on white background.
 
 # Engine state (internal context — DO NOT print this number verbatim in the email body)
 - closed_trade_count_internal = {closed_trade_count}
-  - This counts every V5.3-bracket trade in the live ledger (the trader runs
+  - This counts every trade in the live ledger (the trader runs
     a bracket on every enrichment signal). It is NOT the public track record.
-  - The PUBLIC track record is the list of "This week's V5.3 closes" below
+  - The PUBLIC track record is the list of "This week's GammaRips closes" below
     — the only trades the audience has actually seen. Cite ONLY those.
 - DO NOT write phrases like "the engine has N closed trades" in the email
   body. That number is internal-only and would mislead readers.
@@ -373,8 +373,8 @@ no external CSS). Width 600px. Dark text on white background.
 # This week's daily reports (REAL data — summarize these, do NOT invent)
 {reports_block}
 
-# Featured trade this week (REAL — the top positive V5.3 close. Render this
-# as a prominent callout with FOMO framing. SKIP if 'no winning V5.3 trade'.)
+# Featured trade this week (REAL — the top positive close. Render this
+# as a prominent callout with FOMO framing. SKIP if 'no winning trade'.)
 {ft_block}
 
 # Latest blog post (for "What we wrote" section)
@@ -385,7 +385,7 @@ no external CSS). Width 600px. Dark text on white background.
   No inventing tickers.
 - ONLY cite numbers (signal counts, return percentages) that appear
   verbatim in the data above.
-- If 'no winning V5.3 trade' is shown for the featured trade, SKIP the
+- If 'no winning trade' is shown for the featured trade, SKIP the
   Featured Trade section entirely — do NOT invent a winner.
 - NEVER reference $SPY, $QQQ, $IWM, $DIA, or any ticker not in the lists.
 
@@ -407,7 +407,7 @@ no external CSS). Width 600px. Dark text on white background.
    - Entry → Exit dates and the exit_reason ("target hit" / "3-day exit"
      / "stop hit") — translate exit_reason verbatim from the data block.
    - **FOMO copy line, exact intent**: "Did you catch this trade? Paid
-     subscribers get our curated daily V5.3 pick at 09:00 AM ET — straight
+     subscribers get our curated daily GammaRips pick at 09:00 AM ET — straight
      to inbox, no chart-watching required."
    - Then immediately the paper-trade disclosure as a small italic line:
      "Paper-trade. Past performance is not a guarantee of future results."
@@ -499,18 +499,18 @@ def draft_email(req: DraftEmailRequest) -> DraftEmailResponse:
         # 2. Latest published blog post (skipped section if none).
         latest_blog = tools.get_latest_blog_post()
 
-        # 3. Engine state — V5.3 closed-trade count.
+        # 3. Engine state — Engine closed-trade count.
         closed_count = tools.get_closed_trade_count()
 
         # 4. Real content for the "this week" section — past 7 days of
-        # daily_reports headlines + V5.3 ledger closes. Without this the
+        # daily_reports headlines + ledger closes. Without this the
         # writer hallucinates tickers (Evan 2026-04-30 incident).
         recent_reports = tools.get_recent_daily_reports(days=7)
         recent_closes = tools.get_recent_v53_closes(days=7)
 
-        # 4b. Featured trade — top single positive V5.3 close. Drives FOMO
+        # 4b. Featured trade — top single positive close. Drives FOMO
         # ("Did you catch this trade?"). Only winners qualify; if no
-        # winning V5.3 trade closed this week, the section is skipped.
+        # winning trade closed this week, the section is skipped.
         winners = [
             c for c in recent_closes
             if (c.get("return_pct") is not None) and c["return_pct"] > 0
@@ -1005,11 +1005,11 @@ text on white). NO Markdown, NO code fences, no external CSS.
 
 {_block("GSC search (last 7d)", gsc)}
 
-{_block("V5.3 ledger health (last 30d)", ledger)}
+{_block("Engine ledger health (last 30d)", ledger)}
 
 {_block("Newsletter blast history (last 4 weeks)", blasts)}
 
-{_block("V5.3 closed trades this week", closes)}
+{_block("GammaRips closed trades this week", closes)}
 
 # Required structure (use exactly these section headings)
 1. <h1>GammaRips weekly intel — <date></h1> where <date> is today's ISO.

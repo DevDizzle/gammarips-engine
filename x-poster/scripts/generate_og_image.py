@@ -4,7 +4,7 @@ Nano Banana Pro (gemini-3-pro-image-preview).
 
 The current /og-image.png still pitches the deprecated agent-arena ("5 AI
 Agents. 4 Rounds. 1 Consensus Trade.") and is aesthetically off. This regen
-puts the live V5.3 voice on the card: "One options trade a day. Scored before
+puts the live V5.4 voice on the card: "One options trade a day. Scored before
 you wake up."
 
 Usage:

@@ -170,7 +170,7 @@ def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
         WHERE DATE(exit_timestamp) = @scan_date
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V5_3_TARGET_80'
+          AND policy_version = 'V5_4_AGENT_RANKER'
           AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
     """
     try:
@@ -436,8 +436,8 @@ def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
     the X audience has seen us name should appear. Pass `restrict_tickers`
     populated from `fetch_recently_posted_tickers(scan_date, lookback=10)`.
 
-    Filters: V5_3_TARGET_80 only, drops INVALID_LIQUIDITY/SKIPPED. Each row
-    pre-shaped for the writer template (pct_signed, outcome_emoji,
+    Filters: V5_4_AGENT_RANKER only, drops INVALID_LIQUIDITY/SKIPPED. Each
+    row pre-shaped for the writer template (pct_signed, outcome_emoji,
     direction_short).
 
     Args:
@@ -463,7 +463,7 @@ def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V5_3_TARGET_80'
+          AND policy_version = 'V5_4_AGENT_RANKER'
           AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
         ORDER BY exit_timestamp
     """

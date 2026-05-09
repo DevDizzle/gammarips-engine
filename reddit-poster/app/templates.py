@@ -60,7 +60,7 @@ def render_trade_idea(brief: dict) -> str:
 def render_trade_idea_title(brief: dict) -> str:
     ticker = _ticker(brief)
     direction = _direction_lower(brief)
-    return f"Paper-trading ${ticker} {direction} today — V5.3 setup, receipt on close"
+    return f"Paper-trading ${ticker} {direction} today — GammaRips setup, receipt on close"
 
 
 def render_pnl_receipt(perf: dict) -> str:
@@ -77,7 +77,7 @@ def render_pnl_receipt(perf: dict) -> str:
     closed = perf.get("closed_so_far")
     tally_line = ""
     if wins is not None and closed is not None and int(closed) > 0:
-        tally_line = f"V5.3 cohort so far: {int(wins)}/{int(closed)}.\n\n"
+        tally_line = f"Cohort so far: {int(wins)}/{int(closed)}.\n\n"
     return (
         f"In {entry_date} at 10:00 ET on overnight options flow.\n"
         f"Out {exit_date} on {reason}.\n"

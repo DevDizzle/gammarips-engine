@@ -226,7 +226,7 @@ Forbidden (retired aliases — hard-fail if present):
 - Daily Playbook
 - The Overnight Edge (as a product name)
 - "@mention" (the literal string — we use "tag the agent" instead)
-- "score >= 6"  (old policy — current is V5.3)
+- "score >= 6"  (old policy — current is V5.4)
 - "8:30 AM"    (old time — current is 9:00 AM)
 - "$49 / $149" (old pricing)
 - "premium signal"

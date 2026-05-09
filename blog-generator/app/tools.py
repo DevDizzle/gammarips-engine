@@ -23,7 +23,7 @@ PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
 DATASET = os.getenv("DATASET", "profit_scout")
 LEDGER_TABLE = f"{PROJECT_ID}.{DATASET}.forward_paper_ledger"
 
-# Minimum closed V5.3 trades before any performance-claiming post can ship.
+# Minimum closed trades before any performance-claiming post can ship.
 # Per DESIGN_SPEC.md §Constraints, also §6 of v5.3-surface-and-monetization doc.
 N_TRADES_UNLOCK: int = int(os.getenv("N_TRADES_UNLOCK", "30"))
 
@@ -203,7 +203,7 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         }
 
     date_iso = scan_date or _today_et_iso()
-    # V5.3 only — V3/V4 are historical noise that would falsely trip the
+    # V5.4 only — V3/V4 are historical noise that would falsely trip the
     # 30-trade unlock gate. Drop INVALID_LIQUIDITY/SKIPPED non-trades.
     query = f"""
         SELECT
@@ -214,7 +214,7 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         FROM `{LEDGER_TABLE}`
         WHERE exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V5_3_TARGET_80'
+          AND policy_version = 'V5_4_AGENT_RANKER'
           AND DATE(exit_timestamp) <= @scan_date
     """
     try:
@@ -652,12 +652,12 @@ def send_email_via_mailgun(
 
 
 def get_closed_trade_count(table: str | None = None) -> int:
-    """Count V5.3 trades that actually closed in the live ledger.
+    """Count trades that actually closed in the live ledger.
 
-    Filters: policy_version='V5_3_TARGET_80' AND exit_reason valid (not
+    Filters: policy_version='V5_4_AGENT_RANKER' AND exit_reason valid (not
     INVALID_LIQUIDITY / SKIPPED). Other policy versions (V3, V4) are
     historical and not part of the public track record. Without this
-    filter the count includes V3+V4 noise (~664 today vs ~3 actual V5.3
+    filter the count includes V3+V4 noise (ledger truncated 2026-05-08; V5.4 cohort starts fresh
     closes), which falsely trips the 30-trade unlock gate.
 
     Args:
@@ -671,7 +671,7 @@ def get_closed_trade_count(table: str | None = None) -> int:
         SELECT COUNT(*) AS n FROM `{table_id}`
         WHERE exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V5_3_TARGET_80'
+          AND policy_version = 'V5_4_AGENT_RANKER'
     """
     try:
         job = _bq().query(sql)
@@ -718,10 +718,10 @@ def get_recent_daily_reports(days: int = 7) -> list[dict]:
 
 
 def get_recent_v53_closes(days: int = 7) -> list[dict]:
-    """Past N days of V5.3 trade closes from forward_paper_ledger.
+    """Past N days of GammaRips closes from forward_paper_ledger.
 
     Pre-shaped for newsletter / blog summary: ticker, direction,
-    entry_date, exit_date, return_pct (rounded), exit_reason. V5.3 only,
+    entry_date, exit_date, return_pct (rounded), exit_reason. V5.4 only,
     valid exits only. Empty list on failure.
     """
     from datetime import datetime, timedelta as _td
@@ -738,7 +738,7 @@ def get_recent_v53_closes(days: int = 7) -> list[dict]:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V5_3_TARGET_80'
+          AND policy_version = 'V5_4_AGENT_RANKER'
         ORDER BY exit_timestamp DESC
     """
     try:
@@ -1150,7 +1150,7 @@ def fetch_recent_blast_history(weeks: int = 4) -> list[dict]:
 
 
 def fetch_ledger_intel_summary(days: int = 30) -> dict:
-    """Last N days of V5.3 ledger health: closes, win rate, peak return."""
+    """Last N days of Engine ledger health: closes, win rate, peak return."""
     from datetime import timedelta as _td
     end = datetime.now(ET).date()
     start = end - _td(days=days)
@@ -1168,7 +1168,7 @@ def fetch_ledger_intel_summary(days: int = 30) -> dict:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V5_3_TARGET_80'
+          AND policy_version = 'V5_4_AGENT_RANKER'
     """
     try:
         job = _bq().query(

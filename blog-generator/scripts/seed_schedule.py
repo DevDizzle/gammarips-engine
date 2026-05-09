@@ -189,7 +189,7 @@ BLOG_SCHEDULE_ROWS: list[dict] = [
         "slug": "first-30-v53-trades",
         "week_num": 10,
         "title_candidate": (
-            "The First 30 V5.3 Trades: What the Ledger Shows (Paper)"
+            "The First 30 V5.4 Trades: What the Ledger Shows (Paper)"
         ),
         "persona": ["A", "B", "D"],
         "keywords": [
