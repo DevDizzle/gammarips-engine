@@ -100,6 +100,14 @@ MONEYNESS_MAX = 0.10
 OI_MIN = 20      # contract must have real open interest to be fillable
 VOL_MIN = 100    # contract must have traded yesterday in size
 
+# DTE band added 2026-05-11. Anchored to scorer_v4.md:18 / picker_v3.md:69:
+# 7-30 DTE is the structural sweet spot for the +80%/3-day bracket — short
+# enough for gamma to dominate theta, long enough to survive a flat session.
+# 40+ DTE contracts (like the 2026-05-11 VAL incident) have too little gamma
+# to print +80% on a 3-day move and should never reach the ranker.
+DTE_MIN = 7
+DTE_MAX = 30
+
 # V5.3 execution knobs — must mirror forward-paper-trader/main.py.
 # Displayed in the operator email so the routine matches what the simulator
 # actually models. If these diverge from the trader, update both.
@@ -443,6 +451,7 @@ def format_whatsapp_message(
             "earnings_calendar_unavailable": "Earnings calendar unavailable — engine is standing down (fail-closed).",
             "v5_4_unavailable": "Agent ranker unavailable — engine is standing down (fail-closed).",
             "v5_4_out_of_set": "Agent ranker returned an off-list pick — engine is standing down (fail-closed).",
+            "v5_4_mass_leakage": "Agent ranker detected leaked inputs across all candidates — engine is standing down (fail-closed).",
         }
         reason = reason_lines.get(skip_reason or "", f"No pick today ({skip_reason}).")
         return (
@@ -929,6 +938,7 @@ def run_notifier(target_date: date | None = None):
       AND vix3m_at_enrich IS NOT NULL
       AND recommended_oi >= {OI_MIN}
       AND recommended_volume >= {VOL_MIN}
+      AND recommended_dte BETWEEN {DTE_MIN} AND {DTE_MAX}
     ORDER BY
         COALESCE(
             CASE WHEN direction = 'BULLISH' THEN call_vol_oi_ratio
@@ -1058,6 +1068,23 @@ def run_notifier(target_date: date | None = None):
             None, target_date, None, has_pick=False, skip_reason="v5_4_unavailable"
         ))
         return True, "V5.4 signal-ranker unavailable. Fail-closed."
+
+    # Mass-leakage skip. signal-ranker sets skip=True when every top-5 candidate
+    # scored 1/1/1 (per scorer_v4.md:29 leakage rule) — picking the "least bad"
+    # of identically-floored candidates would ship a coin flip. Treat it like
+    # any other fail-closed reason: no email, empty-state todays_pick, alert
+    # the WhatsApp channel that the engine stood down.
+    if v5_4_response.get("skip"):
+        skip_reason_raw = v5_4_response.get("skip_reason") or "mass_leakage"
+        skip_reason_full = f"v5_4_{skip_reason_raw}"
+        logger.error(
+            f"V5.4 ranker returned skip={skip_reason_full}. Fail-closed: no email."
+        )
+        write_todays_pick_doc(target_date, has_pick=False, skip_reason=skip_reason_full)
+        post_to_openclaw(format_whatsapp_message(
+            None, target_date, None, has_pick=False, skip_reason=skip_reason_full
+        ))
+        return True, f"V5.4 skip ({skip_reason_full}). Fail-closed."
 
     # V5.4 chose a ticker — find its enriched row in df for contract details.
     pick_ticker = v5_4_response.get("pick")

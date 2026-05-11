@@ -33,8 +33,8 @@ TABLE_RUNS = f"{PROJECT_ID}.{DATASET}.signal_ranker_runs"
 
 SCORER_MODEL = os.getenv("SCORER_MODEL", "gemini-3-flash-preview")
 PICKER_MODEL = os.getenv("PICKER_MODEL", "gemini-3.1-pro-preview")
-SCORER_PROMPT_VERSION = int(os.getenv("SCORER_PROMPT_VERSION", "3"))
-PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "2"))
+SCORER_PROMPT_VERSION = int(os.getenv("SCORER_PROMPT_VERSION", "4"))
+PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "3"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 # Floor for partial-Scorer-failure tolerance (audit 2026-05-08 item 6). If
@@ -142,7 +142,7 @@ def persist_run(
     candidates: list[Candidate],
     scorer_outputs: list[ScorerOutput],
     top_5: list[ScorerOutput],
-    picker_output: PickerOutput,
+    picker_output: PickerOutput | None,
     scorer_latency_ms: int | None,
     picker_latency_ms: int | None,
 ) -> None:
@@ -150,6 +150,11 @@ def persist_run(
 
     Schema in scripts/ledger_and_tracking/create_signal_ranker_runs.py.
     No-op on DRY_RUN=true (signal-notifier still gets the response).
+
+    ``picker_output=None`` is the mass-leakage skip path — the Picker never
+    ran, so picker_chose/picker_runner_up are False for every row and the
+    justification/confidence fields are NULL. Audit trail still gets written
+    so forensic queries can find the run.
     """
     if DRY_RUN:
         logger.info(f"DRY_RUN=true — skipping signal_ranker_runs write for {run_id}")
@@ -159,15 +164,19 @@ def persist_run(
         c.ticker: c.static_rank for c in candidates
     }
     top_5_set = {s.ticker for s in top_5}
-    pick = picker_output.pick
-    runner_up = picker_output.runner_up
+    pick = picker_output.pick if picker_output else None
+    runner_up = picker_output.runner_up if picker_output else None
     weights_json = json.dumps(COMPOSITE_WEIGHTS)
     now_ts = datetime.now(timezone.utc).isoformat()
 
     rows: list[dict[str, Any]] = []
     for s in scorer_outputs:
-        is_picked = s.ticker == pick
-        is_runner = s.ticker == runner_up and s.ticker != pick
+        is_picked = picker_output is not None and s.ticker == pick
+        is_runner = (
+            picker_output is not None
+            and s.ticker == runner_up
+            and s.ticker != pick
+        )
         rows.append(
             {
                 "run_id": run_id,
@@ -184,10 +193,14 @@ def persist_run(
                 "picker_chose": is_picked,
                 "picker_runner_up": is_runner,
                 "picker_justification": (
-                    picker_output.justification if (is_picked or is_runner) else None
+                    picker_output.justification
+                    if picker_output and (is_picked or is_runner)
+                    else None
                 ),
                 "picker_confidence": (
-                    picker_output.confidence if (is_picked or is_runner) else None
+                    picker_output.confidence
+                    if picker_output and (is_picked or is_runner)
+                    else None
                 ),
                 "scorer_prompt_version": SCORER_PROMPT_VERSION,
                 "picker_prompt_version": PICKER_PROMPT_VERSION,

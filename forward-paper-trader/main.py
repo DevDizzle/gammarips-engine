@@ -46,8 +46,18 @@ est = pytz.timezone("America/New_York")
 # enriched signal so we retain the full-coverage research dataset.
 MAX_SPREAD_PCT = 0.10
 HOLD_DAYS = 3
-STOP_PCT = 0.60    # -60% on option premium
-TARGET_PCT = 0.80  # +80% on option premium
+STOP_PCT = 0.60    # -60% on option premium (initial hard stop)
+TARGET_PCT = 0.80  # +80% on option premium (hard take-profit)
+# Trailing-stop conditional, completing the original Deep Research V5.3 spec
+# (see docs/DECISIONS/2026-04-17-v5-3-target-80.md — was Phase-2-deferred for
+# Robinhood-mobile-OCO reasons; re-introduced 2026-05-09 because the paper
+# trader and the future Alpaca-agent path are programmatic, not mobile).
+# Once peak premium >= entry × (1 + TRAIL_TRIGGER_PCT), the active stop
+# tightens to peak × (1 - TRAIL_DRAWDOWN_PCT) and ratchets up with every
+# new peak. The original -60% hard stop is dominated by the trail once
+# active: at peak = +30%, trail level = 1.30 × 0.75 = 0.975 (vs hard 0.40).
+TRAIL_TRIGGER_PCT = 0.30   # activate trail when peak gain >= +30%
+TRAIL_DRAWDOWN_PCT = 0.25  # 25% drawdown from peak triggers trail exit
 ENTRY_HHMM = "10:00"  # 10:00 ET on day-1
 EXIT_HHMM = "15:50"   # 15:50 ET on day-3
 POLICY_VERSION = "V5_4_AGENT_RANKER"
@@ -227,6 +237,7 @@ def run_forward_paper_trading(target_date: date = None):
 
     logger.info(f"Running V5.4 Forward Paper Trading for signals generated on {target_date} "
                 f"(entry={ENTRY_HHMM} ET day-1, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "
+                f"trail=-{TRAIL_DRAWDOWN_PCT*100:.0f}% off peak, activated at +{TRAIL_TRIGGER_PCT*100:.0f}% gain, "
                 f"hold_days={HOLD_DAYS}, exit={EXIT_HHMM} ET day-{HOLD_DAYS}, ledger={LEDGER_TABLE})")
     
     client = bigquery.Client(project=PROJECT_ID)
@@ -336,6 +347,10 @@ def run_forward_paper_trading(target_date: date = None):
             "entry_price": None,
             "target_price": None,
             "stop_price": None,
+            "trail_trigger_price": None,
+            "peak_premium": None,
+            "trail_activated": None,
+            "trail_stop_at_exit": None,
             "exit_timestamp": None,
             "exit_reason": "SKIPPED" if is_skipped else None,
             "realized_return_pct": None,
@@ -389,14 +404,17 @@ def run_forward_paper_trading(target_date: date = None):
                 record["exit_reason"] = "INVALID_LIQUIDITY"
             else:
                 base_entry = entry_bar["c"] * 1.02  # 2% Base Slippage
-                # V5.3: -60% option stop AND +80% option target.
+                # V5.3 base: -60% option stop AND +80% option target.
+                # V5.4 (post 2026-05-09): trailing stop conditional re-introduced.
                 stop = base_entry * (1.0 - STOP_PCT)
                 target = base_entry * (1.0 + TARGET_PCT)
+                trail_trigger = base_entry * (1.0 + TRAIL_TRIGGER_PCT)
 
                 record["entry_timestamp"] = datetime.fromtimestamp(entry_bar["t"]/1000, tz=est).isoformat()
                 record["entry_price"] = base_entry
                 record["target_price"] = target
                 record["stop_price"] = stop
+                record["trail_trigger_price"] = trail_trigger
 
                 # ---- Benchmarking fetches (non-blocking; null on any failure) ----
                 # Fetched per-signal at entry time. The stock bars are reused
@@ -437,14 +455,25 @@ def run_forward_paper_trading(target_date: date = None):
                 exit_price = None
                 exit_ts = None
 
-                # V5.3 bar walk: three exits in precedence order.
+                # Track peak premium across the bar walk so the trail can
+                # activate / ratchet. base_entry is the seed (always less than
+                # any future peak by construction since peaks come from bar highs).
+                peak_premium = base_entry
+                trail_active = False
+                trail_stop_level = None
+
+                # V5.4 bar walk: four exits in precedence order.
                 #   TIMEOUT — first bar at-or-after 15:50 ET on exit_day
-                #   STOP    — option low pierces -60% threshold
+                #   STOP    — option low pierces -60% threshold (only when trail not active)
+                #   TRAIL   — option low pierces (peak × 0.75) once peak >= entry × 1.30
                 #   TARGET  — option high pierces +80% threshold
-                # If stop and target hit on the same bar, STOP wins (we can't
-                # know intrabar sequencing; assume worst case). Track the most
-                # recent bar at-or-before timeout_ts_ms so that on TIMEOUT we
-                # price off the last in-window print.
+                # If trail/stop and target hit on the same bar, trail/stop wins
+                # (intrabar conservative — assume drawdown happened first).
+                # Trail can both activate AND trigger on the same bar: peak update
+                # uses bar high, then trail level is checked against bar low. This
+                # mirrors the conservative "high-then-low" intrabar assumption.
+                # Track the most recent bar at-or-before timeout_ts_ms so on
+                # TIMEOUT we price off the last in-window print.
                 last_in_window_bar = None
                 for j in range(entry_idx + 1, len(bars)):
                     b = bars[j]
@@ -457,12 +486,26 @@ def run_forward_paper_trading(target_date: date = None):
                         exit_ts = timeout_bar["t"]
                         break
 
-                    hit_stop = b["l"] <= stop
+                    # Update peak from this bar's high BEFORE evaluating exits,
+                    # so an up-and-down bar that crosses the trigger can both
+                    # activate the trail and stop out on it within the same bar.
+                    if b["h"] > peak_premium:
+                        peak_premium = b["h"]
+                        if peak_premium >= trail_trigger:
+                            trail_active = True
+                        if trail_active:
+                            trail_stop_level = peak_premium * (1.0 - TRAIL_DRAWDOWN_PCT)
+
+                    # Effective stop: trail (tighter) when active, else original -60% hard stop.
+                    effective_stop = trail_stop_level if trail_active else stop
+                    effective_stop_reason = "TRAIL" if trail_active else "STOP"
+
+                    hit_stop = b["l"] <= effective_stop
                     hit_target = b["h"] >= target
                     if hit_stop:
-                        # STOP takes precedence over TARGET on ambiguous bars.
-                        exit_reason = "STOP"
-                        exit_price = stop
+                        # Stop (trail or hard) takes precedence over TARGET on ambiguous bars.
+                        exit_reason = effective_stop_reason
+                        exit_price = effective_stop
                         exit_ts = b_ts
                         break
                     if hit_target:
@@ -489,6 +532,9 @@ def run_forward_paper_trading(target_date: date = None):
                 record["exit_reason"] = exit_reason
                 record["exit_timestamp"] = datetime.fromtimestamp(exit_ts/1000, tz=est).isoformat()
                 record["realized_return_pct"] = float(ret)
+                record["peak_premium"] = float(peak_premium)
+                record["trail_activated"] = bool(trail_active)
+                record["trail_stop_at_exit"] = float(trail_stop_level) if trail_stop_level is not None else None
 
                 # ---- Benchmarking exit-side fetches (non-blocking) ----
                 # Reuse the stock and SPY bar lists fetched at entry time.

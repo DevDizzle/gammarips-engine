@@ -190,45 +190,46 @@ _SIC_TO_SECTOR = {
 }
 
 
-def _load_metadata_from_polygon(poly) -> dict:
-    """
-    Fetch sector/industry for all active US stock tickers from Polygon
-    reference endpoint. Bulk paginated call — ~6 requests covers everything.
+def _load_metadata_for_tickers(poly, tickers: list[str]) -> dict:
+    """Fetch sector/industry for a specific list of tickers via Polygon's
+    per-ticker detail endpoint.
+
+    Why detail not list: as of at least 2026-03-16, Polygon's list endpoint
+    (`/v3/reference/tickers`) returns `sic_description: None` for every
+    ticker — even AAPL — regardless of plan tier or query params. The detail
+    endpoint (`/v3/reference/tickers/{ticker}`) still returns SIC. Verified
+    against live API on 2026-05-09. We only need metadata for movers/scored
+    candidates (typically ~100-300 tickers per scan), not the 12K-ticker
+    universe, so per-ticker calls are tractable: rate-limited at 20/sec they
+    add ~10 sec to scan latency.
+
+    Self-heals if Polygon ever restores list-endpoint SIC: the per-ticker
+    detail call would still return correct data, just redundantly.
     """
     meta = {}
-    url = f"{poly.BASE}/v3/reference/tickers"
-    params = {"market": "stocks", "active": "true", "limit": 1000}
-
-    page = 0
-    while True:
-        page += 1
+    n_tagged = 0
+    for ticker in tickers:
         try:
-            data = poly._get(url, params=params)
+            data = poly._get(f"{poly.BASE}/v3/reference/tickers/{ticker}")
         except Exception as e:
-            logger.error("Polygon metadata fetch failed on page %d: %s", page, e)
-            break
+            logger.warning("Polygon detail fetch failed for %s: %s", ticker, e)
+            meta[ticker] = {"sector": None, "industry": None}
+            continue
+        res = data.get("results") or {}
+        sic = (res.get("sic_description") or "").strip()
+        if sic:
+            meta[ticker] = {
+                "sector": _SIC_TO_SECTOR.get(sic, "Other"),
+                "industry": _SIC_TO_INDUSTRY.get(sic, sic),
+            }
+            n_tagged += 1
+        else:
+            meta[ticker] = {"sector": None, "industry": None}
 
-        results = data.get("results") or []
-        for t in results:
-            ticker = t.get("ticker")
-            if not ticker:
-                continue
-            sic = (t.get("sic_description") or "").strip()
-            if sic:
-                industry = _SIC_TO_INDUSTRY.get(sic, sic)
-                sector = _SIC_TO_SECTOR.get(sic, "Other")
-            else:
-                industry = None
-                sector = None
-            meta[ticker] = {"sector": sector, "industry": industry}
-
-        next_url = data.get("next_url")
-        if not next_url:
-            break
-        url = next_url
-        params = {}  # next_url includes params
-
-    logger.info("Loaded metadata for %d tickers from Polygon (%d pages).", len(meta), page)
+    logger.info(
+        "Loaded sector metadata for %d/%d movers from Polygon detail endpoint.",
+        n_tagged, len(tickers),
+    )
     return meta
 
 
@@ -835,20 +836,24 @@ def run_pipeline():
         logger.error("Empty universe. Aborting.")
         return
 
-    # Step 2: Load metadata for cluster detection (from Polygon API)
-    metadata = _load_metadata_from_polygon(poly)
-
-    # Step 3: Pass 1 - stock snapshots, filter movers
+    # Step 2: Pass 1 - stock snapshots, filter movers
     movers = _pass1_stock_snapshots(poly, universe)
     if not movers:
         logger.info("No movers found. Nothing to scan.")
         return
 
-    # Step 4: Pass 2 - options chains for movers
+    # Step 3: Pass 2 - options chains for movers
     enriched = _pass2_options(poly, movers)
     if not enriched:
         logger.info("No options data collected. Exiting.")
         return
+
+    # Step 4: Load sector/industry metadata for the movers we'll score.
+    # Per-ticker detail fetch: Polygon's list endpoint stopped returning
+    # sic_description some time before 2026-03-16 (broken across all tickers
+    # including AAPL). Only fetched for movers (~100-300), not the full
+    # universe — adds ~10 sec at 20 calls/sec rate limit.
+    metadata = _load_metadata_for_tickers(poly, [d["ticker"] for d in enriched])
 
     # Step 5: Score individually
     scored = [_score_ticker(d) for d in enriched]

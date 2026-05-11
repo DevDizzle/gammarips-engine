@@ -210,8 +210,20 @@ def compute_v5_2_features(sig: dict, scan_date: str, polygon_key: str) -> dict:
         # Fallback: fetch the scan_date daily close from Polygon.
         px_f = fetch_underlying_close(sig.get("ticker", ""), scan_date, polygon_key)
 
+    # Direction-aware moneyness. Positive = OTM, negative = ITM.
+    # Bug fix 2026-05-09: previously stored as abs(), losing direction sign and
+    # silently passing ITM contracts through the "5-10% OTM" gate in
+    # signal-notifier (URI 5/7 picked at $880 strike vs $944.12 spot, recorded
+    # as +0.0679 = "6.8% OTM" but actually 6.8% ITM).
+    # Call (BULLISH) OTM = strike above spot; Put (BEARISH) OTM = strike below.
     if strike_f is not None and px_f is not None and px_f > 0:
-        moneyness = abs(strike_f - px_f) / px_f
+        direction = (sig.get("direction") or "").upper()
+        if direction == "BULLISH":
+            moneyness = (strike_f - px_f) / px_f
+        elif direction == "BEARISH":
+            moneyness = (px_f - strike_f) / px_f
+        else:
+            moneyness = None
     else:
         moneyness = None
 

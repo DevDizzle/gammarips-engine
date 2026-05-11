@@ -2,8 +2,9 @@
 # Deploy signal-ranker to Cloud Run.
 #
 # Called inline from signal-notifier's 07:30 ET cron (Phase 3 wires this).
-# DRY_RUN=true on first deploy: writes to BQ but signal-notifier skips the
-# second ledger row. Flip DRY_RUN=false after gammarips-review pass.
+# DRY_RUN flipped false 2026-05-09 (signal_ranker_runs ledger writes enabled).
+# Prompts bumped to scorer_v4 / picker_v3 same date — trading-context preamble
+# + ITM hard cap; see docs/DECISIONS/2026-05-09-moneyness-fix-and-trading-context-prompts.md.
 set -e
 
 # Stage shared gammarips_content lib into build context (mirrors x-poster).
@@ -31,7 +32,7 @@ gcloud run deploy signal-ranker \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3-flash-preview,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=3,PICKER_PROMPT_VERSION=2,DRY_RUN=true,MIN_SCORER_SUCCESS_FRAC=0.5"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3-flash-preview,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=4,PICKER_PROMPT_VERSION=3,DRY_RUN=false,MIN_SCORER_SUCCESS_FRAC=0.5"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

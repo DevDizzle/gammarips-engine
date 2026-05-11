@@ -146,12 +146,18 @@ class PickerOutput(BaseModel):
 
 
 class RankResponse(BaseModel):
-    """Returned to signal-notifier. Picker output + provenance."""
+    """Returned to signal-notifier. Picker output + provenance.
 
-    pick: str
-    runner_up: str
-    justification: str
-    confidence: Literal["high", "medium", "low"]
+    Two terminal states:
+    - happy path: ``skip=False``, ``pick`` and ``runner_up`` populated.
+    - mass-leakage skip: ``skip=True``, ``skip_reason="mass_leakage"``, pick
+      fields empty. Caller (signal-notifier) must fail-closed in this state.
+    """
+
+    pick: str = ""
+    runner_up: str = ""
+    justification: str = ""
+    confidence: Literal["high", "medium", "low"] | None = None
     scorer_outputs: list[ScorerOutput]
     top_5_tickers: list[str]
     scorer_prompt_version: int
@@ -163,3 +169,5 @@ class RankResponse(BaseModel):
     scorer_latency_ms: int | None = None
     picker_latency_ms: int | None = None
     dry_run: bool = False
+    skip: bool = False
+    skip_reason: str | None = None
