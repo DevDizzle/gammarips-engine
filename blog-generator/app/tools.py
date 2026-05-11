@@ -812,6 +812,12 @@ def read_email_audience(audience: str = "all") -> list[dict]:
     - "paid" : plan == 'pro' AND subscriptionStatus == 'active' AND
                stripeSubscriptionId IS NOT NULL
 
+    Deduped by email address (lowercased). Some addresses (e.g.
+    admin@evanparra.ai, admin@profitscout.app) exist under multiple uids
+    in the users collection; without dedup the same address gets the
+    blast twice. The retained row is the FIRST matching uid in the
+    Firestore stream order — `displayName` and `uid` reflect that row.
+
     Returns: list of {email, displayName, uid}. Empty list on error.
     """
     audience = (audience or "all").strip().lower()
@@ -822,24 +828,36 @@ def read_email_audience(audience: str = "all") -> list[dict]:
     try:
         col = _fs().collection("users")
 
+        def _dedupe_by_email(rows: list[dict]) -> list[dict]:
+            """First-wins dedup on lowercased email. Mailgun call dedup."""
+            seen: set[str] = set()
+            out: list[dict] = []
+            for r in rows:
+                key = (r.get("email") or "").strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                out.append(r)
+            return out
+
         if audience == "paid":
             # Strict-tuple paid filter — same as signal-notifier.
             query = (
                 col.where("plan", "==", "pro")
                 .where("subscriptionStatus", "==", "active")
             )
-            out: list[dict] = []
+            paid_rows: list[dict] = []
             for doc in query.stream():
                 d = doc.to_dict() or {}
                 email = d.get("email")
                 stripe_sub_id = d.get("stripeSubscriptionId")
                 if email and stripe_sub_id and not d.get("isAnonymous", False):
-                    out.append({
+                    paid_rows.append({
                         "email": email,
                         "displayName": d.get("displayName", "") or "",
                         "uid": d.get("uid", doc.id),
                     })
-            return out
+            return _dedupe_by_email(paid_rows)
 
         # "all" and "free" both start from the non-anonymous + has-email cohort.
         # Firestore can't do "field != X" cleanly across all SDKs, so we filter
@@ -861,13 +879,13 @@ def read_email_audience(audience: str = "all") -> list[dict]:
             })
 
         if audience == "all":
-            return [
+            return _dedupe_by_email([
                 {"email": u["email"], "displayName": u["displayName"], "uid": u["uid"]}
                 for u in all_users
-            ]
+            ])
 
         # audience == "free": NOT (plan == 'pro' AND subscriptionStatus == 'active')
-        out = []
+        free_rows: list[dict] = []
         for u in all_users:
             is_active_paid = (
                 u["_plan"] == "pro"
@@ -875,12 +893,12 @@ def read_email_audience(audience: str = "all") -> list[dict]:
                 and bool(u["_stripe_sub_id"])
             )
             if not is_active_paid:
-                out.append({
+                free_rows.append({
                     "email": u["email"],
                     "displayName": u["displayName"],
                     "uid": u["uid"],
                 })
-        return out
+        return _dedupe_by_email(free_rows)
     except Exception as exc:  # noqa: BLE001
         logger.error(f"read_email_audience({audience!r}) failed: {exc}")
         return []

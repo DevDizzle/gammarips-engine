@@ -407,7 +407,7 @@ no external CSS). Width 600px. Dark text on white background.
    - Entry → Exit dates and the exit_reason ("target hit" / "3-day exit"
      / "stop hit") — translate exit_reason verbatim from the data block.
    - **FOMO copy line, exact intent**: "Did you catch this trade? Paid
-     subscribers get our curated daily GammaRips pick at 09:00 AM ET — straight
+     subscribers get our curated daily GammaRips pick at 07:30 AM ET — straight
      to inbox, no chart-watching required."
    - Then immediately the paper-trade disclosure as a small italic line:
      "Paper-trade. Past performance is not a guarantee of future results."
@@ -419,14 +419,29 @@ no external CSS). Width 600px. Dark text on white background.
    "Paper-trading performance, educational content only. Not investment
    advice. Past performance is not a guarantee of future results."
 
-8. CTA: founder pricing $29/mo with code FOUNDER29 (or $39/mo without).
-   NO seat cap, NO scarcity copy. Link to https://gammarips.com/pricing.
-   The CTA appears in EVERY newsletter.
+8. CTA: render EXACTLY this HTML block (substitute nothing — no pricing,
+   no FOUNDER code, no V-numbered upgrade copy). Centered, green pill
+   button linking to the latest market report. Same CTA for every reader,
+   paid or free. The CTA appears in EVERY newsletter.
+
+   <div style="text-align:center; margin:32px 0;">
+     <a href="https://gammarips.com/reports"
+        style="display:inline-block; background:#16a34a; color:#ffffff;
+               padding:14px 28px; border-radius:8px; text-decoration:none;
+               font-weight:600; font-size:16px;">
+       Read the latest market report
+     </a>
+   </div>
 
 # Hard prohibitions (auto-fail)
 - Retired aliases: Ripper, Rippers, Daily Playbook, Overnight Edge (as
   product name), "@mention", "score >= 6", "8:30 AM", "$49/$149",
   "premium signal", "interactive dashboard".
+- Retired strategy version labels: "V5.3", "V5.3 Signals", "Upgrade to V5.3"
+  — V5.3 was retired 2026-05-08. Use "GammaRips Signals" or just "Signals".
+- Pricing / coupon language anywhere in the body: do NOT mention dollar
+  amounts ($29, $39), coupon codes (FOUNDER29), or "/pricing" URLs. The
+  green CTA above is the ONLY commercial surface in the newsletter.
 - Recommendation language: "buy this", "act now", second-person timing
   imperatives.
 - Scarcity: "only N seats", "500-seat cap", "while supplies last".
@@ -588,22 +603,16 @@ def draft_email(req: DraftEmailRequest) -> DraftEmailResponse:
                 ),
             )
 
-        # 7+8. Operator-only Mailgun send (always — both dry_run=True and False).
-        operator_email = os.environ.get("OPERATOR_EMAIL", "evan@gammarips.com").strip()
-        send_subject = f"[DRAFT preview] {subject}"
-        send_result = tools.send_email_via_mailgun(
-            to=operator_email,
-            subject=send_subject,
-            html=html,
-            text=text,
-        )
-
+        # 7+8. Silent GCS-only render — no operator preview email.
+        # Disabled 2026-05-11: the operator is on the paid subscriber list and
+        # receives the real blast Monday morning. Preview emails were getting
+        # treated as a separate "extra" send and adding noise without value.
         logger.log_struct(
             {
                 "event": "draft_email_complete",
                 "gcs_uri": html_uri,
                 "subject": subject,
-                "operator_send_status": send_result.get("status"),
+                "operator_send_status": "skipped",
                 "compliance_passed": True,
             },
             severity="INFO",
@@ -617,8 +626,8 @@ def draft_email(req: DraftEmailRequest) -> DraftEmailResponse:
             preview_text=preheader,
             compliance_passed=True,
             compliance_failures=[],
-            operator_send_status=send_result.get("status"),
-            error=send_result.get("message"),
+            operator_send_status="skipped",
+            error=None,
         )
     except HTTPException:
         raise
