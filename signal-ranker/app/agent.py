@@ -87,7 +87,7 @@ def _fence(label: str, body: str) -> str:
 
 
 def _build_scorer_prompt(scan_date: str, candidate: Candidate, report_md: str) -> str:
-    rubric = tools.load_prompt("scorer_v4.md")
+    rubric = tools.load_prompt("scorer_v5.md")
     cand_block = tools.render_candidate_for_scorer(candidate)
     return (
         f"{rubric}\n\n"
@@ -180,7 +180,7 @@ async def score_candidates(
 
 # --- Picker (ADK LlmAgent) --------------------------------------------------
 def _build_picker_instruction() -> str:
-    """Picker instruction = picker_v1.md + slot for top_5_block, report_md, ledger.
+    """Picker instruction = picker_v4.md + slot for top_5_block, report_md, ledger.
 
     State keys read at runtime: top_5_block, report_md, ledger_block, scan_date.
     The picker is an LlmAgent with output_schema=PickerOutput.
@@ -188,7 +188,7 @@ def _build_picker_instruction() -> str:
     LLM-generated state values are fenced upstream in run_picker() to neutralize
     prompt-injection from upstream narrative strings (audit 2026-05-08 item 3).
     """
-    rubric = tools.load_prompt("picker_v3.md")
+    rubric = tools.load_prompt("picker_v4.md")
     return (
         f"{rubric}\n\n"
         f"=== INPUTS ===\n"
@@ -318,7 +318,7 @@ async def run_pipeline(req: RankRequest) -> RankResponse:
     top_5 = tools.take_top_n(scorer_outputs)
     top_5_tickers = [s.ticker for s in top_5]
 
-    # Mass-leakage fail-closed. Per scorer_v4.md:29, a leakage detection forces
+    # Mass-leakage fail-closed. Per scorer_v5.md:29, a leakage detection forces
     # 1/1/1 scores. If EVERY top-5 candidate is 1/1/1 the entire input pool is
     # poisoned (e.g. report_md date mismatch on 2026-05-11). Picking the
     # "least bad" of identically-floored candidates is a coin flip — refuse

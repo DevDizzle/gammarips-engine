@@ -33,8 +33,8 @@ TABLE_RUNS = f"{PROJECT_ID}.{DATASET}.signal_ranker_runs"
 
 SCORER_MODEL = os.getenv("SCORER_MODEL", "gemini-3-flash-preview")
 PICKER_MODEL = os.getenv("PICKER_MODEL", "gemini-3.1-pro-preview")
-SCORER_PROMPT_VERSION = int(os.getenv("SCORER_PROMPT_VERSION", "4"))
-PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "3"))
+SCORER_PROMPT_VERSION = int(os.getenv("SCORER_PROMPT_VERSION", "5"))
+PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "4"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 # Floor for partial-Scorer-failure tolerance (audit 2026-05-08 item 6). If

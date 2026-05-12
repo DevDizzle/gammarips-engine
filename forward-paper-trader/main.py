@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import pytz
 import pandas_market_calendars as mcal
-from google.cloud import bigquery
+from google.cloud import bigquery, firestore
 import yfinance as yf
 import time
 from flask import Flask, jsonify, request
@@ -40,10 +40,13 @@ est = pytz.timezone("America/New_York")
 # Exit precedence when stop and target hit in the same bar: STOP wins
 # (conservative — we can't know intrabar sequencing, so assume worst case).
 #
-# The trader has NO filters beyond what enrichment applies. Signal quality
-# gates (V/OI, moneyness, VIX <= VIX3M) live in signal-notifier and
-# enrichment-trigger, not here. This service simulates and ledgers every
-# enriched signal so we retain the full-coverage research dataset.
+# The trader has NO filters beyond what enrichment + signal-notifier
+# applied upstream. Signal quality gates (V/OI, moneyness, VIX <= VIX3M,
+# earnings, DTE, OI/vol floors) live in signal-notifier and enrichment-
+# trigger, not here. V5.4-only ledger contract (post 2026-05-12): this
+# service simulates ONLY the ticker named in todays_pick/{scan_date} and
+# writes at most one ledger row per scan_date. See docs/DECISIONS/
+# 2026-05-12-v5-4-pipeline-alignment.md.
 MAX_SPREAD_PCT = 0.10
 HOLD_DAYS = 3
 STOP_PCT = 0.60    # -60% on option premium (initial hard stop)
@@ -209,24 +212,127 @@ def get_regime_context(target_date: date):
         logger.error(f"Error extracting regime context (FRED/Polygon) for {target_date}: {e}")
         return None, None, None
 
+def _build_skip_record(
+    scan_date: date,
+    skip_reason: str,
+    vix_level: float | None,
+    spy_trend: str | None,
+    vix_5d_delta: float | None,
+    ticker: str | None = None,
+) -> dict:
+    """Construct a no-trade ledger row.
+
+    Preserves every column the active-trade record carries so downstream
+    consumers can SELECT * without NULL-handling per-row. Used for V5.4
+    no-pick days (`todays_pick.has_pick=False`), V5.4 missing-doc days, and
+    Firestore-unreachable fail-closed days.
+    """
+    return {
+        "scan_date": scan_date,
+        "ticker": ticker,
+        "recommended_contract": None,
+        "direction": None,
+        "is_premium_signal": False,
+        "premium_score": 0,
+        "policy_version": POLICY_VERSION,
+        "policy_gate": POLICY_GATE,
+        "is_skipped": True,
+        "skip_reason": skip_reason,
+        "VIX_at_entry": float(vix_level) if vix_level is not None else None,
+        "SPY_trend_state": spy_trend,
+        "vix_5d_delta_entry": float(vix_5d_delta) if vix_5d_delta is not None else None,
+        "recommended_dte": None,
+        "recommended_volume": None,
+        "recommended_oi": None,
+        "recommended_spread_pct": None,
+        "entry_timestamp": None,
+        "entry_price": None,
+        "target_price": None,
+        "stop_price": None,
+        "trail_trigger_price": None,
+        "peak_premium": None,
+        "trail_activated": None,
+        "trail_stop_at_exit": None,
+        "exit_timestamp": None,
+        "exit_reason": "SKIPPED",
+        "realized_return_pct": None,
+        "iv_rank_entry": None,
+        "iv_percentile_entry": None,
+        "hv_20d_entry": None,
+        "underlying_entry_price": None,
+        "underlying_exit_price": None,
+        "underlying_return": None,
+        "spy_entry_price": None,
+        "spy_exit_price": None,
+        "spy_return_over_window": None,
+    }
+
+
+def _fetch_todays_pick(scan_date: date) -> tuple[str | None, dict | None, str | None]:
+    """Read the canonical V5.4 pick doc for ``scan_date``.
+
+    Returns ``(state, doc_dict, picked_ticker)`` where ``state`` is one of:
+      - ``"HAS_PICK"`` — doc exists, ``has_pick=True``, ticker present.
+      - ``"NO_PICK"`` — doc exists, ``has_pick=False`` (skip_reason carries why).
+      - ``"MISSING"`` — doc does not exist at all (signal-notifier never ran).
+      - ``"FETCH_FAILED"`` — Firestore call raised; caller must fail-closed.
+
+    The doc is written by signal-notifier under both ``scan_date`` and
+    ``entry_day`` keys (dual-write contract, see signal-notifier
+    ``write_todays_pick_doc``). The trader reads under ``scan_date`` which is
+    the authoritative key for that day's decision.
+    """
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        doc_ref = db.collection("todays_pick").document(scan_date.isoformat())
+        snap = doc_ref.get()
+        if not snap.exists:
+            return "MISSING", None, None
+        doc = snap.to_dict() or {}
+        if not doc.get("has_pick"):
+            return "NO_PICK", doc, None
+        ticker = doc.get("ticker")
+        if not ticker:
+            # Malformed doc: has_pick=True but no ticker field. Treat as NO_PICK
+            # with an explicit reason so the ledger row says what happened.
+            return "NO_PICK", doc, None
+        return "HAS_PICK", doc, str(ticker).upper()
+    except Exception as e:
+        logger.error(f"todays_pick fetch failed for {scan_date}: {e}")
+        return "FETCH_FAILED", None, None
+
+
 def run_forward_paper_trading(target_date: date = None):
-    """Forward paper trading — Target 80 mechanics under V5.4 picker.
+    """Forward paper trading — V5.4-only ledger (post 2026-05-12).
 
     Execution policy (frozen; change only with a new decision doc):
       - Entry:  10:00 ET on D+1 (first trading day after scan_date)
       - Stop:   -60% on option premium
       - Target: +80% on option premium
+      - Trail:  -25% off peak, activated at +30% gain (peak ratchet)
       - Hold:   3 trading days; exit at 15:50 ET on day-3 if neither fires
       - Ambiguous bar: STOP wins over TARGET (conservative)
       - Writes to forward_paper_ledger with policy_version=V5_4_AGENT_RANKER
-        (V5.3 retired 2026-05-08; the trader simulates EVERY enriched signal
-        as research dataset; the "official pick" is identified externally
-        via ticker JOIN to Firestore todays_pick/{scan_date}).
+
+    V5.4-only ledger contract (2026-05-12, see docs/DECISIONS/
+    2026-05-12-v5-4-pipeline-alignment.md): the trader simulates ONLY the
+    ticker named in Firestore todays_pick/{scan_date}. The previous behavior
+    (simulate every enriched signal as a "research fanout dataset") wrote ~70
+    rows/day labeled policy_version=V5_4_AGENT_RANKER even though only one
+    was actually the V5.4 pick. That mislabeling broke cohort_stats integrity.
+    Now: one trade row per day (or one skip row), all genuinely V5.4.
+
+    Fail-closed behavior:
+      - todays_pick missing entirely  -> single skip row, skip_reason=NO_TODAYS_PICK_DOC
+      - todays_pick has_pick=False    -> single skip row, skip_reason=<doc skip_reason>
+      - todays_pick fetch raised      -> single skip row, skip_reason=TODAYS_PICK_FETCH_FAILED
+      - todays_pick ticker not in enriched table -> single skip row,
+        skip_reason=PICK_NOT_IN_ENRICHED
 
     The trader applies NO additional gates. Signal quality filters live
     upstream in enrichment-trigger (spread <= 8%, UOA > $500K, score >= 1)
     and in signal-notifier (V/OI > 2, moneyness 5-10%, VIX <= VIX3M,
-    earnings overlap, V5.4 picker).
+    earnings overlap, DTE 7-45, OI>=10, vol>=50, V5.4 picker).
 
     No knobs are exposed at the HTTP layer. To change any of this, edit the
     constants at the top of this file and write a decision note.
@@ -239,52 +345,21 @@ def run_forward_paper_trading(target_date: date = None):
                 f"(entry={ENTRY_HHMM} ET day-1, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "
                 f"trail=-{TRAIL_DRAWDOWN_PCT*100:.0f}% off peak, activated at +{TRAIL_TRIGGER_PCT*100:.0f}% gain, "
                 f"hold_days={HOLD_DAYS}, exit={EXIT_HHMM} ET day-{HOLD_DAYS}, ledger={LEDGER_TABLE})")
-    
+
     client = bigquery.Client(project=PROJECT_ID)
-    
-    # 1. Fetch Eligible Signals
-    # V5.3: no trader-side gates. All signal quality filtering is upstream
-    # (enrichment-trigger + signal-notifier). Everything in the enriched table
-    # gets simulated and ledgered. See docs/DECISIONS/2026-04-17-v5-3-target-80.md
-    query = f"""
-    SELECT
-        ticker, scan_date, direction, recommended_contract, recommended_strike,
-        recommended_expiration, recommended_dte, recommended_volume, recommended_oi,
-        recommended_spread_pct, is_premium_signal, premium_score
-    FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
-    WHERE DATE(scan_date) = "{target_date}"
-      AND recommended_strike IS NOT NULL
-      AND recommended_expiration IS NOT NULL
-    """
-    
-    df = client.query(query).to_dataframe()
-    logger.info(f"Found {len(df)} eligible signals for {target_date}")
-    
-    if len(df) == 0:
-        return True, "No eligible signals found."
-        
-    # Deduplicate signals: one per ticker per scan_date
-    # Priority: 1. highest premium_score, 2. highest volume, 3. fallback deterministically on index
-    df = df.sort_values(by=["premium_score", "recommended_volume"], ascending=[False, False])
-    
-    # Track which ticker/date combos have been seen
-    seen_combinations = set()
-    deduplicated_rows = []
-    
-    for _, row in df.iterrows():
-        combo_key = (row["ticker"], str(row["scan_date"].date() if isinstance(row["scan_date"], datetime) else row["scan_date"]))
-        if combo_key in seen_combinations:
-            # We'll process this as a skipped duplicate later, but keep it in the dataframe for ledger logging
-            row["is_duplicate"] = True
-        else:
-            row["is_duplicate"] = False
-            seen_combinations.add(combo_key)
-        deduplicated_rows.append(row)
-        
-    df = pd.DataFrame(deduplicated_rows)
-        
-    # The intended execution day is the next trading day after the scan_date
-    entry_day = get_next_trading_day(target_date) # target_date + 1 trading day
+
+    # 1. Resolve today's V5.4 pick from Firestore.
+    # The trader is now V5.4-only: the ledger row count is at most 1 per
+    # scan_date (one trade row OR one skip row, never both, never multiple).
+    # The previous fanout path (simulate every enriched row) is gone — it
+    # mislabeled non-picks as V5_4_AGENT_RANKER. See docs/DECISIONS/
+    # 2026-05-12-v5-4-pipeline-alignment.md.
+    pick_state, pick_doc, picked_ticker = _fetch_todays_pick(target_date)
+
+    # 2. Determine entry/exit day timing — needed for both happy-path simulation
+    # AND for the timeout-day guard (we don't write skip rows for future hold
+    # windows either; the daily cron retries the same target_date next day).
+    entry_day = get_next_trading_day(target_date)
     if entry_day > datetime.now(est).date():
         logger.warning(f"Entry day {entry_day} is in the future. Cannot simulate execution yet.")
         return False, f"Entry day {entry_day} is in the future."
@@ -293,7 +368,9 @@ def run_forward_paper_trading(target_date: date = None):
     # Without this guard, the exit-fallback path at the bottom of the simulation
     # loop will use a partial intraday bar from "today" as a phantom TIMEOUT exit,
     # producing data that looks like a closed trade but represents an open position.
-    # V5.3: exit_day = entry_day + (HOLD_DAYS - 1) trading days.
+    # V5.4: exit_day = entry_day + (HOLD_DAYS - 1) trading days.
+    # Note: guard applies to skip rows too — premature skip writes for in-progress
+    # hold windows would race the next-day retrigger and write duplicate skips.
     timeout_day_check = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
     today_et = datetime.now(est).date()
     if timeout_day_check >= today_et:
@@ -301,7 +378,7 @@ def run_forward_paper_trading(target_date: date = None):
                f"in the future. Hold window has not fully closed; refusing to simulate.")
         logger.warning(msg)
         return False, msg
-        
+
     vix_level, spy_trend, vix_5d_delta = get_regime_context(entry_day)
 
     if vix_level is None:
@@ -309,313 +386,374 @@ def run_forward_paper_trading(target_date: date = None):
     else:
         delta_str = f"{vix_5d_delta:+.2f}" if vix_5d_delta is not None else "n/a"
         logger.info(f"Regime telemetry on {entry_day}: VIX = {vix_level:.2f} (5d Δ {delta_str}), SPY Trend = {spy_trend}")
-    
-    records_to_insert = []
-    
-    for _, row in df.iterrows():
-        is_skipped = False
-        skip_reason = None
-        
-        # 2. Evaluate Skip Conditions
 
-        # Deduplication check
-        if row.get("is_duplicate", False):
-            is_skipped = True
-            skip_reason = "DEDUP_TICKER_DATE_SKIP"
-        # V5.3: no trader-side gates — all enriched signals trade
+    # 3. Branch on pick state. All non-HAS_PICK branches write a single skip row.
+    if pick_state == "FETCH_FAILED":
+        logger.error(f"todays_pick Firestore fetch failed for {target_date}; writing fail-closed skip row.")
+        skip_record = _build_skip_record(
+            target_date, "TODAYS_PICK_FETCH_FAILED", vix_level, spy_trend, vix_5d_delta,
+        )
+        return _write_ledger_records(client, target_date, [skip_record])
 
-        record = {
-            "scan_date": row["scan_date"].date() if isinstance(row["scan_date"], datetime) else row["scan_date"],
-            "ticker": row["ticker"],
-            "recommended_contract": row["recommended_contract"],
-            "direction": row["direction"],
-            "is_premium_signal": bool(row["is_premium_signal"]) if pd.notna(row["is_premium_signal"]) else False,
-            "premium_score": int(row["premium_score"]) if pd.notna(row["premium_score"]) else 0,
-            "policy_version": POLICY_VERSION,
-            "policy_gate": POLICY_GATE,
-            "is_skipped": is_skipped,
-            "skip_reason": skip_reason,
-            "VIX_at_entry": float(vix_level) if vix_level is not None else None,
-            "SPY_trend_state": spy_trend,
-            "vix_5d_delta_entry": float(vix_5d_delta) if vix_5d_delta is not None else None,
-            "recommended_dte": int(row["recommended_dte"]),
-            "recommended_volume": int(row["recommended_volume"]),
-            "recommended_oi": int(row["recommended_oi"]),
-            "recommended_spread_pct": float(row["recommended_spread_pct"]),
-            # Execution defaults (will be updated if not skipped)
-            "entry_timestamp": None,
-            "entry_price": None,
-            "target_price": None,
-            "stop_price": None,
-            "trail_trigger_price": None,
-            "peak_premium": None,
-            "trail_activated": None,
-            "trail_stop_at_exit": None,
-            "exit_timestamp": None,
-            "exit_reason": "SKIPPED" if is_skipped else None,
-            "realized_return_pct": None,
-            # Benchmarking & regime context — populated inline during simulation.
-            # All remain None for skipped rows and on fetch failure (non-blocking).
-            "iv_rank_entry": None,
-            "iv_percentile_entry": None,
-            "hv_20d_entry": None,
-            "underlying_entry_price": None,
-            "underlying_exit_price": None,
-            "underlying_return": None,
-            "spy_entry_price": None,
-            "spy_exit_price": None,
-            "spy_return_over_window": None,
-        }
-        
-        # 3. Simulate Execution
-        if not is_skipped:
-            exp_date = row["recommended_expiration"].date() if isinstance(row["recommended_expiration"], pd.Timestamp) or isinstance(row["recommended_expiration"], datetime) else row["recommended_expiration"]
-            opt_ticker = build_polygon_ticker(row["ticker"], exp_date, row["direction"], float(row["recommended_strike"]))
-            
-            # V5.3: entry 10:00 ET day-1, hold 3 trading days, exit 15:50 ET day-3.
-            # HOLD_DAYS is the number of trading days held inclusive of entry_day.
-            # day-1 == entry_day, day-3 == get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
-            exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+    if pick_state == "MISSING":
+        logger.info(f"No todays_pick/{target_date} doc exists; writing NO_TODAYS_PICK_DOC skip row.")
+        skip_record = _build_skip_record(
+            target_date, "NO_TODAYS_PICK_DOC", vix_level, spy_trend, vix_5d_delta,
+        )
+        return _write_ledger_records(client, target_date, [skip_record])
 
-            bars = fetch_minute_bars(opt_ticker, entry_day, exit_day)
-            time.sleep(0.2)
+    if pick_state == "NO_PICK":
+        doc_skip_reason = (pick_doc or {}).get("skip_reason") or "no_candidates_passed_gates"
+        logger.info(f"todays_pick/{target_date} has_pick=False; writing skip row skip_reason={doc_skip_reason}.")
+        skip_record = _build_skip_record(
+            target_date, str(doc_skip_reason), vix_level, spy_trend, vix_5d_delta,
+        )
+        return _write_ledger_records(client, target_date, [skip_record])
 
-            entry_dt = datetime.combine(entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time())
-            entry_ts_ms = int(est.localize(entry_dt).timestamp() * 1000)
-            timeout_dt = datetime.combine(exit_day, datetime.strptime(EXIT_HHMM, "%H:%M").time())
-            timeout_ts_ms = int(est.localize(timeout_dt).timestamp() * 1000)
+    # HAS_PICK: fetch the single enriched row for the picked ticker on this scan_date.
+    assert picked_ticker is not None
+    query = f"""
+    SELECT
+        ticker, scan_date, direction, recommended_contract, recommended_strike,
+        recommended_expiration, recommended_dte, recommended_volume, recommended_oi,
+        recommended_spread_pct, is_premium_signal, premium_score
+    FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+    WHERE DATE(scan_date) = "{target_date}"
+      AND UPPER(ticker) = "{picked_ticker}"
+      AND recommended_strike IS NOT NULL
+      AND recommended_expiration IS NOT NULL
+    ORDER BY premium_score DESC, recommended_volume DESC
+    LIMIT 1
+    """
 
-            # Find the entry bar. Prefer a bar at-or-after 10:00 ET, but fall
-            # back to the most recent bar before 10:00 as a price proxy rather
-            # than throwing the whole trade away. Only mark INVALID_LIQUIDITY
-            # when entry_day genuinely has zero printed bars.
-            entry_day_bars = [b for b in bars
-                              if datetime.fromtimestamp(b["t"]/1000, tz=est).date() == entry_day]
-            entry_bar = None
-            if entry_day_bars:
-                after_or_at = [b for b in entry_day_bars if b["t"] >= entry_ts_ms]
-                if after_or_at:
-                    entry_bar = after_or_at[0]
-                else:
-                    before = [b for b in entry_day_bars if b["t"] < entry_ts_ms]
-                    entry_bar = before[-1] if before else None
+    df = client.query(query).to_dataframe()
+    logger.info(f"V5.4 pick={picked_ticker} on {target_date}: matched {len(df)} enriched row(s).")
 
-            if not entry_bar or entry_bar.get("v", 0) == 0:
-                record["exit_reason"] = "INVALID_LIQUIDITY"
-            else:
-                base_entry = entry_bar["c"] * 1.02  # 2% Base Slippage
-                # V5.3 base: -60% option stop AND +80% option target.
-                # V5.4 (post 2026-05-09): trailing stop conditional re-introduced.
-                stop = base_entry * (1.0 - STOP_PCT)
-                target = base_entry * (1.0 + TARGET_PCT)
-                trail_trigger = base_entry * (1.0 + TRAIL_TRIGGER_PCT)
+    if len(df) == 0:
+        # The pick ticker is named in todays_pick but no enriched row exists
+        # for it on this scan_date. Shouldn't happen in normal operation —
+        # signal-notifier selects the pick FROM the enriched table. Treat as
+        # fail-closed skip so the ledger row count stays at exactly 1.
+        logger.error(
+            f"V5.4 pick={picked_ticker} not found in overnight_signals_enriched "
+            f"for {target_date}. Writing PICK_NOT_IN_ENRICHED skip row."
+        )
+        skip_record = _build_skip_record(
+            target_date, "PICK_NOT_IN_ENRICHED", vix_level, spy_trend, vix_5d_delta,
+            ticker=picked_ticker,
+        )
+        return _write_ledger_records(client, target_date, [skip_record])
 
-                record["entry_timestamp"] = datetime.fromtimestamp(entry_bar["t"]/1000, tz=est).isoformat()
-                record["entry_price"] = base_entry
-                record["target_price"] = target
-                record["stop_price"] = stop
-                record["trail_trigger_price"] = trail_trigger
+    # Happy path: simulate the single V5.4-picked row. The trader runs at most
+    # one simulation per scan_date (one trade row → one ledger row). All bar-
+    # walking / benchmarking logic below is unchanged from the V5.3 era; only
+    # the input is now a single-row selection instead of a fanout loop.
+    row = df.iloc[0]
+    records_to_insert: list[dict] = []
 
-                # ---- Benchmarking fetches (non-blocking; null on any failure) ----
-                # Fetched per-signal at entry time. The stock bars are reused
-                # for the exit-side lookup after the simulation loop.
-                stock_bars_for_trade: list = []
-                spy_bars_for_trade: list = []
-                try:
-                    stock_bars_for_trade = fetch_minute_bars(
-                        row["ticker"], entry_day, exit_day
-                    )
-                    time.sleep(0.1)
-                    price = bctx.find_price_at_or_after(
-                        stock_bars_for_trade, entry_bar["t"]
-                    )
-                    record["underlying_entry_price"] = price
-                except Exception as e:
-                    logger.warning(f"underlying_entry_price fetch failed for {row['ticker']}: {e}")
+    record = {
+        "scan_date": row["scan_date"].date() if isinstance(row["scan_date"], datetime) else row["scan_date"],
+        "ticker": row["ticker"],
+        "recommended_contract": row["recommended_contract"],
+        "direction": row["direction"],
+        "is_premium_signal": bool(row["is_premium_signal"]) if pd.notna(row["is_premium_signal"]) else False,
+        "premium_score": int(row["premium_score"]) if pd.notna(row["premium_score"]) else 0,
+        "policy_version": POLICY_VERSION,
+        "policy_gate": POLICY_GATE,
+        "is_skipped": False,
+        "skip_reason": None,
+        "VIX_at_entry": float(vix_level) if vix_level is not None else None,
+        "SPY_trend_state": spy_trend,
+        "vix_5d_delta_entry": float(vix_5d_delta) if vix_5d_delta is not None else None,
+        "recommended_dte": int(row["recommended_dte"]),
+        "recommended_volume": int(row["recommended_volume"]),
+        "recommended_oi": int(row["recommended_oi"]),
+        "recommended_spread_pct": float(row["recommended_spread_pct"]),
+        # Execution defaults (overwritten during simulation below).
+        "entry_timestamp": None,
+        "entry_price": None,
+        "target_price": None,
+        "stop_price": None,
+        "trail_trigger_price": None,
+        "peak_premium": None,
+        "trail_activated": None,
+        "trail_stop_at_exit": None,
+        "exit_timestamp": None,
+        "exit_reason": None,
+        "realized_return_pct": None,
+        # Benchmarking & regime context — populated inline during simulation.
+        # All remain None on fetch failure (non-blocking, see benchmark_context.py).
+        "iv_rank_entry": None,
+        "iv_percentile_entry": None,
+        "hv_20d_entry": None,
+        "underlying_entry_price": None,
+        "underlying_exit_price": None,
+        "underlying_return": None,
+        "spy_entry_price": None,
+        "spy_exit_price": None,
+        "spy_return_over_window": None,
+    }
 
-                try:
-                    spy_bars_for_trade = bctx.get_spy_bars_cached(entry_day, exit_day)
-                    record["spy_entry_price"] = bctx.find_price_at_or_after(
-                        spy_bars_for_trade, entry_bar["t"]
-                    )
-                except Exception as e:
-                    logger.warning(f"spy_entry_price fetch failed: {e}")
+    # 4. Simulate Execution (single ticker, single contract).
+    exp_date = row["recommended_expiration"].date() if isinstance(row["recommended_expiration"], pd.Timestamp) or isinstance(row["recommended_expiration"], datetime) else row["recommended_expiration"]
+    opt_ticker = build_polygon_ticker(row["ticker"], exp_date, row["direction"], float(row["recommended_strike"]))
 
-                try:
-                    ivr, ivp, hv = bctx.fetch_underlying_context(row["ticker"], entry_day)
-                    record["iv_rank_entry"] = ivr
-                    record["iv_percentile_entry"] = ivp
-                    record["hv_20d_entry"] = hv
-                except Exception as e:
-                    logger.warning(f"underlying context fetch failed for {row['ticker']}: {e}")
-                # ------------------------------------------------------------------
+    # V5.4 mechanics: entry 10:00 ET day-1, hold 3 trading days, exit 15:50 ET day-3.
+    # HOLD_DAYS is the number of trading days held inclusive of entry_day.
+    # day-1 == entry_day, day-3 == get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+    exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
 
-                entry_idx = bars.index(entry_bar)
-                exit_reason = "TIMEOUT"
-                exit_price = None
-                exit_ts = None
+    bars = fetch_minute_bars(opt_ticker, entry_day, exit_day)
+    time.sleep(0.2)
 
-                # Track peak premium across the bar walk so the trail can
-                # activate / ratchet. base_entry is the seed (always less than
-                # any future peak by construction since peaks come from bar highs).
-                peak_premium = base_entry
-                trail_active = False
-                trail_stop_level = None
+    entry_dt = datetime.combine(entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time())
+    entry_ts_ms = int(est.localize(entry_dt).timestamp() * 1000)
+    timeout_dt = datetime.combine(exit_day, datetime.strptime(EXIT_HHMM, "%H:%M").time())
+    timeout_ts_ms = int(est.localize(timeout_dt).timestamp() * 1000)
 
-                # V5.4 bar walk: four exits in precedence order.
-                #   TIMEOUT — first bar at-or-after 15:50 ET on exit_day
-                #   STOP    — option low pierces -60% threshold (only when trail not active)
-                #   TRAIL   — option low pierces (peak × 0.75) once peak >= entry × 1.30
-                #   TARGET  — option high pierces +80% threshold
-                # If trail/stop and target hit on the same bar, trail/stop wins
-                # (intrabar conservative — assume drawdown happened first).
-                # Trail can both activate AND trigger on the same bar: peak update
-                # uses bar high, then trail level is checked against bar low. This
-                # mirrors the conservative "high-then-low" intrabar assumption.
-                # Track the most recent bar at-or-before timeout_ts_ms so on
-                # TIMEOUT we price off the last in-window print.
-                last_in_window_bar = None
-                for j in range(entry_idx + 1, len(bars)):
-                    b = bars[j]
-                    b_ts = b["t"]
+    # Find the entry bar. Prefer a bar at-or-after 10:00 ET, but fall
+    # back to the most recent bar before 10:00 as a price proxy rather
+    # than throwing the whole trade away. Only mark INVALID_LIQUIDITY
+    # when entry_day genuinely has zero printed bars.
+    entry_day_bars = [b for b in bars
+                      if datetime.fromtimestamp(b["t"]/1000, tz=est).date() == entry_day]
+    entry_bar = None
+    if entry_day_bars:
+        after_or_at = [b for b in entry_day_bars if b["t"] >= entry_ts_ms]
+        if after_or_at:
+            entry_bar = after_or_at[0]
+        else:
+            before = [b for b in entry_day_bars if b["t"] < entry_ts_ms]
+            entry_bar = before[-1] if before else None
 
-                    if b_ts >= timeout_ts_ms:
-                        exit_reason = "TIMEOUT"
-                        timeout_bar = last_in_window_bar if last_in_window_bar is not None else b
-                        exit_price = timeout_bar["c"]
-                        exit_ts = timeout_bar["t"]
-                        break
+    if not entry_bar or entry_bar.get("v", 0) == 0:
+        record["exit_reason"] = "INVALID_LIQUIDITY"
+    else:
+        base_entry = entry_bar["c"] * 1.02  # 2% Base Slippage
+        # V5.3 base: -60% option stop AND +80% option target.
+        # V5.4 (post 2026-05-09): trailing stop conditional re-introduced.
+        stop = base_entry * (1.0 - STOP_PCT)
+        target = base_entry * (1.0 + TARGET_PCT)
+        trail_trigger = base_entry * (1.0 + TRAIL_TRIGGER_PCT)
 
-                    # Update peak from this bar's high BEFORE evaluating exits,
-                    # so an up-and-down bar that crosses the trigger can both
-                    # activate the trail and stop out on it within the same bar.
-                    if b["h"] > peak_premium:
-                        peak_premium = b["h"]
-                        if peak_premium >= trail_trigger:
-                            trail_active = True
-                        if trail_active:
-                            trail_stop_level = peak_premium * (1.0 - TRAIL_DRAWDOWN_PCT)
+        record["entry_timestamp"] = datetime.fromtimestamp(entry_bar["t"]/1000, tz=est).isoformat()
+        record["entry_price"] = base_entry
+        record["target_price"] = target
+        record["stop_price"] = stop
+        record["trail_trigger_price"] = trail_trigger
 
-                    # Effective stop: trail (tighter) when active, else original -60% hard stop.
-                    effective_stop = trail_stop_level if trail_active else stop
-                    effective_stop_reason = "TRAIL" if trail_active else "STOP"
-
-                    hit_stop = b["l"] <= effective_stop
-                    hit_target = b["h"] >= target
-                    if hit_stop:
-                        # Stop (trail or hard) takes precedence over TARGET on ambiguous bars.
-                        exit_reason = effective_stop_reason
-                        exit_price = effective_stop
-                        exit_ts = b_ts
-                        break
-                    if hit_target:
-                        exit_reason = "TARGET"
-                        exit_price = target
-                        exit_ts = b_ts
-                        break
-
-                    # No exit triggered on this bar; remember it as the latest in-window print.
-                    last_in_window_bar = b
-
-                if exit_price is None:
-                    # The bar walk completed without ever crossing timeout_ts_ms. With
-                    # the future-timeout guard above, this should only happen when the
-                    # contract simply stopped printing before the timeout boundary; use
-                    # the last available in-window bar as the timeout exit price.
-                    last = last_in_window_bar if last_in_window_bar is not None else entry_bar
-                    exit_reason = "TIMEOUT"
-                    exit_price = last["c"]
-                    exit_ts = last["t"]
-                    
-                ret = (exit_price - base_entry) / base_entry
-
-                record["exit_reason"] = exit_reason
-                record["exit_timestamp"] = datetime.fromtimestamp(exit_ts/1000, tz=est).isoformat()
-                record["realized_return_pct"] = float(ret)
-                record["peak_premium"] = float(peak_premium)
-                record["trail_activated"] = bool(trail_active)
-                record["trail_stop_at_exit"] = float(trail_stop_level) if trail_stop_level is not None else None
-
-                # ---- Benchmarking exit-side fetches (non-blocking) ----
-                # Reuse the stock and SPY bar lists fetched at entry time.
-                try:
-                    stock_exit_px = bctx.find_price_at_or_before(
-                        stock_bars_for_trade, exit_ts
-                    )
-                    record["underlying_exit_price"] = stock_exit_px
-                    stock_entry_px = record.get("underlying_entry_price")
-                    if (
-                        stock_entry_px is not None
-                        and stock_exit_px is not None
-                        and stock_entry_px > 0
-                    ):
-                        raw = (stock_exit_px - stock_entry_px) / stock_entry_px
-                        sign = 1.0 if str(row["direction"]).upper() == "BULLISH" else -1.0
-                        record["underlying_return"] = float(sign * raw)
-                except Exception as e:
-                    logger.warning(f"underlying_exit fetch failed for {row['ticker']}: {e}")
-
-                try:
-                    spy_exit_px = bctx.find_price_at_or_before(
-                        spy_bars_for_trade, exit_ts
-                    )
-                    record["spy_exit_price"] = spy_exit_px
-                    spy_entry_px = record.get("spy_entry_price")
-                    if (
-                        spy_entry_px is not None
-                        and spy_exit_px is not None
-                        and spy_entry_px > 0
-                    ):
-                        record["spy_return_over_window"] = float(
-                            (spy_exit_px - spy_entry_px) / spy_entry_px
-                        )
-                except Exception as e:
-                    logger.warning(f"spy_exit fetch failed: {e}")
-                # --------------------------------------------------------
-
-        records_to_insert.append(record)
-        
-    # 4. Write to BigQuery — idempotent: delete any existing rows for this
-    # scan_date in LEDGER_TABLE, then load the new ones via a load job.
-    # We use a load job (not streaming insert_rows_json) so the new rows do not
-    # land in BigQuery's streaming buffer, which would block the DELETE on a
-    # subsequent re-trigger of the same scan_date for ~90 minutes.
-    if records_to_insert:
-        # Convert date to string for BQ load
-        for r in records_to_insert:
-            if isinstance(r["scan_date"], date):
-                r["scan_date"] = r["scan_date"].isoformat()
-
-        # Idempotency: delete any prior rows for this scan_date in the canonical ledger.
-        delete_query = f'DELETE FROM `{LEDGER_TABLE}` WHERE scan_date = "{target_date.isoformat()}"'
+        # ---- Benchmarking fetches (non-blocking; null on any failure) ----
+        # Fetched at entry time. The stock bars are reused for the exit-side
+        # lookup after the bar-walk.
+        stock_bars_for_trade: list = []
+        spy_bars_for_trade: list = []
         try:
-            client.query(delete_query).result()
-            logger.info(f"Deleted any prior rows for scan_date={target_date} in {LEDGER_TABLE}")
+            stock_bars_for_trade = fetch_minute_bars(
+                row["ticker"], entry_day, exit_day
+            )
+            time.sleep(0.1)
+            price = bctx.find_price_at_or_after(
+                stock_bars_for_trade, entry_bar["t"]
+            )
+            record["underlying_entry_price"] = price
         except Exception as e:
-            # Most likely cause: prior rows are still in the streaming buffer from a
-            # very recent insert. With load jobs (below) this should not happen on
-            # repeat triggers, but legacy data inserted via streaming may still trip
-            # this on the first run after deploy. Surface the error rather than
-            # silently double-writing.
-            logger.error(f"Pre-write DELETE failed for {LEDGER_TABLE} scan_date={target_date}: {e}")
-            return False, f"Pre-write DELETE failed: {e}"
+            logger.warning(f"underlying_entry_price fetch failed for {row['ticker']}: {e}")
 
-        # Load via a load job (NOT streaming) so the rows don't sit in streaming buffer.
-        import io
-        jsonl = "\n".join(json.dumps(r, default=str) for r in records_to_insert)
-        load_job_config = bigquery.LoadJobConfig(
-            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        )
-        load_job = client.load_table_from_file(
-            io.BytesIO(jsonl.encode("utf-8")),
-            LEDGER_TABLE,
-            job_config=load_job_config,
-        )
-        load_job.result()
-        logger.info(f"Loaded {len(records_to_insert)} records into {LEDGER_TABLE}")
-        return True, f"Successfully inserted {len(records_to_insert)} records."
-    return True, "No records to insert."
+        try:
+            spy_bars_for_trade = bctx.get_spy_bars_cached(entry_day, exit_day)
+            record["spy_entry_price"] = bctx.find_price_at_or_after(
+                spy_bars_for_trade, entry_bar["t"]
+            )
+        except Exception as e:
+            logger.warning(f"spy_entry_price fetch failed: {e}")
+
+        try:
+            ivr, ivp, hv = bctx.fetch_underlying_context(row["ticker"], entry_day)
+            record["iv_rank_entry"] = ivr
+            record["iv_percentile_entry"] = ivp
+            record["hv_20d_entry"] = hv
+        except Exception as e:
+            logger.warning(f"underlying context fetch failed for {row['ticker']}: {e}")
+        # ------------------------------------------------------------------
+
+        entry_idx = bars.index(entry_bar)
+        exit_reason = "TIMEOUT"
+        exit_price = None
+        exit_ts = None
+
+        # Track peak premium across the bar walk so the trail can
+        # activate / ratchet. base_entry is the seed (always less than
+        # any future peak by construction since peaks come from bar highs).
+        peak_premium = base_entry
+        trail_active = False
+        trail_stop_level = None
+
+        # V5.4 bar walk: four exits in precedence order.
+        #   TIMEOUT — first bar at-or-after 15:50 ET on exit_day
+        #   STOP    — option low pierces -60% threshold (only when trail not active)
+        #   TRAIL   — option low pierces (peak × 0.75) once peak >= entry × 1.30
+        #   TARGET  — option high pierces +80% threshold
+        # If trail/stop and target hit on the same bar, trail/stop wins
+        # (intrabar conservative — assume drawdown happened first).
+        # Trail can both activate AND trigger on the same bar: peak update
+        # uses bar high, then trail level is checked against bar low. This
+        # mirrors the conservative "high-then-low" intrabar assumption.
+        # Track the most recent bar at-or-before timeout_ts_ms so on
+        # TIMEOUT we price off the last in-window print.
+        last_in_window_bar = None
+        for j in range(entry_idx + 1, len(bars)):
+            b = bars[j]
+            b_ts = b["t"]
+
+            if b_ts >= timeout_ts_ms:
+                exit_reason = "TIMEOUT"
+                timeout_bar = last_in_window_bar if last_in_window_bar is not None else b
+                exit_price = timeout_bar["c"]
+                exit_ts = timeout_bar["t"]
+                break
+
+            # Update peak from this bar's high BEFORE evaluating exits,
+            # so an up-and-down bar that crosses the trigger can both
+            # activate the trail and stop out on it within the same bar.
+            if b["h"] > peak_premium:
+                peak_premium = b["h"]
+                if peak_premium >= trail_trigger:
+                    trail_active = True
+                if trail_active:
+                    trail_stop_level = peak_premium * (1.0 - TRAIL_DRAWDOWN_PCT)
+
+            # Effective stop: trail (tighter) when active, else original -60% hard stop.
+            effective_stop = trail_stop_level if trail_active else stop
+            effective_stop_reason = "TRAIL" if trail_active else "STOP"
+
+            hit_stop = b["l"] <= effective_stop
+            hit_target = b["h"] >= target
+            if hit_stop:
+                # Stop (trail or hard) takes precedence over TARGET on ambiguous bars.
+                exit_reason = effective_stop_reason
+                exit_price = effective_stop
+                exit_ts = b_ts
+                break
+            if hit_target:
+                exit_reason = "TARGET"
+                exit_price = target
+                exit_ts = b_ts
+                break
+
+            # No exit triggered on this bar; remember it as the latest in-window print.
+            last_in_window_bar = b
+
+        if exit_price is None:
+            # The bar walk completed without ever crossing timeout_ts_ms. With
+            # the future-timeout guard above, this should only happen when the
+            # contract simply stopped printing before the timeout boundary; use
+            # the last available in-window bar as the timeout exit price.
+            last = last_in_window_bar if last_in_window_bar is not None else entry_bar
+            exit_reason = "TIMEOUT"
+            exit_price = last["c"]
+            exit_ts = last["t"]
+
+        ret = (exit_price - base_entry) / base_entry
+
+        record["exit_reason"] = exit_reason
+        record["exit_timestamp"] = datetime.fromtimestamp(exit_ts/1000, tz=est).isoformat()
+        record["realized_return_pct"] = float(ret)
+        record["peak_premium"] = float(peak_premium)
+        record["trail_activated"] = bool(trail_active)
+        record["trail_stop_at_exit"] = float(trail_stop_level) if trail_stop_level is not None else None
+
+        # ---- Benchmarking exit-side fetches (non-blocking) ----
+        # Reuse the stock and SPY bar lists fetched at entry time.
+        try:
+            stock_exit_px = bctx.find_price_at_or_before(
+                stock_bars_for_trade, exit_ts
+            )
+            record["underlying_exit_price"] = stock_exit_px
+            stock_entry_px = record.get("underlying_entry_price")
+            if (
+                stock_entry_px is not None
+                and stock_exit_px is not None
+                and stock_entry_px > 0
+            ):
+                raw = (stock_exit_px - stock_entry_px) / stock_entry_px
+                sign = 1.0 if str(row["direction"]).upper() == "BULLISH" else -1.0
+                record["underlying_return"] = float(sign * raw)
+        except Exception as e:
+            logger.warning(f"underlying_exit fetch failed for {row['ticker']}: {e}")
+
+        try:
+            spy_exit_px = bctx.find_price_at_or_before(
+                spy_bars_for_trade, exit_ts
+            )
+            record["spy_exit_price"] = spy_exit_px
+            spy_entry_px = record.get("spy_entry_price")
+            if (
+                spy_entry_px is not None
+                and spy_exit_px is not None
+                and spy_entry_px > 0
+            ):
+                record["spy_return_over_window"] = float(
+                    (spy_exit_px - spy_entry_px) / spy_entry_px
+                )
+        except Exception as e:
+            logger.warning(f"spy_exit fetch failed: {e}")
+        # --------------------------------------------------------
+
+    records_to_insert.append(record)
+
+    return _write_ledger_records(client, target_date, records_to_insert)
+
+
+def _write_ledger_records(
+    client: bigquery.Client, target_date: date, records_to_insert: list[dict]
+) -> tuple[bool, str]:
+    """Idempotent write of ledger rows for ``target_date``.
+
+    Delete-then-load via a load job (NOT streaming) so the new rows never
+    land in BigQuery's streaming buffer — that buffer blocks DELETE for
+    ~90 minutes and would prevent same-day re-triggers from succeeding.
+
+    Used by every exit path in ``run_forward_paper_trading``: happy-path
+    trade write AND every fail-closed skip write. Always writes exactly
+    what the caller passed (no dedup / dedup is the caller's job).
+    """
+    if not records_to_insert:
+        return True, "No records to insert."
+
+    # Convert date to string for BQ load.
+    for r in records_to_insert:
+        if isinstance(r["scan_date"], date):
+            r["scan_date"] = r["scan_date"].isoformat()
+
+    # Idempotency: delete any prior rows for this scan_date in the canonical ledger.
+    delete_query = f'DELETE FROM `{LEDGER_TABLE}` WHERE scan_date = "{target_date.isoformat()}"'
+    try:
+        client.query(delete_query).result()
+        logger.info(f"Deleted any prior rows for scan_date={target_date} in {LEDGER_TABLE}")
+    except Exception as e:
+        # Most likely cause: prior rows are still in the streaming buffer from a
+        # very recent insert. With load jobs (below) this should not happen on
+        # repeat triggers, but legacy data inserted via streaming may still trip
+        # this on the first run after deploy. Surface the error rather than
+        # silently double-writing.
+        logger.error(f"Pre-write DELETE failed for {LEDGER_TABLE} scan_date={target_date}: {e}")
+        return False, f"Pre-write DELETE failed: {e}"
+
+    # Load via a load job (NOT streaming) so the rows don't sit in streaming buffer.
+    import io
+    jsonl = "\n".join(json.dumps(r, default=str) for r in records_to_insert)
+    load_job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+    )
+    load_job = client.load_table_from_file(
+        io.BytesIO(jsonl.encode("utf-8")),
+        LEDGER_TABLE,
+        job_config=load_job_config,
+    )
+    load_job.result()
+    logger.info(f"Loaded {len(records_to_insert)} records into {LEDGER_TABLE}")
+    return True, f"Successfully inserted {len(records_to_insert)} records."
 
 def get_previous_trading_day(base_date: date) -> date:
     start_date = base_date - timedelta(days=10)

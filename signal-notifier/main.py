@@ -97,16 +97,36 @@ MONEYNESS_MIN = 0.05
 # Augustin et al. 2022 J. Fin. Markets: informed traders prefer slightly
 # OTM, not deep-OTM, because B/A spreads scale inversely with price.
 MONEYNESS_MAX = 0.10
-OI_MIN = 20      # contract must have real open interest to be fillable
-VOL_MIN = 100    # contract must have traded yesterday in size
+# Liquidity floors relaxed 2026-05-12 (Scenario C, picker starvation fix; see
+# docs/DECISIONS/2026-05-12-v5-4-pipeline-alignment.md). Pre-relaxation values
+# (OI_MIN=20, VOL_MIN=100) were chosen as defensive defaults at the 2026-04-30
+# liquidity-floor launch; researcher funnel analysis on the 22 V5.4-era scan
+# dates showed they were the dominant cause of zero-candidate days. Halving
+# both floors keeps the "contract is actually fillable" intent while opening
+# the candidate pool. Underlying liquidity is already enforced upstream by
+# enrichment-trigger (directional UOA > $500K), so a 10/50 contract still
+# sits inside a real flow envelope. Revisit at N=15 closed V5.4 trades only
+# if win rate diverges materially by OI/volume decile.
+OI_MIN = 10      # contract must have real open interest to be fillable
+VOL_MIN = 50     # contract must have traded yesterday in size
 
-# DTE band added 2026-05-11. Anchored to scorer_v4.md:18 / picker_v3.md:69:
-# 7-30 DTE is the structural sweet spot for the +80%/3-day bracket — short
-# enough for gamma to dominate theta, long enough to survive a flat session.
-# 40+ DTE contracts (like the 2026-05-11 VAL incident) have too little gamma
-# to print +80% on a 3-day move and should never reach the ranker.
+# DTE band added 2026-05-11 (7-30 originally). Anchored to scorer_v4.md:18 /
+# picker_v3.md:69: short-DTE is the structural sweet spot for the +80%/3-day
+# bracket — short enough for gamma to dominate theta, long enough to survive
+# a flat session. 40+ DTE contracts (like the 2026-05-11 VAL incident) have
+# too little gamma to print +80% on a 3-day move and should never reach the
+# ranker.
+#
+# Upper bound widened 30 -> 45 on 2026-05-12 (Scenario C, picker starvation
+# fix; see docs/DECISIONS/2026-05-12-v5-4-pipeline-alignment.md). Gamma is
+# still meaningfully positive at 31-45 DTE on near-the-money strikes (delta
+# 0.45-0.55 inside the 5-10% moneyness band); the original 30-day cap was a
+# defensive default, not literature-backed. Projected funnel impact (22-day
+# sample): median candidates 1 -> 2; % days with >=3 candidates 22.7% ->
+# 50%. Tighten back to 30 if research shows EV at 31-45 DTE materially
+# underperforms 7-30 DTE on N>=15 V5.4 closes.
 DTE_MIN = 7
-DTE_MAX = 30
+DTE_MAX = 45
 
 # V5.3 execution knobs — must mirror forward-paper-trader/main.py.
 # Displayed in the operator email so the routine matches what the simulator

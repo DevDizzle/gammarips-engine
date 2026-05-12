@@ -27,9 +27,10 @@ Hard gates run UPSTREAM of the agent ranker. Only signals passing ALL get into t
 4. V/OI ratio > 2.0 at focal strike
 5. Moneyness 5–10% OTM (tightened from 15% on 2026-05-06 per lit-audit H12)
 6. VIX <= VIX3M (skip entire day if backwardation)
-7. Recommended contract OI >= 20 (so it has a real market)
-8. Recommended contract volume >= 100 (it traded yesterday in size)
-9. **No earnings near hold window** — exclude any ticker reporting in `[scan_date, entry_day+2 trading days]`. Window includes scan_date to catch AMC prints that contaminate the V/OI signal pre-entry. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*: retail loses 5–9% per event). Fail-closed if FMP earnings calendar is unreachable OR returns a non-list payload (quota-exhausted).
+7. Recommended contract OI >= 10 (relaxed from 20 on 2026-05-12 to lift picker-starvation floor)
+8. Recommended contract volume >= 50 (relaxed from 100 on 2026-05-12, same reason)
+9. DTE 7-45 (added 2026-05-11 at 7-30, widened to 7-45 on 2026-05-12 — picker rubrics penalize >45 DTE)
+10. **No earnings near hold window** — exclude any ticker reporting in `[scan_date, entry_day+2 trading days]`. Window includes scan_date to catch AMC prints that contaminate the V/OI signal pre-entry. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*: retail loses 5–9% per event). Fail-closed if FMP earnings calendar is unreachable OR returns a non-list payload (quota-exhausted).
 
 Top 10 gate-clean candidates fed to the V5.4 agent ranker. Scorer (`gemini-3-flash-preview`, scorer_v3) grades each on three rubrics (1-10): `flow_conviction` (60% weight), `regime_alignment` (25%, must cite the daily report), `narrative_coherence` (15%). HEDGING-tagged flow is hard-capped at flow_conviction ≤4. Top-5 by composite go to the Picker (`gemini-3.1-pro-preview`, picker_v2) — single high-stakes call that returns one ticker + runner-up + justification + confidence enum (`high`/`medium`/`low`). Picker reads top-5 candidate enriched data + Scorer reasoning prose (no raw rubric scores) + the daily report markdown + 14d ledger summary. **No abstain.** **Fail-closed on any error** — no fallback ranker; signal-ranker uptime is the SLO.
 
