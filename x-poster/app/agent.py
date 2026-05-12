@@ -450,21 +450,32 @@ class Publisher(BaseAgent):
                 )
                 return
 
-        # No-content guard for scorecard: when no trades on publicly-named
-        # tickers closed this week, skip rather than post an empty thread.
-        # First real-fire window is post-watchlist-launch (5/8 onward) — until
-        # then the public ledger restricts to ~0 rows.
+        # Minimum-N guard for scorecard: V5.4 cohort builds slowly (1 pick/day
+        # cadence post-2026-05-12 pipeline alignment). Suppress publish until
+        # at least 5 publicly-named trades have closed — otherwise an N=1-2
+        # week paints a misleading aggregate (e.g. "0 of 2 wins" reads as
+        # broken policy when it's just thin sample). Threshold of 5 chosen
+        # to be statistically minimal but still ship roughly weekly once
+        # cohort matures (~2-4 weeks post-V5.4 pipeline alignment).
+        SCORECARD_MIN_N = 5
         if post_type == "scorecard":
             wl = brief.get("weekly_ledger")
             trades = (wl or {}).get("trades") if isinstance(wl, dict) else None
-            if not trades:
-                logger.info("scorecard fired but no posted-ticker closes this week — skipping publish.")
+            trade_count = len(trades) if trades else 0
+            if trade_count < SCORECARD_MIN_N:
+                reason = (
+                    "no_scorecard_trades" if trade_count == 0
+                    else f"scorecard_below_min_n_{trade_count}_lt_{SCORECARD_MIN_N}"
+                )
+                logger.info(
+                    f"scorecard fired but N={trade_count} < min {SCORECARD_MIN_N} — skipping publish."
+                )
                 tools.log_post(
                     scan_date=scan_date, post_type=post_type,
                     text="", tweet_id=None, iterations=0,
-                    error="no_scorecard_trades",
+                    error=reason,
                 )
-                noop = {"status": "skipped", "reason": "no_scorecard_trades"}
+                noop = {"status": "skipped", "reason": reason}
                 state["publish_result"] = noop
                 yield Event(
                     author=self.name,
