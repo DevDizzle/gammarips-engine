@@ -94,7 +94,7 @@ def _normalize_percent(value):
 
 
 def fetch_todays_pick(scan_date: str) -> dict:
-    """Fetch today's V5.3 signal pick from Firestore `todays_pick/{scan_date}`.
+    """Fetch today's V5.4 signal pick from Firestore `todays_pick/{scan_date}`.
 
     Normalizes `moneyness_pct` to display units (6.42 not 0.0642) so the writer
     template renders `6.42%` consistently regardless of upstream storage.
@@ -142,7 +142,7 @@ def fetch_todays_report_summary(scan_date: str) -> dict:
 
 
 def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
-    """Query `forward_paper_ledger` for V5.3 trades that closed today.
+    """Query `forward_paper_ledger` for V5.4 trades that closed today.
 
     Returns each row pre-shaped for the WIN/LOSS writer template: derived
     `exit_price` (entry_price * (1 + realized_return_pct)), `pct_signed`
@@ -223,7 +223,7 @@ def fetch_watchlist(scan_date: str, n: int, exclude_ticker: str = "") -> dict:
     """Query `overnight_signals_enriched` for top-N high-dollar-volume setups.
 
     Used for the public X "watchlist" post — drives discovery via popular
-    names without leaking the paid V5.3 daily pick. Ranks by total option
+    names without leaking the paid V5.4 daily pick. Ranks by total option
     dollar volume (call+put) which biases toward broad-attention tickers
     (CAT, MS, MELI, BE…) rather than small-cap unusual-activity names.
 
@@ -285,7 +285,7 @@ def fetch_recently_posted_tickers(scan_date: str, lookback_days: int = 5) -> dic
     Args:
         scan_date: Today's date (YYYY-MM-DD); look back from here.
         lookback_days: Calendar days to walk back. 5 covers Mon-Fri callbacks
-            paired with prev-week posts under the V5.3 3-day hold.
+            paired with prev-week posts under the V5.4 3-day hold.
 
     Returns:
         dict: {"status": "success", "tickers": ["BE", "STX", ...]} unique upper-case.
@@ -430,7 +430,7 @@ def fetch_original_tweet_id(original_scan_date: str) -> dict:
 
 
 def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
-    """Query the past 5 trading days' V5.3 closes for the Friday scorecard.
+    """Query the past 5 trading days' V5.4 closes for the Friday scorecard.
 
     The scorecard reflects the PUBLIC track record — only trades on tickers
     the X audience has seen us name should appear. Pass `restrict_tickers`
@@ -443,7 +443,7 @@ def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
     Args:
         week_ending: Friday date in YYYY-MM-DD format.
         restrict_tickers: Comma-separated tickers to restrict to. Empty = all
-            V5.3 closes (use only for internal/admin scorecards — public X
+            V5.4 closes (use only for internal/admin scorecards — public X
             scorecards must restrict).
 
     Returns:

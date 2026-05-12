@@ -154,7 +154,7 @@ Scan date: {scan_date}   ← this is today's ET date, also the header date for t
 === STEP 1: Call the right tools for this post_type ===
 - signal: fetch_todays_pick(scan_date)
 - standby: fetch_todays_pick(scan_date)  — expected to return status=empty; that's normal
-- watchlist: FIRST fetch_todays_pick(scan_date) to learn the paid daily-pick ticker (if any). THEN call fetch_watchlist(scan_date, n=3, exclude_ticker=<pick.ticker or "">). Watchlist surfaces popular flow magnets ranked by dollar volume — NOT the paid V5.3 pick. If fetch_watchlist returns empty, leave brief.watchlist=[] — the publisher will skip.
+- watchlist: FIRST fetch_todays_pick(scan_date) to learn the paid daily-pick ticker (if any). THEN call fetch_watchlist(scan_date, n=3, exclude_ticker=<pick.ticker or "">). Watchlist surfaces popular flow magnets ranked by dollar volume — NOT the paid V5.4 pick. If fetch_watchlist returns empty, leave brief.watchlist=[] — the publisher will skip.
 - teaser: FIRST fetch_todays_pick(scan_date) to learn today's daily-pick ticker (if any), THEN call fetch_runner_ups(scan_date, n=3, exclude_ticker=<pick.ticker or "">). The teaser must show OTHER setups on the bench, not duplicate the SIGNAL post. If runner_ups returns an empty list, leave brief.runner_ups=[] — the publisher will skip.
 - report: fetch_todays_report_summary(scan_date)
 - callback (wins/losses): FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=5) to learn which tickers we've publicly named (callbacks should ONLY discuss tickers the X audience has seen). THEN call fetch_closing_trades(scan_date, restrict_tickers=<comma-joined ticker list>). For each closing trade in the result, call find_originating_post_for_ticker(ticker) to get the QRT id for win posts.

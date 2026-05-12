@@ -135,12 +135,12 @@ All tools live in `x-poster/app/tools.py`. Return JSON-serializable dicts.
 - 3-zone layout:
   - Top-left: `🔥 GammaRips` wordmark
   - Center: 2 × 2 grid placeholder for ticker/direction/contract/flow stats
-  - Bottom-right: `V5_3_TARGET_80` watermark
+  - Bottom-right: `V5_4_AGENT_RANKER` watermark
 - Color palette: dark navy background (#0F1419), accent green (#00BA7C) for bullish, accent red (#F4212E) for bearish, off-white text (#E7E9EA)
 - Typography: sans-serif, bold for tickers
 
 **Per-post image prompt templates** (owned by `writer` agent, emitted in `post_draft.image_prompt`):
-- `signal` — "Apply to brand_ref_card: ticker ${TICKER}, direction ${DIR}, strike ring ${STRIKE}, flow stats V/OI ${VOI}, DTE ${DTE}, keep V5_3_TARGET_80 watermark"
+- `signal` — "Apply to brand_ref_card: ticker ${TICKER}, direction ${DIR}, strike ring ${STRIKE}, flow stats V/OI ${VOI}, DTE ${DTE}, keep V5_4_AGENT_RANKER watermark"
 - `standby` — "Apply to brand_ref_card: empty scanner animation, '0 signals cleared' badge in center, subdued palette"
 - `report` — "Abstract market-mood illustration matching theme: ${THEME}, brand colors, no text except 'Overnight Brief'"
 - `win` — "Victory overlay on brand_ref_card: ${TICKER} ${DIR} callout, +${PCT}% badge in green"
