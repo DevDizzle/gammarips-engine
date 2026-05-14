@@ -15,7 +15,7 @@ from google.genai import types
 # pre-computed sector concentration, 14d sentiment shift (Tetlock), divergence
 # flags, change-vs-yesterday diff (Lazy Prices), forced per-candidate binary
 # directional calls (Lopez-Lira), structured theme tags (Bybee), seoMetadata.
-PROMPT_VERSION = "report_v2"
+PROMPT_VERSION = "report_v2.1"
 
 try:
     from trace_logger import TraceLogger, TraceRecord
@@ -136,6 +136,34 @@ def fetch_baseline_split(underlying_scan_date: str, lookback_days: int = 14):
     var = sum((x - mean) ** 2 for x in bull_shares) / max(len(bull_shares) - 1, 1)
     std = math.sqrt(var)
     return {"baseline_bull_share": mean, "baseline_std": std, "n_days": len(bull_shares)}
+
+
+def fetch_recent_titles(report_date: str, n: int = 3):
+    """Pull the last `n` distinct prior daily_reports titles to feed back into
+    the prompt as an anti-repetition signal. Walks back up to 14 calendar days
+    to skip weekends/holidays. Dedupes the dual-write twins (entry-day +
+    underlying-scan-date docs share a title) by collecting unique titles in
+    walk-back order. Returns a list[str], possibly empty."""
+    titles: list[str] = []
+    seen: set[str] = set()
+    try:
+        rd = datetime.strptime(report_date, "%Y-%m-%d")
+        for back in range(1, 15):
+            if len(titles) >= n:
+                break
+            prior = (rd - timedelta(days=back)).strftime("%Y-%m-%d")
+            doc = db.collection("daily_reports").document(prior).get()
+            if not doc.exists:
+                continue
+            data = doc.to_dict() or {}
+            t = (data.get("title") or "").strip()
+            if not t or t in seen:
+                continue
+            seen.add(t)
+            titles.append(t)
+    except Exception as e:
+        logger.warning(f"recent-titles lookup failed: {e}")
+    return titles
 
 
 def fetch_yesterday_top_tickers(report_date: str):
@@ -297,7 +325,22 @@ recompute, do not contradict, do not omit):
 OUTPUT — produce a single JSON object with these keys:
 
 - "title": punchy thematic title, quotable on X. e.g., "The Tariff Shakeout"
-  or "Hedges Outnumber Bets". Tied to today's themes/sentiment_shift, not generic.
+  or "Hedges Outnumber Bets". HARD RULES:
+    a) MUST cite or directly evoke one of the catalyst names from the
+       structured `themes` list in the payload (e.g. "Sector Rotation",
+       "Earnings Beat", "Technical Breakout", "Guidance Raise",
+       "Analyst Upgrade", "Macro"). Do NOT invent a theme — in particular
+       do NOT default to "AI Infrastructure" / "AI Re-Rating" / "Data Center"
+       phrasing unless that exact phrase appears in `themes` or in a top
+       candidate's `catalyst_type`. Ticker news prose is not a theme source.
+    b) MUST NOT repeat or paraphrase any title in the payload's
+       `previous_titles` list. Same anchor noun phrase counts as a repeat
+       (e.g. if a previous title was "The Infrastructure Re-Rating", you
+       cannot ship "AI Infrastructure Re-Rating", "The Infrastructure Pivot",
+       or "Infrastructure Re-Pricing"). Pick a different theme angle.
+    c) Tie the title to today's sentiment_shift direction when the z-score
+       is outside [-1, 1] — e.g. an outlier_bearish day should read as a
+       cooling/de-risking title, not a euphoric one.
 - "headline": 2-3 sentence summary leading with the bull/bear split + the
   shift_z direction (today vs trailing 14d), then the dominant theme.
 - "content": full markdown body. REQUIRED sections in this order:
@@ -365,7 +408,7 @@ CRITICAL FORMATTING:
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=ReportResponse,
-                temperature=0.4,
+                temperature=0.7,
             )
         )
     except Exception as e:
@@ -534,6 +577,8 @@ def generate_report():
     top_bullish_tickers = [s.get("ticker") for s in top_bullish if s.get("ticker")]
     top_bearish_tickers = [s.get("ticker") for s in top_bearish if s.get("ticker")]
 
+    previous_titles = fetch_recent_titles(report_date, n=3)
+
     payload = {
         "report_date": report_date,
         "underlying_scan_date": underlying_scan_date,
@@ -549,6 +594,7 @@ def generate_report():
         "themes": themes,
         "divergences": divergences,
         "change_vs_yesterday": change_vs_yesterday,
+        "previous_titles": previous_titles,
     }
 
     # Stage 2: Editorial composition
