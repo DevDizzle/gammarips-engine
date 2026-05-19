@@ -45,6 +45,7 @@ import pytz
 import requests
 from flask import Flask, jsonify, request
 from google.cloud import bigquery, firestore
+from pandas.tseries.offsets import BDay
 
 app = Flask(__name__)
 
@@ -61,6 +62,13 @@ RECIPIENT_EMAIL = "eraphaelparra@gmail.com"
 # call this service makes to FMP; mounted via deploy.sh as a Secret Manager
 # binding. Missing key fails closed (no email).
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "").strip()
+
+# Active-days liquidity gate (2026-05-19). Polygon daily aggs on the
+# recommended_contract are used to compute active_days_20d transiently per
+# finalist. Missing key -> compute_active_days_20d returns ("polygon_error")
+# -> caller fails closed per-candidate. See:
+#   docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md
+POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 
 # Live cohort starts 2026-05-08 (V5.4 promotion truncated forward_paper_ledger
 # 246 rows). V5.3 is retired entirely. Pre-2026-05-08 ledger rows are GONE —
@@ -127,6 +135,15 @@ VOL_MIN = 50     # contract must have traded yesterday in size
 # underperforms 7-30 DTE on N>=15 V5.4 closes.
 DTE_MIN = 7
 DTE_MAX = 45
+
+# Active-days liquidity gate (added 2026-05-19). Each finalist's
+# recommended_contract must have printed volume on at least ACTIVE_DAYS_MIN of
+# the 20 trading days preceding scan_date. Picked deliberately at 5: lifts
+# entry-day fillability 50% -> 71% (~95% of the gain from >=8) with zero V5.4
+# dry days in the 25-day backtest. Tuning requires a new DECISIONS doc — do
+# not loosen via env var or hot-path edit. See:
+#   docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md
+ACTIVE_DAYS_MIN = 5
 
 # V5.3 execution knobs — must mirror forward-paper-trader/main.py.
 # Displayed in the operator email so the routine matches what the simulator
@@ -216,6 +233,104 @@ def fetch_earnings_calendar(start_date: date, end_date: date) -> set[str] | None
     except Exception as e:
         logger.error(f"Earnings calendar fetch failed: {e}")
         return None
+
+
+def compute_active_days_20d(
+    recommended_contract: str, scan_date: date
+) -> tuple[int | None, str]:
+    """Count trading days with vol>0 over the 20 sessions preceding scan_date.
+
+    Returns ``(active_days_20d, status)`` where ``status`` is one of:
+      * ``"ok"`` — Polygon returned a valid (possibly empty) ``results`` list
+        AND we were able to compute a count. Returned int is in [0, 20].
+      * ``"polygon_empty"`` — Polygon returned 200 with ``results=[]`` or
+        ``resultsCount=0``. Treated as "contract never printed in the
+        window" — count is None, caller MUST fail closed.
+      * ``"polygon_error"`` — any other failure (missing key, exception,
+        timeout, non-200, malformed JSON). Count is None, caller MUST fail
+        closed.
+
+    Single attempt — the caller handles fail-closed; retries belong in the
+    Polygon session, not here. 8s timeout. See decision doc for threshold
+    rationale and backtest:
+      docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md
+    """
+    if not POLYGON_API_KEY:
+        logger.error(
+            "POLYGON_API_KEY not set; cannot compute active_days_20d for "
+            f"{recommended_contract}"
+        )
+        return None, "polygon_error"
+
+    # 35 calendar days back from scan_date is enough to span 20 trading days
+    # even across long weekends / holidays. End at scan_date - 1 calendar day
+    # so we never accidentally include scan_date itself.
+    start_d = scan_date - timedelta(days=35)
+    end_d = scan_date - timedelta(days=1)
+    url = (
+        f"https://api.polygon.io/v2/aggs/ticker/{recommended_contract}"
+        f"/range/1/day/{start_d.isoformat()}/{end_d.isoformat()}"
+        f"?adjusted=true&sort=asc&limit=120&apiKey={POLYGON_API_KEY}"
+    )
+
+    try:
+        resp = requests.get(url, timeout=8)
+        if resp.status_code != 200:
+            logger.warning(
+                f"Polygon daily aggs {recommended_contract} HTTP "
+                f"{resp.status_code}: {resp.text[:200]}"
+            )
+            return None, "polygon_error"
+        body = resp.json()
+    except Exception as e:
+        logger.warning(
+            f"Polygon daily aggs {recommended_contract} fetch failed: {e}"
+        )
+        return None, "polygon_error"
+
+    if not isinstance(body, dict):
+        logger.warning(
+            f"Polygon daily aggs {recommended_contract} non-dict body: "
+            f"{str(body)[:200]}"
+        )
+        return None, "polygon_error"
+
+    results = body.get("results") or []
+    if not results:
+        # Distinguish "never traded" from "API down" — same fail-closed
+        # outcome, different skip reason in postmortem.
+        return None, "polygon_empty"
+
+    # Build the 20 most recent US business days strictly before scan_date.
+    # BDay is the same primitive the researcher's backtest used; pandas
+    # business-day arithmetic is good enough here (option markets follow NYSE
+    # but the trailing 20-session count is robust to the rare federal holiday
+    # mismatch — at worst we mis-bucket by 1 session, which doesn't move the
+    # gate at threshold 5).
+    sd_ts = pd.Timestamp(scan_date)
+    sessions = pd.bdate_range(end=sd_ts - BDay(1), periods=20)
+    session_dates = {ts.date() for ts in sessions}
+
+    # Map Polygon results to {date: volume}. `t` is ms epoch at bar start (UTC).
+    # Polygon returns at most one bar per US trading day; we treat each bar's
+    # UTC date as its trading-day index.
+    by_date: dict[date, int] = {}
+    for bar in results:
+        t_ms = bar.get("t")
+        if t_ms is None:
+            continue
+        v = bar.get("v", 0) or 0
+        try:
+            d = datetime.utcfromtimestamp(t_ms / 1000.0).date()
+        except (OverflowError, OSError, ValueError):
+            continue
+        if d >= scan_date:
+            continue
+        by_date[d] = int(v)
+
+    # Zero-fill missing trading days, then count days with vol > 0.
+    active = sum(1 for d in session_dates if by_date.get(d, 0) > 0)
+    return active, "ok"
 
 
 def write_todays_pick_doc(
@@ -1066,6 +1181,105 @@ def run_notifier(target_date: date | None = None):
             f"Earnings exclusion: removed {len(skipped_for_earnings)} candidates "
             f"({skipped_for_earnings}). {len(df)} candidates passed to V5.4."
         )
+
+    # Active-days liquidity gate (added 2026-05-19, per
+    # docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md). Each surviving
+    # finalist's recommended_contract must have printed volume on at least
+    # ACTIVE_DAYS_MIN of the 20 trading days preceding scan_date. Two distinct
+    # rejection reasons:
+    #   * thin_contract_liquidity     — Polygon answered, count < threshold
+    #   * liquidity_check_unavailable — Polygon errored or returned empty;
+    #                                   fail-closed at the candidate level
+    # The KBR Jun-18 27.5P 2026-05-14 INVALID_LIQUIDITY incident is the
+    # motivating case (4 active days, scan-day vol=323 was a single block).
+    pre_liquidity_n = len(df)
+    keep_mask: list[bool] = []
+    active_days_per_row: list[int | None] = []
+    liquidity_rejections: list[dict] = []
+    for _, cand in df.iterrows():
+        ticker = str(cand.get("ticker", ""))
+        contract = str(cand.get("recommended_contract", "") or "")
+        if not contract:
+            # Defensive — the SELECT already requires strike + expiration,
+            # but a NULL recommended_contract slipping through should not
+            # crash the loop. Fail-closed on the candidate.
+            logger.info(
+                f"Active-days gate: {ticker} has no recommended_contract; "
+                f"removing from pool (liquidity_check_unavailable)."
+            )
+            keep_mask.append(False)
+            active_days_per_row.append(None)
+            liquidity_rejections.append({
+                "ticker": ticker,
+                "contract": contract,
+                "active_days_20d": None,
+                "reason": "liquidity_check_unavailable",
+            })
+            continue
+        active, status = compute_active_days_20d(contract, target_date)
+        if status != "ok":
+            logger.info(
+                f"Active-days gate: {ticker} {contract} status={status} "
+                f"-> liquidity_check_unavailable (removed)."
+            )
+            keep_mask.append(False)
+            active_days_per_row.append(None)
+            liquidity_rejections.append({
+                "ticker": ticker,
+                "contract": contract,
+                "active_days_20d": None,
+                "reason": "liquidity_check_unavailable",
+            })
+            continue
+        if active < ACTIVE_DAYS_MIN:
+            logger.info(
+                f"Active-days gate: {ticker} {contract} "
+                f"active_days_20d={active} < {ACTIVE_DAYS_MIN} "
+                f"-> thin_contract_liquidity (removed)."
+            )
+            keep_mask.append(False)
+            active_days_per_row.append(active)
+            liquidity_rejections.append({
+                "ticker": ticker,
+                "contract": contract,
+                "active_days_20d": active,
+                "reason": "thin_contract_liquidity",
+            })
+            continue
+        keep_mask.append(True)
+        active_days_per_row.append(active)
+
+    # Attach the computed value as a column so the ranker payload carries it
+    # forward as ranker context (signal-ranker ignores unknown keys; this is
+    # purely additive). NaN-safe — None becomes NaN under pandas, which the
+    # _candidate_for_ranker helper drops on isna check.
+    df = df.assign(active_days_20d=active_days_per_row)
+    df = df[keep_mask].reset_index(drop=True)
+
+    if liquidity_rejections:
+        logger.info(
+            f"Active-days liquidity gate: removed {len(liquidity_rejections)} "
+            f"of {pre_liquidity_n} candidates; {len(df)} candidates passed to V5.4. "
+            f"Rejections: {liquidity_rejections}"
+        )
+
+    if len(df) == 0:
+        # The pool emptied here even though it was non-empty before this gate
+        # (we only entered this block if earnings filtering left rows). Use the
+        # existing day-level skip reason — thin_contract_liquidity is per
+        # candidate, not per day, per the decision doc.
+        logger.info(
+            "All remaining candidates failed the active-days liquidity gate. "
+            "No email sent."
+        )
+        write_todays_pick_doc(
+            target_date, has_pick=False, skip_reason="no_candidates_passed_gates"
+        )
+        post_to_openclaw(format_whatsapp_message(
+            None, target_date, None, has_pick=False,
+            skip_reason="no_candidates_passed_gates",
+        ))
+        return True, "No eligible signal after active-days liquidity gate."
 
     # V5.4 IS the picker — no V5.3 SQL "rank-1" fallback. signal-ranker uptime
     # is the SLO. On any error: fail-closed (no email, empty-state todays_pick).

@@ -20,7 +20,7 @@ gcloud run deploy $SERVICE_NAME \
   --min-instances=0 \
   --max-instances=1 \
   --set-env-vars="SIGNAL_RANKER_URL=https://signal-ranker-hrhjaecvhq-uc.a.run.app" \
-  --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,FMP_API_KEY=FMP_API_KEY:latest" \
+  --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,FMP_API_KEY=FMP_API_KEY:latest,POLYGON_API_KEY=POLYGON_API_KEY:latest" \
   --service-account="firebase-adminsdk-fbsvc@$PROJECT_ID.iam.gserviceaccount.com"
 
 echo "Done!"

@@ -59,6 +59,12 @@ _archive/*
 # trace_logger vendor copies staged by service deploy.sh scripts
 **/_trace_logger_vendor/
 
+# Local Polygon API response cache for ad-hoc backtests — not reproducible artifacts.
+backtesting_and_research/cache/
+
+# Claude Code scheduled-task lock files (local runtime state).
+.claude/scheduled_tasks.lock
+
 # dbt — incomplete/stale project, not in use. Ignore the whole directory.
 dbt/
 .user.yml
