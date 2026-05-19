@@ -70,11 +70,28 @@ FMP_API_KEY = os.environ.get("FMP_API_KEY", "").strip()
 #   docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md
 POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 
-# Live cohort starts 2026-05-08 (V5.4 promotion truncated forward_paper_ledger
-# 246 rows). V5.3 is retired entirely. Pre-2026-05-08 ledger rows are GONE —
-# the V5.4 cohort has no V5.3 history mixed in. See:
+# Live cohort starts 2026-05-13 — the first actual V5.4 fill (OKTA scan
+# 2026-05-12 → entry 2026-05-13). V5.4 was *promoted* 2026-05-08 but the
+# V5.4-only trader code didn't land until 2026-05-15 and the first row it
+# wrote was OKTA with entry_timestamp=2026-05-13. Anchoring the public cohort
+# to the policy-promotion date (5/8) over-states the cohort age and creates
+# the impression that fewer trades have fired than expected. Anchored instead
+# to the first executed trade so the "cohort age" displayed publicly matches
+# the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
-LIVE_COHORT_START_DATE = "2026-05-08"
+#   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
+LIVE_COHORT_START_DATE = "2026-05-13"
+
+# Fixed-dollar position sizing for the public cohort_stats panel.
+# The ledger records actual per-contract premium + percent return; the public
+# display layer applies a normalized $500/trade position size so the cohort
+# ROI is comparable across trades regardless of contract premium. Without
+# this, a 1-contract $0.40 option winning +80% (HTZ on 2026-05-19) shows
+# only ~$32 P&L next to a 1-contract $4.67 option losing -2% (OKTA on
+# 2026-05-13) at $9 — the dollar-weighted ROI under-represents wins on
+# low-premium contracts. n_contracts = max(1, ROUND($500 / (entry_price*100))).
+# See docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md.
+POSITION_SIZE_USD = 500.0
 
 # Public webapp base — used to build deep-links for emails / WhatsApp.
 # Pinned here so the email surface never accidentally points at a staging
@@ -983,18 +1000,34 @@ def compute_and_write_cohort_stats() -> bool:
     """
     try:
         client = bigquery.Client(project=PROJECT_ID)
+        # Fixed-dollar sizing: n_contracts = max(1, ROUND(POSITION_SIZE_USD /
+        # (entry_price * 100))). Computed in-SQL so changing position size is a
+        # one-place update and the ledger keeps per-contract granularity. See
+        # docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md.
         query = f"""
+        WITH sized AS (
+          SELECT
+            realized_return_pct,
+            entry_price,
+            GREATEST(1, CAST(ROUND({POSITION_SIZE_USD} / (entry_price * 100)) AS INT64)) AS n_contracts
+          FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
+          WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
+            AND policy_version = "V5_4_AGENT_RANKER"
+            AND realized_return_pct IS NOT NULL
+            AND entry_price IS NOT NULL
+            AND entry_price > 0
+        )
         SELECT
           COUNT(*) AS trades_closed,
           COUNTIF(realized_return_pct > 0) AS trades_won,
           COALESCE(SAFE_DIVIDE(COUNTIF(realized_return_pct > 0), COUNT(*)), 0) AS win_rate,
-          COALESCE(SUM(entry_price * 100), 0) AS total_invested_usd,
-          COALESCE(SUM(entry_price * 100 * realized_return_pct), 0) AS total_pl_usd,
-          COALESCE(SAFE_DIVIDE(SUM(entry_price * 100 * realized_return_pct), SUM(entry_price * 100)), 0) AS roi_pct
-        FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
-        WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
-          AND policy_version = "V5_4_AGENT_RANKER"
-          AND realized_return_pct IS NOT NULL
+          COALESCE(SUM(n_contracts * entry_price * 100), 0) AS total_invested_usd,
+          COALESCE(SUM(n_contracts * entry_price * 100 * realized_return_pct), 0) AS total_pl_usd,
+          COALESCE(SAFE_DIVIDE(
+            SUM(n_contracts * entry_price * 100 * realized_return_pct),
+            SUM(n_contracts * entry_price * 100)
+          ), 0) AS roi_pct
+        FROM sized
         """
         rows = list(client.query(query).result())
         r = rows[0] if rows else None
@@ -1002,6 +1035,7 @@ def compute_and_write_cohort_stats() -> bool:
         stats = {
             "cohort_start": LIVE_COHORT_START_DATE,
             "policy_version": "V5_4_AGENT_RANKER",
+            "position_size_usd": POSITION_SIZE_USD,
             "as_of": firestore.SERVER_TIMESTAMP,
             "trades_closed": int(r["trades_closed"]) if r else 0,
             "trades_won": int(r["trades_won"]) if r else 0,
