@@ -365,6 +365,9 @@ def fetch_and_analyze_news(
     scan_date: str | None = None,
     run_id: str | None = None,
     flow_context: dict | None = None,
+    recommended_strike: float | None = None,
+    recommended_expiration: str | None = None,
+    underlying_price: float | None = None,
 ) -> dict | None:
     """
     Use Gemini with Google Search grounding to fetch and analyze
@@ -396,13 +399,39 @@ def fetch_and_analyze_news(
         search_tool = types.Tool(google_search=types.GoogleSearch())
 
         _xcut = render_flow_context_block(flow_context)
+
+        # Authoritative contract block — the scanner already picked the strike +
+        # expiry; the thesis must cite these verbatim instead of inventing them.
+        # Before 2026-05-18 the thesis prompt only had an example string ("FSLY
+        # BULL $25C Mar 21") and no real contract data, so the model would
+        # hallucinate a plausible-looking strike that disagreed with the
+        # Recommended Setup card on the same webapp surface.
+        _opt_letter = "C" if direction == "BULLISH" else "P"
+        if recommended_strike is not None and recommended_expiration:
+            try:
+                _exp_dt = datetime.strptime(str(recommended_expiration)[:10], "%Y-%m-%d")
+                _exp_label = _exp_dt.strftime("%b %d '%y")
+            except Exception:
+                _exp_label = str(recommended_expiration)
+            _strike_label = f"${recommended_strike:g}{_opt_letter}"
+            _contract_block = (
+                f"\nRECOMMENDED CONTRACT (cite these values verbatim — do NOT invent or round):\n"
+                f"- Strike: {_strike_label}\n"
+                f"- Expiration: {_exp_label}\n"
+                + (f"- Underlying spot: ${underlying_price:.2f}\n" if underlying_price else "")
+                + f"- Thesis lead must read exactly: \"{ticker} "
+                f"{'BULL' if direction == 'BULLISH' else 'BEAR'} {_strike_label} {_exp_label}.\"\n"
+            )
+        else:
+            _contract_block = ""
+
         prompt = f"""You are a senior institutional options flow analyst. Search for the latest news about {ticker} stock from the past 24 hours. Use at most 2 Google Search queries total.
 
 CONTEXT:
 - Stock moved {price_change_pct:+.1f}% recently
 - Institutional options flow direction: {direction}
 - Flow volume: ${flow_volume:,.0f}
-{_xcut}
+{_xcut}{_contract_block}
 CRITICAL ANALYSIS: You must assess whether this options flow is DIRECTIONAL (a new bet on future movement) or HEDGING (protecting existing positions after a move already happened). This distinction is everything.
 
 Key signals of HEDGING flow (not tradeable):
@@ -427,7 +456,7 @@ Based on what you find, respond in valid JSON only (no markdown, no code fences)
   "flow_intent_reasoning": "<1 sentence explaining why you classified the flow this way>",
   "move_overdone": <boolean, true if the price move appears disproportionate to the catalyst>,
   "reversal_probability": <float 0.0-1.0, probability of a reversal in the next 1-5 trading days based on historical patterns for this type of event>,
-  "thesis": "<2-3 sentence trade thesis synthesizing flow direction, catalyst, and setup. Write as a trader briefing: what's the trade, why now, what's the risk. Example: 'FSLY BULL $25C Mar 21. Agentic AI traffic driving blockbuster earnings beat with 1,986% call volume surge. Entry above $22 support with $28 resistance target. Risk: post-earnings fade if guidance disappoints on follow-through.'"
+  "thesis": "<2-3 sentence trade thesis synthesizing flow direction, catalyst, and setup. Write as a trader briefing: what's the trade, why now, what's the risk. If RECOMMENDED CONTRACT block is present above, the FIRST sentence MUST open with the exact required lead string from that block — do NOT substitute a different strike, a different expiry month, or a rounded number. Example shape (the strike/expiry come from the contract block, not from you): 'TICKER BULL $XXXC MMM DD ''YY. <catalyst-driven thesis>. Entry near <level> with <target> target. Risk: <risk>.'"
 }}
 
 If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst_score to 0.1, and provide a summary noting the lack of news coverage."""
@@ -646,10 +675,16 @@ def fetch_and_analyze_news_batch(
             logger.info(f"  {ticker}: cache hit — skipping grounded Gemini call")
             return ticker, cached
 
+        _rec_strike = signal.get("recommended_strike")
+        _rec_exp = signal.get("recommended_expiration")
+        _und_px = signal.get("underlying_price")
         analysis = fetch_and_analyze_news(
             ticker, direction, move_pct, flow_vol,
             scan_date=today, run_id=_run_id,
             flow_context=flow_context,
+            recommended_strike=float(_rec_strike) if _rec_strike is not None else None,
+            recommended_expiration=str(_rec_exp) if _rec_exp is not None else None,
+            underlying_price=float(_und_px) if _und_px is not None else None,
         )
 
         # Store result in GCS for audit trail + cache for downstream/retries

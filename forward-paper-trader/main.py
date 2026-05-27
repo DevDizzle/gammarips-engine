@@ -66,6 +66,7 @@ EXIT_HHMM = "15:50"   # 15:50 ET on day-3
 POLICY_VERSION = "V5_4_AGENT_RANKER"
 POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
 LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
+INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_intraday"
 
 def get_next_trading_day(base_date: date) -> date:
     end_date = base_date + timedelta(days=7)
@@ -368,14 +369,14 @@ def run_forward_paper_trading(target_date: date = None):
     # Without this guard, the exit-fallback path at the bottom of the simulation
     # loop will use a partial intraday bar from "today" as a phantom TIMEOUT exit,
     # producing data that looks like a closed trade but represents an open position.
-    # V5.4: exit_day = entry_day + (HOLD_DAYS - 1) trading days.
-    # Note: guard applies to skip rows too — premature skip writes for in-progress
-    # hold windows would race the next-day retrigger and write duplicate skips.
+    # V5.4: exit_day = entry_day + (HOLD_DAYS - 1) trading days. The cron fires
+    # at 16:30 ET after market close, so the 15:50 ET TIMEOUT bar on exit_day=today
+    # is already final and safe to simulate — hence `>` (strict future), not `>=`.
     timeout_day_check = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
     today_et = datetime.now(est).date()
-    if timeout_day_check >= today_et:
-        msg = (f"Exit day {timeout_day_check} for hold_days={HOLD_DAYS} is today or "
-               f"in the future. Hold window has not fully closed; refusing to simulate.")
+    if timeout_day_check > today_et:
+        msg = (f"Exit day {timeout_day_check} for hold_days={HOLD_DAYS} is in the "
+               f"future. Hold window has not fully closed; refusing to simulate.")
         logger.warning(msg)
         return False, msg
 
@@ -761,16 +762,23 @@ def get_previous_trading_day(base_date: date) -> date:
     valid_dates = [d.date() for d in schedule.index if d.date() < base_date]
     return valid_dates[-1] if valid_dates else None
 
+def get_nth_previous_trading_day(base_date: date, n: int) -> date:
+    d = base_date
+    for _ in range(n):
+        d = get_previous_trading_day(d)
+        if d is None:
+            return None
+    return d
+
 def get_canonical_scan_date(today: date = None) -> date:
-    """Return the most recent scan_date whose V5.3 hold window has fully closed
-    before `today`.
+    """Return the scan_date whose 3-day hold window EXITS on `today`.
 
     A signal scanned on date X enters at next_trading_day(X) (= day-1) and
-    times out at nth_next_trading_day(entry, HOLD_DAYS - 1) (= day-N). For the
-    trade to be safely simulated, the timeout day must be strictly before
-    `today`. We walk back (HOLD_DAYS + 1) trading days from today: 1 for the
-    entry-day lag, and HOLD_DAYS - 1 for the span from day-1 to day-N, plus 1
-    for the "strictly before today" guard.
+    times out at nth_next_trading_day(entry, HOLD_DAYS - 1) (= day-N, exit at
+    15:50 ET). The cron fires at 16:30 ET after market close, so today's bars
+    — including the 15:50 ET TIMEOUT bar — are already final and safe to
+    simulate. We walk back HOLD_DAYS trading days from today: 1 for the
+    entry-day lag (scan → entry) plus HOLD_DAYS-1 for the entry → exit span.
 
     This is the function the daily cron uses when no explicit target_date is
     provided.
@@ -778,8 +786,8 @@ def get_canonical_scan_date(today: date = None) -> date:
     if today is None:
         today = datetime.now(est).date()
     d = today
-    # HOLD_DAYS=3: walk back 4 trading days (entry + 2 more hold days + 1 buffer)
-    for _ in range(HOLD_DAYS + 1):
+    # HOLD_DAYS=3: walk back 3 trading days (entry-day lag + 2 hold-day span)
+    for _ in range(HOLD_DAYS):
         d = get_previous_trading_day(d)
     return d
 
@@ -885,6 +893,192 @@ def run_iv_cache_update():
         "tickers_attempted": n_attempted,
         "tickers_with_iv": n_with_iv,
     }
+
+
+def run_mark_to_market() -> tuple[bool, dict]:
+    """Daily EOD mark-to-market snapshot for V5.4 open positions.
+
+    An "open position" is a pick whose entry_day has occurred but whose hold
+    window has not yet fully closed (today <= exit_day). We discover them by
+    walking the last HOLD_DAYS entry_day candidates (today, today-1td,
+    today-2td) and reading each corresponding todays_pick doc.
+    For each open position we pull the option's intraday bars from entry_day
+    through today, derive entry_price (10:00 ET on entry_day with the same
+    2% slippage the trader uses) and the current EOD mid, and write one
+    snapshot row to forward_paper_ledger_intraday.
+
+    Read-only against the canonical ledger. The hard exit at HOLD_DAYS day-N
+    is still owned by run_forward_paper_trading — this function never closes
+    a position, only observes it.
+    """
+    client = bigquery.Client(project=PROJECT_ID)
+    db = firestore.Client(project=PROJECT_ID)
+    today_et = datetime.now(est).date()
+    snapshot_ts_iso = datetime.now(est).isoformat()
+
+    rows: list[dict] = []
+    inspected = 0
+
+    # Open positions can have entry_day in {today, today-1td, today-2td}.
+    # We iterate scan_date = entry_day - 1 trading day for each.
+    for n in range(HOLD_DAYS):
+        entry_day = today_et if n == 0 else get_nth_previous_trading_day(today_et, n)
+        if entry_day is None:
+            continue
+        scan_date = get_previous_trading_day(entry_day)
+        if scan_date is None:
+            continue
+        inspected += 1
+
+        # Read the pick.
+        try:
+            snap = db.collection("todays_pick").document(scan_date.isoformat()).get()
+        except Exception as e:
+            logger.warning(f"MTM: todays_pick read failed for {scan_date}: {e}")
+            continue
+        if not snap.exists:
+            continue
+        pick = snap.to_dict() or {}
+        if not pick.get("has_pick"):
+            continue
+        ticker = pick.get("ticker")
+        if not ticker:
+            continue
+
+        # Hydrate full contract details from overnight_signals_enriched. The
+        # pick doc carries ticker + direction; the enriched row carries the
+        # canonical strike/expiration we need to build the Polygon option ID.
+        enriched_sql = f"""
+        SELECT ticker, direction, recommended_contract, recommended_strike,
+               recommended_expiration
+        FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+        WHERE DATE(scan_date) = "{scan_date.isoformat()}"
+          AND UPPER(ticker) = "{str(ticker).upper()}"
+          AND recommended_strike IS NOT NULL
+          AND recommended_expiration IS NOT NULL
+        ORDER BY premium_score DESC, recommended_volume DESC
+        LIMIT 1
+        """
+        try:
+            edf = client.query(enriched_sql).to_dataframe()
+        except Exception as e:
+            logger.warning(f"MTM: enriched lookup failed for {ticker}@{scan_date}: {e}")
+            continue
+        if len(edf) == 0:
+            logger.info(f"MTM: no enriched row for {ticker}@{scan_date}; skip")
+            continue
+        row = edf.iloc[0]
+
+        exp_date = row["recommended_expiration"].date() if isinstance(row["recommended_expiration"], (pd.Timestamp, datetime)) else row["recommended_expiration"]
+        opt_ticker = build_polygon_ticker(
+            row["ticker"], exp_date, row["direction"], float(row["recommended_strike"])
+        )
+
+        exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+        # Past the hold window — let the daily exit cron own this one.
+        if today_et > exit_day:
+            continue
+        # Before entry — pick is published but entry hasn't happened yet.
+        if today_et < entry_day:
+            continue
+
+        bars = fetch_minute_bars(opt_ticker, entry_day, today_et)
+        time.sleep(0.2)
+        if not bars:
+            logger.info(f"MTM: no bars for {opt_ticker} {entry_day}→{today_et}; skip")
+            continue
+
+        # Entry bar (mirrors run_forward_paper_trading): first bar at or after
+        # 10:00 ET on entry_day, with the trader's 2% slippage applied.
+        entry_dt = datetime.combine(entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time())
+        entry_ts_ms = int(est.localize(entry_dt).timestamp() * 1000)
+        entry_day_bars = [b for b in bars
+                          if datetime.fromtimestamp(b["t"]/1000, tz=est).date() == entry_day]
+        entry_bar = None
+        if entry_day_bars:
+            after = [b for b in entry_day_bars if b["t"] >= entry_ts_ms]
+            if after:
+                entry_bar = after[0]
+            else:
+                before = [b for b in entry_day_bars if b["t"] < entry_ts_ms]
+                entry_bar = before[-1] if before else None
+        if not entry_bar or entry_bar.get("v", 0) == 0:
+            logger.info(f"MTM: invalid entry bar for {opt_ticker} on {entry_day}; skip")
+            continue
+        entry_price = entry_bar["c"] * 1.02
+
+        # Post-entry walk: peak high + EOD mid (today's last bar close).
+        post_entry = [b for b in bars if b["t"] >= entry_bar["t"]]
+        peak = max(b["h"] for b in post_entry) if post_entry else entry_price
+        current_mid = post_entry[-1]["c"] if post_entry else entry_bar["c"]
+
+        # trading_day_idx: 1 on entry_day, 2 on entry+1td, 3 on entry+2td.
+        trading_day_idx = n + 1  # n=0 → today is entry_day → idx 1
+
+        unrealized = (current_mid - entry_price) / entry_price if entry_price else None
+        trail_armed = bool(peak >= entry_price * (1.0 + TRAIL_TRIGGER_PCT))
+
+        rows.append({
+            "scan_date": scan_date.isoformat(),
+            "ticker": row["ticker"],
+            "direction": row["direction"],
+            "recommended_contract": row["recommended_contract"],
+            "entry_day": entry_day.isoformat(),
+            "exit_day": exit_day.isoformat(),
+            "snapshot_date": today_et.isoformat(),
+            "snapshot_ts": snapshot_ts_iso,
+            "trading_day_idx": trading_day_idx,
+            "entry_price": entry_price,
+            "current_mid": current_mid,
+            "peak_mid": peak,
+            "unrealized_return_pct": unrealized,
+            "trail_armed": trail_armed,
+            "underlying_close": None,
+            "policy_version": POLICY_VERSION,
+        })
+
+    if not rows:
+        logger.info(f"MTM: {inspected} scan_date(s) inspected, 0 open positions found")
+        return True, {"rows_written": 0, "scan_dates_inspected": inspected}
+
+    # Idempotent write: delete any prior snapshot for today, then load.
+    delete_sql = f'DELETE FROM `{INTRADAY_TABLE}` WHERE snapshot_date = "{today_et.isoformat()}"'
+    try:
+        client.query(delete_sql).result()
+    except Exception as e:
+        logger.error(f"MTM: pre-write DELETE failed: {e}")
+        return False, {"error": f"Pre-write DELETE failed: {e}"}
+
+    import io
+    jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
+    load_job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+    )
+    load_job = client.load_table_from_file(
+        io.BytesIO(jsonl.encode("utf-8")),
+        INTRADAY_TABLE,
+        job_config=load_job_config,
+    )
+    load_job.result()
+    logger.info(f"MTM: loaded {len(rows)} snapshot row(s) for {today_et}")
+    return True, {"rows_written": len(rows), "scan_dates_inspected": inspected}
+
+
+@app.route("/mark_to_market", methods=["POST", "GET"])
+def trigger_mark_to_market():
+    """Daily EOD MTM endpoint — hit by Cloud Scheduler ~16:15 ET, before the
+    16:30 ET exit cron. Snapshots open V5.4 positions for the webapp live
+    panel. Non-blocking with respect to the realized-PnL exit logic.
+    """
+    try:
+        success, result = run_mark_to_market()
+        if success:
+            return jsonify({"status": "success", **result}), 200
+        return jsonify({"status": "error", "message": str(result)}), 500
+    except Exception as e:
+        logger.error(f"Error in mark-to-market endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/cache_iv", methods=["POST", "GET"])

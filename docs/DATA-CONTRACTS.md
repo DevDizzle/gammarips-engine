@@ -32,7 +32,9 @@ Schema is ensured idempotently via `ALTER TABLE ADD COLUMN IF NOT EXISTS` on eve
 
 ## Forward ledger — `profitscout-fida8.profit_scout.forward_paper_ledger`
 
-Active forward paper-trading ledger. Written by `forward-paper-trader/main.py:run_forward_paper_trading` via delete-then-load JSON-L. One row per (scan_date, ticker) per trader invocation. No trader-side filters — all signals from `overnight_signals_enriched` are executed. **V5.3 "Target 80" mechanics (adopted 2026-04-17):** 10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit; STOP wins over TARGET on ambiguous bars. Rows tagged `policy_version = V5_4_AGENT_RANKER`. V5.3 rows were truncated when V5.4 was promoted 2026-05-08. Populated by Cloud Scheduler `forward-paper-trader-trigger` at 16:30 ET Mon-Fri.
+Active forward paper-trading ledger. Written by `forward-paper-trader/main.py:run_forward_paper_trading` via delete-then-load JSON-L. One row per `scan_date` (V5.4-only ledger; the trader simulates ONLY the ticker named in `todays_pick/{scan_date}`). **V5.4 mechanics:** 10:00 ET entry, −60% initial stop, trail at +30% gain / 25% off peak, +80% target, 3-day hold, 15:50 ET exit; STOP/TRAIL wins over TARGET on ambiguous bars. Rows tagged `policy_version = V5_4_AGENT_RANKER`. V5.3 rows were truncated when V5.4 was promoted 2026-05-08. Populated by Cloud Scheduler `forward-paper-trader-trigger` at 16:30 ET Mon-Fri. The cron resolves `scan_date` such that `exit_day = today` (walks back `HOLD_DAYS=3` trading days from today via `get_canonical_scan_date`).
+
+**Skip rows are first-class.** When the picker abstains (`todays_pick/{scan_date}.has_pick = false`), the trader writes one ledger row with `is_skipped=true`, `skip_reason=<reason>`, and `ticker/recommended_contract/direction` all NULL. Those three columns are NULLABLE (relaxed 2026-05-15 — see `docs/DECISIONS/2026-05-15-trader-resurrection-and-mtm.md`).
 
 ### Columns
 
@@ -86,6 +88,33 @@ One row per (ticker, as_of_date). Populated daily by `forward-paper-trader/main.
 | `fetched_at` | TIMESTAMP REQUIRED | When the row was written |
 
 Idempotent per `as_of_date`: the endpoint issues `DELETE FROM polygon_iv_history WHERE as_of_date = CURRENT_DATE()` before appending, so re-triggering on the same day does not double-write.
+
+## Intraday mark-to-market — `profitscout-fida8.profit_scout.forward_paper_ledger_intraday` (added 2026-05-15)
+
+Daily EOD snapshots of open V5.4 positions. Pure observability — never feeds back into the trader's decision path. One row per open position per `snapshot_date`. Written by `forward-paper-trader/main.py:run_mark_to_market` via the `POST /mark_to_market` endpoint (Cloud Scheduler `forward-paper-trader-mtm`, 16:15 ET Mon–Fri — 15 minutes before the realized-exit cron).
+
+**Partition:** `snapshot_date` (DAY). All non-key columns NULLABLE.
+
+| Column | Type | Notes |
+|---|---|---|
+| `scan_date` | DATE REQUIRED | The pick's scan_date — FK to `forward_paper_ledger.scan_date` once the trade closes |
+| `ticker` | STRING REQUIRED | Denormalized for filter speed |
+| `direction` | STRING | `BULLISH` / `BEARISH` |
+| `recommended_contract` | STRING | Polygon option ID (e.g. `O:HTZ260612P00005500`) |
+| `entry_day` | DATE | First trading day after scan_date |
+| `exit_day` | DATE | `entry_day + (HOLD_DAYS-1)` trading days |
+| `snapshot_date` | DATE REQUIRED | The date this snapshot represents (today in ET when the cron fires) |
+| `snapshot_ts` | TIMESTAMP REQUIRED | Exact write time |
+| `trading_day_idx` | INT64 | 1, 2, or 3 — which trading day of the hold this snapshot covers (1 on entry_day, 3 on exit_day) |
+| `entry_price` | FLOAT | Reconstructed entry: 10:00 ET entry-day bar close × 1.02 (mirrors trader slippage) |
+| `current_mid` | FLOAT | Most recent option close in the bars-from-entry-to-today window |
+| `peak_mid` | FLOAT | Max bar high over the same window |
+| `unrealized_return_pct` | FLOAT | `(current_mid − entry_price) / entry_price` |
+| `trail_armed` | BOOL | `peak_mid >= entry_price × 1.30` (i.e., trail trigger has been hit) |
+| `underlying_close` | FLOAT | Reserved; currently NULL |
+| `policy_version` | STRING | `"V5_4_AGENT_RANKER"` |
+
+Idempotent per `snapshot_date`: `DELETE FROM forward_paper_ledger_intraday WHERE snapshot_date = CURRENT_DATE()` before append. Same write pattern as the canonical ledger.
 
 ## Firestore — `x_posts/{scan_date}_{post_type}` (added 2026-04-24)
 
