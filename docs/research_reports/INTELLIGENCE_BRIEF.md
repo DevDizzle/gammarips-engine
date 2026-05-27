@@ -2,6 +2,10 @@
 
 > **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`. Operator cheat: `../../CHEAT-SHEET.md`.
 
+## 2026-05-27 update — Trailing-liquidity volume-floor (H15) tested and REJECTED
+
+**H15** (tighten the `active_days_20d >= 5` gate by adding a per-day volume floor — count a day "active" only if `vol >= N`) — **tested and REJECTED 2026-05-27.** Motivated by EQIX (05-20) and BLK (05-21) hitting INVALID_LIQUIDITY *despite* the 05-19 active-days gate being live. Backtest (`backtesting_and_research/2026-05-27_active_day_volume_floor.py`): trailing daily volume — count OR floor — does **not** separate fillable from unfillable contracts in the V5.4-eligible cohort. Any floor that rejects EQIX/BLK also rejects OKTA and BBY (real fills) and darkens ≥42% of days; HTZ (the +80% winner) had only 3 active days and would fail even the *current* gate; dead BLK had the most trailing activity (12 days) yet never printed. Quote-based fill model also dead-ended (no Polygon NBBO on our tier). **Resolution:** INVALID_LIQUIDITY accepted as a paper-only artifact (it overstates real-world un-fillability); the `active_days_20d >= 5` gate left untouched but flagged as possibly net-harmful for the eventual go-live diagnostic. Decision: `docs/DECISIONS/2026-05-27-invalid-liquidity-accepted.md`. Memory: `project_invalid_liquidity_root_cause`. **Do not pursue another trailing-liquidity gate variant — the approach is dead.**
+
 ## 2026-05-06 update — Full literature audit of V5.3 stack (12 parameters across 3 services)
 
 Triggered by the meta-principle adopted in this session: **for structural questions (microstructure, IV crush, term structure, vol risk premium, informed-flow horizon), cite literature; reserve our N=1,563 cohort for selection-style questions specific to our scanner's output.** Three parallel literature scans audited every parameter in the V5.3 stack against peer-reviewed and serious-practitioner sources. Verdict per parameter:

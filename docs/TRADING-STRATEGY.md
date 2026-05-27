@@ -87,6 +87,7 @@ Plus regime context: `VIX_at_entry` (FRED VIXCLS), `vix_5d_delta_entry`, `hv_20d
 
 ## Validation posture
 - **Paper-only until proven.** No real-money capital is in market. The V5.4 cohort begins 2026-05-08 and accumulates closed trades in `forward_paper_ledger`. Real-money go-live (Alpaca agent path documented in `docs/DECISIONS/2026-05-09-DEFERRED-alpaca-agent-execution.md`) is triggered when: (1) N ≥ 30 closed V5.4 trades AND (2) cohort EV ≥ 0 AND (3) at least 15 operator-confirmed manual trades match the picker's signal. Until all three fire, the system is paper-only.
+- **15-closed-trade interim checkpoint (operator plan, 2026-05-27).** At 15 closed/counted trades (distinct scan_date with a realized exit — excludes SKIPPED and INVALID_LIQUIDITY), run the evals + a diagnostic as a GO/NO-GO health check. This is a milestone, NOT the go-live gate — the full three-part trigger above plus a `gammarips-review` audit still apply before any real-money execution. The diagnostic should include a review of whether the `active_days_20d >= 5` gate should stay (flagged possibly net-harmful in `docs/DECISIONS/2026-05-27-invalid-liquidity-accepted.md`).
 - **`gammarips-review` must audit V5.4 before each new deploy.**
 - **No knob-twiddling during paper.** If EV is negative after 4 weeks at N ≥ 15, revisit Deep Research; don't tune filters one at a time.
 - **Do not modify `signals_labeled_v1` or `scripts/research/`** — both are frozen for reproducibility.
