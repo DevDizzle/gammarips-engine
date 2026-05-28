@@ -20,5 +20,5 @@ gcloud run deploy enrichment-trigger \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,GCS_BUCKET=profit-scout-data,TRACE_LOGGING_ENABLED=true,MIN_ENRICHMENT_SCORE=1" \
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,GCS_BUCKET=profit-scout-data,TRACE_LOGGING_ENABLED=true,MIN_ENRICHMENT_SCORE=1,MODEL_NAME=gemini-3.5-flash,VERTEX_LOCATION=global" \
   --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest"

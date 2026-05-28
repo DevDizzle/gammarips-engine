@@ -391,7 +391,7 @@ CRITICAL FORMATTING:
 """
     
     _t0 = _time.monotonic()
-    _model_id = 'gemini-3-flash-preview'
+    _model_id = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
     _scan_date_obj = None
     if report_date:
         try:
@@ -408,7 +408,9 @@ CRITICAL FORMATTING:
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=ReportResponse,
-                temperature=0.7,
+                # Gemini 3.x migration (2026-05-27): dropped temperature=0.7 —
+                # response_schema enforces structure. Thinking left at SDK/server
+                # default (explicit thinking_level needs google-genai >= 1.74; pinned 1.22).
             )
         )
     except Exception as e:

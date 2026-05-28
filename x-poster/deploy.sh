@@ -28,5 +28,5 @@ gcloud run deploy x-poster \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,GCS_BUCKET=gammarips-x-media,BRAND_REF_GCS=gs://gammarips-x-media/brand_ref_card.png,IMAGE_MODEL=gemini-3-pro-image-preview,BRAND_HANDLE=@gammarips,DRY_RUN=false" \
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,GCS_BUCKET=gammarips-x-media,BRAND_REF_GCS=gs://gammarips-x-media/brand_ref_card.png,IMAGE_MODEL=gemini-3-pro-image-preview,BRAND_HANDLE=@gammarips,GEMINI_MODEL=gemini-3.5-flash,DRY_RUN=false" \
   --set-secrets="X_API_KEY=X_API_KEY:latest,X_API_SECRET=X_API_SECRET:latest,X_ACCESS_TOKEN=X_ACCESS_TOKEN:latest,X_ACCESS_SECRET=X_ACCESS_SECRET:latest"

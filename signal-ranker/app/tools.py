@@ -31,7 +31,7 @@ PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
 DATASET = os.getenv("DATASET", "profit_scout")
 TABLE_RUNS = f"{PROJECT_ID}.{DATASET}.signal_ranker_runs"
 
-SCORER_MODEL = os.getenv("SCORER_MODEL", "gemini-3-flash-preview")
+SCORER_MODEL = os.getenv("SCORER_MODEL", "gemini-3.5-flash")
 PICKER_MODEL = os.getenv("PICKER_MODEL", "gemini-3.1-pro-preview")
 SCORER_PROMPT_VERSION = int(os.getenv("SCORER_PROMPT_VERSION", "5"))
 PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "4"))

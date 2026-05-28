@@ -75,7 +75,7 @@ def evaluate(*, trace, gt_context, config) -> Optional[object]:
             budget["exhausted"] = True
             return None
 
-    judge_model = config.get("judge_model", "gemini-3-flash-preview")
+    judge_model = config.get("judge_model", "gemini-3.5-flash")
     project_id = os.environ.get("PROJECT_ID", "profitscout-fida8")
 
     try:

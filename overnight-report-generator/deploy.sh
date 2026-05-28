@@ -19,5 +19,5 @@ gcloud run deploy overnight-report-generator \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,TRACE_LOGGING_ENABLED=true" \
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,TRACE_LOGGING_ENABLED=true,GEMINI_MODEL=gemini-3.5-flash" \
   --set-secrets="GOOGLE_API_KEY=GOOGLE_API_KEY:latest"

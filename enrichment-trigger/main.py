@@ -48,7 +48,7 @@ VERTEX_PROJECT = os.getenv("VERTEX_PROJECT", PROJECT_ID)
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "global")
 
 # Model Config
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3-flash-preview")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.5-flash")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 TOP_P = float(os.getenv("TOP_P", "0.95"))
 TOP_K = int(os.getenv("TOP_K", "30"))
@@ -462,13 +462,13 @@ Based on what you find, respond in valid JSON only (no markdown, no code fences)
 If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst_score to 0.1, and provide a summary noting the lack of news coverage."""
 
         cfg = types.GenerateContentConfig(
-            temperature=TEMPERATURE,
-            top_p=TOP_P,
-            top_k=TOP_K,
-            seed=SEED,
             candidate_count=CANDIDATE_COUNT,
             max_output_tokens=MAX_OUTPUT_TOKENS,
             tools=[search_tool],
+            # Gemini 3.x migration (2026-05-27): dropped temperature/top_p/top_k/seed —
+            # 3.x degrades/loops under pinned low temp and effectively ignores top_k;
+            # rely on the strict-JSON prompt contract below. Thinking left at SDK/server
+            # default. (TEMPERATURE/TOP_P/TOP_K/SEED consts now unused.)
             # REMOVED: response_mime_type="application/json" (causes issues with grounding)
         )
 

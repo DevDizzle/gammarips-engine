@@ -3,7 +3,7 @@
 # judge model for LLM-as-judge evaluators.
 
 eval_version: v1.0.0
-judge_model: gemini-3-flash-preview
+judge_model: gemini-3.5-flash
 max_spend_usd_per_run: 2.0
 
 # Which evaluators run against each service's traces.

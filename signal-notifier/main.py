@@ -23,7 +23,7 @@ Gate stack (run UPSTREAM of the V5.4 picker):
     long single-leg through the print. Fail-closed on calendar fetch failure.
     See docs/DECISIONS/2026-05-06-earnings-overlap-exclusion.md.
 
-The picker (V5.4): Scorer fanout (`gemini-3-flash-preview`, scorer_v3 with
+The picker (V5.4): Scorer fanout (`gemini-3.5-flash`, scorer_v3 with
 HEDGING flow_conviction ≤4 hard cap) + Picker (`gemini-3.1-pro-preview`,
 picker_v2, enum confidence). Composite weights 60/25/15 flow/regime/narrative
 (weighted sum). Hosted at signal-ranker Cloud Run service. signal-ranker

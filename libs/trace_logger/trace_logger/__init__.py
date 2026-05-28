@@ -15,7 +15,7 @@ Usage (all services):
         scan_date=scan_date,
         ticker=ticker,
         model_provider="vertex_gemini",
-        model_id="gemini-3-flash",
+        model_id="gemini-3.5-flash",
         prompt=prompt,
         response_text=response.text,
         response_parsed=parsed,

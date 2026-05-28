@@ -41,7 +41,7 @@ os.environ.setdefault("GOOGLE_CLOUD_PROJECT", _project_id or "profitscout-fida8"
 os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "True")
 
-MODEL = "gemini-3-flash-preview"
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 
 
 # --- Structured output schema for the reviewer ----------------------------

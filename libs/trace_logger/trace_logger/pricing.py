@@ -9,6 +9,7 @@ from typing import Optional
 # (input_per_1k, output_per_1k) in USD.
 PRICING: dict[str, tuple[float, float]] = {
     # Google Gemini (Vertex)
+    "gemini-3.5-flash": (0.000075, 0.0003),  # GA 2026-05-19; coarse flash-tier estimate, confirm GA pricing
     "gemini-3-flash": (0.000075, 0.0003),
     "gemini-3-flash-preview": (0.000075, 0.0003),
     "gemini-2.5-flash": (0.000075, 0.0003),

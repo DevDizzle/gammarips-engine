@@ -28,7 +28,7 @@ gcloud run deploy enrichment-trigger \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=3 \
-  --set-env-vars="PROJECT_ID=$PROJECT,DATASET=profit_scout,GCS_BUCKET=profit-scout-data,MODEL_NAME=gemini-3-flash-preview,VERTEX_PROJECT=$PROJECT,VERTEX_LOCATION=global" \
+  --set-env-vars="PROJECT_ID=$PROJECT,DATASET=profit_scout,GCS_BUCKET=profit-scout-data,MODEL_NAME=gemini-3.5-flash,VERTEX_PROJECT=$PROJECT,VERTEX_LOCATION=global" \
   --set-secrets="POLYGON_API_KEY=polygon-api-key:latest"
 
 echo ""

@@ -1,5 +1,9 @@
 # Next Session Prompt
 
+**2026-05-28 session — Gemini model migration SHIPPED + verified.** Migrated every text-generation Gemini call `gemini-3-flash-preview` → `gemini-3.5-flash` across the engine. Voluntary quality upgrade — `profitscout-fida8` calls the old model daily so it keeps access past the 2026-06-15 deprecation regardless (NOT a forced migration). **Deployed + verified on 3.5-flash:** `overnight-report-generator` (00016-txd, trace ok), `gammarips-eval` (00006-t8p, judge logs ok + `config.yaml` bug fixed), `x-poster` (00036-kj6, dry-run APPROVE; DRY_RUN restored false), `enrichment-trigger` (00038-6xf — verified by its live 05:30 ET cron: 79 ok grounded calls on 3.5-flash), `signal-ranker` (00010-bmt — verified via `/rank` smoke: `scorer_model=gemini-3.5-flash`). **Untouched (deliberate):** Picker (`gemini-3.1-pro-preview`), x-poster image model (`gemini-3-pro-image-preview`), VAPO (`gemini-2.5-pro`), agent-arena (dead). **Behavioral:** Scorer `temperature=0.2` dropped (response_schema enforces structure); enrichment sampling knobs incl `seed=42` dropped; report temp dropped; **eval judges keep temp=0.0**. `thinking_level` NOT set — deployed `google-genai==1.22.0` rejects the field (caught live by smoke test, a green build hid it); thinking stays at 3.x server default. **Cohort:** segmented by `v5_4_scorer_model` — the 3 pre-migration closed trades (`gemini-3-flash-preview`) are NOT pooled with new-model trades for the 15/30-trade EV gates. `gammarips-review` PASSED. Decision: [`docs/DECISIONS/2026-05-27-gemini-3-5-flash-migration.md`](docs/DECISIONS/2026-05-27-gemini-3-5-flash-migration.md). ⚠️ **Working tree has ~23 uncommitted files — commit to sync repo with production.**
+
+---
+
 **Last session wrapped:** 2026-05-27 (Wednesday) — **diagnostic + decision session, no code shipped.** Answered "why only 3 trades on the app," traced the recurring INVALID_LIQUIDITY no-fills to their root cause, backtested a proposed fix, and **rejected it** on the evidence. Operator decision: accept INVALID_LIQUIDITY as a paper-only artifact and leave liquidity gating untouched. Set the go-forward plan: a **15-closed-trade interim checkpoint** (evals + diagnostic GO/NO-GO) ahead of the unchanged formal real-money DoD. Decision file: [`docs/DECISIONS/2026-05-27-invalid-liquidity-accepted.md`](docs/DECISIONS/2026-05-27-invalid-liquidity-accepted.md).
 
 **State at handoff time (2026-05-27):**
@@ -60,13 +64,13 @@ Until those fire, the system is paper-only. Founder pricing $29/mo continues as 
 | Service | Revision | Status |
 |---|---|---|
 | `signal-notifier` | `00024-xh7` | LIVE V5.4-only fail-closed. `active_days_20d >= 5` gate + fixed-$500 sizing. Cron `30 7 * * 1-5` ET. Refreshes `cohort_stats/current` per run. |
-| `signal-ranker` | `00009-p2t` | ADK Scorer fanout + Picker. IAM-only. `DRY_RUN=true` (Phase 4 trigger flips this at N≥10). |
+| `signal-ranker` | `00010-bmt` | Scorer fanout (`gemini-3.5-flash` since 2026-05-27) + Picker (`gemini-3.1-pro-preview`). IAM-only. `DRY_RUN=false` (live; table previously mis-stated `true`). |
 | `forward-paper-trader` | `00035-72h` | Deferred simulator (today − 3 trading days). Two crons + `/mark_to_market`. |
 | `win-tracker` | `00011-5l9` | 30-trade DoD gate. Cron `30 16 * * 1-5` ET. |
-| `x-poster` | `00033-2v8` | LIVE, DRY_RUN=false. 5 schedulers active. |
-| `enrichment-trigger` | `00037-7ll` | gates: score≥1, spread≤8%, UOA>$500K. |
-| `overnight-report-generator` | `00014-p2l` | writes `daily_reports/{date}`. |
-| `gammarips-eval` | `00005-ng7` | monitoring-only. Rubric IC hookup is Phase 4. |
+| `x-poster` | `00036-kj6` | LIVE, DRY_RUN=false. 5 schedulers active. Text on `gemini-3.5-flash` (2026-05-27). |
+| `enrichment-trigger` | `00038-6xf` | gates: score≥1, spread≤8%, UOA>$500K. Thesis on `gemini-3.5-flash` (2026-05-27). |
+| `overnight-report-generator` | `00016-txd` | writes `daily_reports/{date}`. On `gemini-3.5-flash` (2026-05-27). |
+| `gammarips-eval` | `00006-t8p` | monitoring-only. Rubric IC hookup is Phase 4. Judge on `gemini-3.5-flash` (2026-05-27). |
 | `reddit-poster` | `00004-2qd` | LIVE DRY_RUN=true. Reddit creds not wired. |
 | `blog-generator` | `00020-npx` | LIVE, DRY_RUN=false. |
 | `gammarips-mcp` | `00027-mcl` | 18 tools. |

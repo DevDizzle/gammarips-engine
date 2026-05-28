@@ -60,7 +60,7 @@ SCORE_WEIGHTS_QUIET = {
 # Helper to ensure we track all columns (keys are identical in both dicts)
 SCORE_COLS = list(SCORE_WEIGHTS_QUIET.keys())
 # --- Vertex AI Gen AI ---
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3-flash-preview")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.5-flash")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 TOP_P = float(os.getenv("TOP_P", "0.95"))
 TOP_K = int(os.getenv("TOP_K", "30"))
@@ -70,10 +70,10 @@ MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
 
 # --- Pipeline Specific Models ---
 TECHNICALS_ANALYZER_MODEL_NAME = os.getenv(
-    "TECHNICALS_ANALYZER_MODEL_NAME", "gemini-3-flash-preview"
+    "TECHNICALS_ANALYZER_MODEL_NAME", "gemini-3.5-flash"
 )
 NEWS_ANALYZER_MODEL_NAME = os.getenv(
-    "NEWS_ANALYZER_MODEL_NAME", "gemini-3-flash-preview"
+    "NEWS_ANALYZER_MODEL_NAME", "gemini-3.5-flash"
 )
 
 # --- Cloud Storage Prefixes ---
@@ -115,7 +115,7 @@ WORKER_TIMEOUT = 300
 
 # --- Macro Thesis / Worldview ---
 MACRO_THESIS_MODE = "search"
-MACRO_THESIS_MODEL_NAME = "gemini-3-flash-preview"
+MACRO_THESIS_MODEL_NAME = os.getenv("MACRO_THESIS_MODEL_NAME", "gemini-3.5-flash")
 MACRO_THESIS_MAX_SOURCES = 10
 MACRO_THESIS_HTTP_TIMEOUT = 30
 MACRO_THESIS_SOURCE_CHAR_LIMIT = 15000

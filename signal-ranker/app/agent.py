@@ -116,7 +116,10 @@ async def _score_one(
     cfg = genai_types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=ScorerOutput,
-        temperature=0.2,  # low — we want stable rubric scoring, not creativity
+        # Gemini 3.x migration (2026-05-27): dropped temperature=0.2 — 3.x can
+        # degrade/loop under pinned low temp; response_schema enforces structure.
+        # Thinking left at SDK/server default (explicit thinking_level needs
+        # google-genai >= 1.74; deployed SDK 1.22 rejects the field).
     )
 
     resp = await client.aio.models.generate_content(
@@ -161,7 +164,7 @@ async def score_candidates(
     Returns (scorer_outputs, total_latency_ms). Skips and logs candidates that
     error individually so one bad row doesn't fail the whole rank.
     """
-    client = genai.Client(vertexai=True)
+    client = genai.Client(vertexai=True, location="global")  # 3.5-flash served global-only
     started = time.monotonic()
     coros = [
         _score_one(client, scan_date, c, report_md) for c in candidates

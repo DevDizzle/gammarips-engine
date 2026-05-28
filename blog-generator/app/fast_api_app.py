@@ -291,7 +291,8 @@ def _render_newsletter_html(
     """Single-shot Gemini render of the weekly newsletter.
 
     Returns (html, plain_text, subject, preheader). MODEL is the same
-    `gemini-3-flash-preview` the blog pipeline uses — do NOT change it.
+    `gemini-3.5-flash` the blog pipeline uses (migrated from gemini-3-flash-preview
+    2026-05-27; env-overridable via GEMINI_MODEL — keep it pinned in deploy config).
 
     The writer is fed REAL data — daily_reports headlines from the past
     week and ledger closes — so it summarizes what actually happened

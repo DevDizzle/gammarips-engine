@@ -35,7 +35,7 @@ gcloud run deploy signal-ranker \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3-flash-preview,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=5,PICKER_PROMPT_VERSION=4,DRY_RUN=false,MIN_SCORER_SUCCESS_FRAC=0.5"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3.5-flash,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=5,PICKER_PROMPT_VERSION=4,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false,MIN_SCORER_SUCCESS_FRAC=0.5"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

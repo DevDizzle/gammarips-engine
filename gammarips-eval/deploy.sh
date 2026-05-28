@@ -20,7 +20,7 @@ gcloud run deploy $SERVICE \
   --concurrency=8 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=${PROJECT},DATASET=profit_scout,EVAL_VERSION=v1.0.0,EVAL_MAX_SPEND_USD=2.0,JUDGE_MODEL=gemini-3-flash-preview"
+  --set-env-vars="PROJECT_ID=${PROJECT},DATASET=profit_scout,EVAL_VERSION=v1.0.0,EVAL_MAX_SPEND_USD=2.0,JUDGE_MODEL=gemini-3.5-flash"
 
 URL=$(gcloud run services describe $SERVICE --project=$PROJECT --region=$REGION --format='value(status.url)')
 echo "Deployed: ${URL}"

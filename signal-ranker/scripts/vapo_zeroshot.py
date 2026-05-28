@@ -135,7 +135,7 @@ def main() -> int:
     diff_doc = (
         f"# Zero-shot VAPO lint pass — {today}\n\n"
         f"Tuning model: `{TUNING_MODEL}` (preview models excluded as VAPO targets; "
-        f"runtime transfers to `gemini-3-flash-preview` for Scorer and "
+        f"runtime transfers to `gemini-3.5-flash` for Scorer and "
         f"`gemini-3.1-pro-preview` for Picker).\n\n"
         f"Per EXEC-PLAN: cherry-pick wording wins manually. Do NOT auto-accept. "
         f"After review, merge accepted edits into the v1 file in place OR bump "
