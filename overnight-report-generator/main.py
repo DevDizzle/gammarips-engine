@@ -17,6 +17,12 @@ from google.genai import types
 # directional calls (Lopez-Lira), structured theme tags (Bybee), seoMetadata.
 PROMPT_VERSION = "report_v2.1"
 
+# Independent version label for the per-signal SEO call (writes seoMetadata onto
+# the public /signals/{ticker} pages). Deliberately ISOLATED from PROMPT_VERSION:
+# the SEO call never touches the report markdown the V5.4 ranker reads, so its
+# prompt can evolve without re-cohorting the trading-relevant report eval.
+SEO_PROMPT_VERSION = "signal_seo_v1"
+
 try:
     from trace_logger import TraceLogger, TraceRecord
     _trace_logger = TraceLogger()
@@ -276,6 +282,182 @@ class ReportResponse(BaseModel):
     content: str = Field(description='The full markdown body of the report.')
     per_candidate_calls: List[CandidateCall] = Field(description='One forced directional call per top candidate (bull and bear lists combined). Lopez-Lira & Tang 2023 binary forcing.')
     seoMetadata: SeoMetadata = Field(description='Structured metadata for the public webapp /reports/{date} surface (schema.org Article + OG tags).')
+
+class PerSignalSeo(BaseModel):
+    ticker: str = Field(description='Ticker symbol, UPPERCASE, must match one of the input candidates.')
+    seoTitle: str = Field(description='Evergreen SEO page title for gammarips.com/signals/{ticker}, <=60 chars. Front-load "{TICKER} Unusual Options Flow" then the direction (Bullish/Bearish) and/or catalyst. NO date — these pages rank over time.')
+    seoDescription: str = Field(description='Meta description, 140-160 chars. Lead with the ticker + direction + the load-bearing datum (flow, catalyst, or key headline). Plain and specific, no hype.')
+    keywords: List[str] = Field(description='5-8 keywords mixing evergreen ("unusual options activity", "options flow") with "{TICKER}" + its catalyst/theme.')
+
+class PerSignalSeoResponse(BaseModel):
+    items: List[PerSignalSeo] = Field(description='One SEO block per input candidate ticker.')
+
+def _truncate(s: str, n: int) -> str:
+    s = (s or "").replace("\n", " ").strip()
+    if len(s) <= n:
+        return s
+    return s[: n - 3].rstrip() + "..."
+
+def _fallback_signal_seo(sig: dict, report_date: str) -> dict:
+    """Deterministic per-ticker SEO metadata. Used as the baseline for every
+    candidate and as the safety net when the LLM call fails or returns malformed
+    output, so a top-candidate page never silently regresses to the thin
+    "{TICKER} Signal" webapp default. Free, deterministic, no LLM dependency."""
+    ticker = (sig.get("ticker") or "").upper()
+    direction = (sig.get("direction") or "").upper()
+    dir_word = "Bullish" if direction == "BULLISH" else "Bearish" if direction == "BEARISH" else ""
+    catalyst = (sig.get("catalyst_type") or "").strip()
+
+    title = f"{ticker} Unusual Options Flow"
+    if dir_word:
+        title = f"{title} — {dir_word} Signal"
+    title = _truncate(title, 60)
+
+    thesis = (sig.get("thesis") or "").strip()
+    if thesis:
+        desc = thesis
+    else:
+        strike = sig.get("recommended_strike")
+        exp = sig.get("recommended_expiration")
+        lead = f"{ticker} flagged for unusual options activity with {dir_word.lower() or 'directional'} institutional flow."
+        tail = f" Recommended contract: strike {strike}, exp {exp}." if strike else ""
+        desc = lead + tail
+    desc = _truncate(desc, 160)
+
+    keywords = [ticker, f"{ticker} options", "unusual options activity", "options flow", "institutional options flow"]
+    if dir_word:
+        keywords.append(f"{ticker} {dir_word.lower()}")
+    if catalyst:
+        keywords.append(catalyst)
+    # de-dupe preserving order, cap at 8
+    seen = set()
+    keywords = [k for k in keywords if k and not (k in seen or seen.add(k))][:8]
+
+    return {"seoTitle": title, "seoDescription": desc, "keywords": keywords}
+
+def generate_per_signal_seo(candidates: list[dict], report_date: str) -> dict:
+    """Per-ticker SEO metadata for the public /signals/{ticker} pages.
+
+    ISOLATED from generate_report_content on purpose: the daily report markdown
+    is consumed verbatim by the V5.4 Scorer/Picker as report_md. This call does
+    NOT feed the ranker and does NOT touch that text — it only enriches the
+    public per-ticker pages. Returns {TICKER: {seoTitle, seoDescription,
+    keywords}}. Every ticker starts with deterministic fallback metadata; the
+    LLM only UPGRADES entries it returns cleanly, so any failure degrades to the
+    deterministic baseline rather than to the thin webapp default."""
+    result = {}
+    for s in candidates:
+        t = (s.get("ticker") or "").upper()
+        if t:
+            result[t] = _fallback_signal_seo(s, report_date)
+
+    if not ai_client or not result:
+        return result
+
+    # Only the SEO-relevant fields. This output never feeds the ranker, so there
+    # is no leakage surface — but we still keep the context tight and factual.
+    compact = [{
+        "ticker": (s.get("ticker") or "").upper(),
+        "direction": s.get("direction"),
+        "catalyst_type": s.get("catalyst_type"),
+        "key_headline": s.get("key_headline"),
+        "thesis": s.get("thesis"),
+        "recommended_strike": s.get("recommended_strike"),
+        "recommended_expiration": str(s.get("recommended_expiration")) if s.get("recommended_expiration") else None,
+    } for s in candidates if s.get("ticker")]
+
+    prompt = f"""You write SEO metadata for GammaRips per-ticker pages at
+gammarips.com/signals/{{ticker}}. Each page shows ONE stock's overnight unusual
+options activity. Generate metadata that wins organic clicks from traders
+searching a ticker alongside "unusual options flow" / "options activity".
+
+RULES (do not violate):
+- These pages are EVERGREEN — NO date in the title; they accrue rank over time.
+- GammaRips is paper-trading / educational. NO performance promises, NO "buy",
+  "profit", "guaranteed", or advice language. NO clickbait. Factual flow-structure
+  framing only.
+- seoTitle: <=60 chars. Front-load "{{TICKER}} Unusual Options Flow", then the
+  direction (Bullish/Bearish) and/or the catalyst.
+- seoDescription: 140-160 chars. Lead with ticker + direction + the load-bearing
+  datum (flow, catalyst, or key headline). Plain and specific.
+- keywords: 5-8, mixing evergreen ("unusual options activity", "options flow")
+  with "{{TICKER}}" + its catalyst/theme.
+
+Return one item per input candidate, ticker UPPERCASED to match the input.
+
+CANDIDATES:
+{json.dumps(compact, indent=2, default=str)}
+
+prompt_version: {SEO_PROMPT_VERSION}
+"""
+
+    _t0 = _time.monotonic()
+    _model_id = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    try:
+        response = ai_client.models.generate_content(
+            model=_model_id,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=PerSignalSeoResponse,
+            ),
+        )
+        parsed = response.parsed.model_dump() if response.parsed else json.loads(response.text)
+        for it in (parsed.get("items") or []):
+            t = (it.get("ticker") or "").upper()
+            if not t or t not in result:
+                continue
+            title = _truncate(it.get("seoTitle") or "", 60)
+            desc = _truncate(it.get("seoDescription") or "", 160)
+            kws = [k for k in (it.get("keywords") or []) if k][:8]
+            if title and desc:
+                result[t] = {
+                    "seoTitle": title,
+                    "seoDescription": desc,
+                    "keywords": kws or result[t]["keywords"],
+                }
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _um = getattr(response, "usage_metadata", None)
+                _trace_logger.log(TraceRecord(
+                    service="report_generator",
+                    call_site="generate_per_signal_seo",
+                    run_id=f"signal_seo_{report_date}",
+                    scan_date=_date.fromisoformat(report_date) if report_date else _date.today(),
+                    model_provider="vertex_gemini",
+                    model_id=_model_id,
+                    prompt=prompt,
+                    response_text=getattr(response, "text", None),
+                    response_parsed=parsed,
+                    input_tokens=getattr(_um, "prompt_token_count", None) if _um else None,
+                    output_tokens=getattr(_um, "candidates_token_count", None) if _um else None,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="ok",
+                    inputs_raw=f"prompt_version={SEO_PROMPT_VERSION}|signal_seo|{report_date}|{len(compact)}",
+                ))
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Per-signal SEO LLM call failed; using deterministic fallback: {e}")
+        if _trace_logger is not None and TraceRecord is not None:
+            try:
+                _trace_logger.log(TraceRecord(
+                    service="report_generator",
+                    call_site="generate_per_signal_seo",
+                    run_id=f"signal_seo_{report_date}",
+                    scan_date=_date.fromisoformat(report_date) if report_date else _date.today(),
+                    model_provider="vertex_gemini",
+                    model_id=_model_id,
+                    prompt=prompt,
+                    response_text=None,
+                    latency_ms=int((_time.monotonic() - _t0) * 1000),
+                    status="api_error",
+                    error=str(e)[:500],
+                ))
+            except Exception:
+                pass
+
+    return result
 
 def generate_report_content(payload, report_date: str | None = None):
     # Charged-token whitelist (SESTM 2021): these are the institutional-flow
@@ -685,9 +867,35 @@ def generate_report():
         logger.error(f"Failed to save to Firestore: {e}")
         return jsonify({"status": "error", "message": "Failed to save to Firestore", "details": str(e)}), 500
 
+    # Stage 5: per-signal SEO metadata for the public /signals/{ticker} pages.
+    # Runs AFTER the trading-critical report is already persisted, and is fully
+    # non-blocking — the report's success does not depend on it. Writes ONLY the
+    # seoMetadata field onto the enrichment-written
+    # overnight_signals/{report_date}_{ticker} docs via update(); update() no-ops
+    # the field-set on an existing doc and raises (caught per-ticker) if the doc
+    # is absent, so we never create a partial signal doc that would break the
+    # webapp's getSignalByTicker render.
+    seo_written = 0
+    try:
+        seo_map = generate_per_signal_seo(top_combined, report_date)
+        for ticker, seo in seo_map.items():
+            try:
+                db.collection("overnight_signals").document(f"{report_date}_{ticker}").update({
+                    "seoMetadata": seo,
+                    "seo_prompt_version": SEO_PROMPT_VERSION,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                })
+                seo_written += 1
+            except Exception as e:
+                logger.warning(f"Skipped seoMetadata write for {report_date}_{ticker} (doc absent or update failed): {e}")
+        logger.info(f"Wrote per-signal seoMetadata to {seo_written}/{len(seo_map)} overnight_signals docs")
+    except Exception as e:
+        logger.error(f"Per-signal SEO stage failed (non-blocking, report already saved): {e}")
+
     return jsonify({
         "status": "success",
         "message": f"Report generated and saved to daily_reports/{report_date}",
+        "seo_signals_written": seo_written,
         "report_date": report_date,
         "data": {
             "title": title,
