@@ -22,6 +22,7 @@ State keys across the pipeline:
 from __future__ import annotations
 
 import logging
+import re
 import os
 from typing import AsyncGenerator, Literal
 
@@ -328,6 +329,49 @@ class EscalationChecker(BaseAgent):
             yield Event(author=self.name)
 
 
+def _parse_front_matter(markdown: str) -> tuple[dict, str]:
+    """Split the writer's leading YAML front-matter block from the body.
+
+    The writer is contractually required to emit a front-matter block with
+    title/slug/description/keywords/cta (agent.py writer instruction). The
+    schedule row has no `description`, and ADK stores `post_outline` as a raw
+    JSON string (so Publisher's `outline.get(...)` reads fail) — the front
+    matter is therefore the authoritative, writer-refined metadata source.
+
+    Returns (meta, body). `body` is the markdown with the front-matter block
+    stripped (so the stored post renders cleanly, without a literal `---`
+    YAML dump). Dependency-free (no yaml import) and defensive: on any parse
+    issue returns ({}, original_markdown).
+    """
+    if not markdown:
+        return {}, ""
+    m = re.match(r"^\s*---\s*\n(.*?)\n---\s*\n?", markdown, re.DOTALL)
+    if not m:
+        return {}, markdown
+    block = m.group(1)
+    body = markdown[m.end():].lstrip("\n")
+    meta: dict = {}
+    try:
+        for line in block.splitlines():
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            key = key.strip()
+            val = val.strip()
+            if key not in ("slug", "title", "description", "keywords", "cta"):
+                continue
+            if key == "keywords":
+                items = re.findall(r'"([^"]*)"', val)
+                if not items:
+                    items = [s.strip().strip("\"'") for s in val.strip("[]").split(",")]
+                meta["keywords"] = [k for k in items if k]
+            else:
+                meta[key] = val.strip().strip("\"'")
+    except Exception:  # noqa: BLE001 — never let metadata parsing break publish
+        return {}, body
+    return meta, body
+
+
 class Publisher(BaseAgent):
     """Runs once after the LoopAgent: Firestore write + schedule update + log.
 
@@ -349,26 +393,40 @@ class Publisher(BaseAgent):
         iterations = int(state.get("iterations", 1) or 1)
         dry_run = bool(state.get("dry_run", False))
 
-        # Resolve slug + metadata (outline is the source; schedule_slot is fallback)
+        # Resolve slug + metadata. Front matter (writer-refined, contains all
+        # five publish fields incl. the description the schedule row lacks) is
+        # the authoritative source; `outline` is a JSON string under output_key
+        # so its .get() reads fail — schedule_slot is the deterministic fallback.
+        # `body` is the markdown with the front matter stripped so the stored
+        # post renders without a literal YAML dump at the top.
+        front, body = _parse_front_matter(markdown)
+        if body:
+            markdown = body
         slug = (
             state.get("slug")
+            or front.get("slug")
             or (outline.get("slug") if isinstance(outline, dict) else None)
             or schedule_slot.get("slug", "")
         )
         title = (
-            (outline.get("h1") if isinstance(outline, dict) else None)
+            front.get("title")
+            or (outline.get("h1") if isinstance(outline, dict) else None)
             or schedule_slot.get("title_candidate", "")
         )
         description = (
-            (outline.get("description") if isinstance(outline, dict) else None)
+            front.get("description")
+            or (outline.get("description") if isinstance(outline, dict) else None)
             or (schedule_slot.get("description") if isinstance(schedule_slot, dict) else "")
             or ""
         )
         keywords = (
-            schedule_slot.get("keywords") if isinstance(schedule_slot, dict) else None
-        ) or []
+            front.get("keywords")
+            or (schedule_slot.get("keywords") if isinstance(schedule_slot, dict) else None)
+            or []
+        )
         cta = (
-            (outline.get("closing_cta") if isinstance(outline, dict) else None)
+            front.get("cta")
+            or (outline.get("closing_cta") if isinstance(outline, dict) else None)
             or schedule_slot.get("cta", "webapp_visit")
         )
         # Reviewer score — rubric_check passed? Convert to a pseudo-score for observability.
@@ -426,7 +484,16 @@ class Publisher(BaseAgent):
             )
             return
 
-        # Happy path — Firestore write.
+        # Happy path — Firestore write. Loud-fail on an unresolved slug so a
+        # regression surfaces (publish_to_firestore returns status=error here,
+        # which the endpoint turns into a 500 + scheduler retry) instead of the
+        # old silent 200 that left blog_posts empty.
+        if not slug:
+            logger.error(
+                "Publisher could not resolve a slug — front matter + schedule_slot "
+                "both empty. Aborting publish. markdown_head=%r",
+                markdown[:160],
+            )
         publish_out = tools.publish_to_firestore(
             slug=slug,
             title=title,

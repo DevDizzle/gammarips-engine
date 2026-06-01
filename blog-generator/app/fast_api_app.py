@@ -159,8 +159,11 @@ async def trigger_run(request: RunRequest) -> RunResponse:
          "iterations": resp.iterations},
         severity="INFO" if status in ("published", "dry_run") else "WARNING",
     )
-    # Fail loud on reject per DESIGN_SPEC §Example Use Cases 4.
-    if status == "rejected":
+    # Fail loud on reject per DESIGN_SPEC §Example Use Cases 4, and on a publish
+    # error (e.g. unresolved slug / Firestore write failure) — both must surface
+    # as 500 so the failure is visible and Cloud Scheduler retries, instead of a
+    # silent 200 that leaves blog_posts empty.
+    if status in ("rejected", "error"):
         raise HTTPException(status_code=500, detail=resp.model_dump())
     return resp
 
