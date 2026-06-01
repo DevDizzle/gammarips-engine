@@ -429,6 +429,31 @@ class Publisher(BaseAgent):
             or (outline.get("closing_cta") if isinstance(outline, dict) else None)
             or schedule_slot.get("cta", "webapp_visit")
         )
+
+        # Deterministic last resort. Front matter is the primary source but the
+        # LLM occasionally emits a body whose front-matter block isn't at the
+        # top (so it fails to parse), and the planner's schedule_slot lives
+        # nested in the post_outline JSON string — not in top-level state — so
+        # the fallbacks above resolve to "". Read the slug straight from the
+        # schedule: in the cron drain (no explicit slug) the first pending row
+        # IS this post; a manual retry already resolved slug from state["slug"]
+        # above and never reaches here.
+        if not slug:
+            try:
+                fb = tools.fetch_next_schedule_slot()
+            except Exception:  # noqa: BLE001
+                fb = {}
+            if fb.get("status") == "success":
+                fs = fb.get("data") or {}
+                slug = fs.get("slug", "")
+                title = title or fs.get("title_candidate", "")
+                keywords = keywords or fs.get("keywords", []) or []
+                cta = cta or fs.get("cta", "webapp_visit")
+                logger.warning(
+                    "Publisher fell back to schedule for slug=%r "
+                    "(front matter + outline state both empty).",
+                    slug,
+                )
         # Reviewer score — rubric_check passed? Convert to a pseudo-score for observability.
         reviewer_score = 10.0 if rubric.get("passed") else 0.0
 
