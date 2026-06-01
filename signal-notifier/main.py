@@ -162,6 +162,28 @@ DTE_MAX = 45
 #   docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md
 ACTIVE_DAYS_MIN = 5
 
+# Daily-cadence fallback (2026-06-01, see
+# docs/DECISIONS/2026-06-01-daily-cadence-fallback.md). When the strict
+# conviction gates (V/OI > 2, 5-10% OTM band) leave ZERO candidates, we no
+# longer skip the day — we surface the single best *fillable* candidate so the
+# cohort gets a trade on every tradeable day. The fallback RELAXES only the two
+# pure-conviction gates (unusual-volume V/OI, the tight OTM band) and KEEPS
+# every tradeability / literature-settled gate intact: OI/vol floors, the
+# regime (VIX<=VIX3M) gate, the earnings-overlap exclusion, and the active-days
+# liquidity gate all still run on the fallback pool. The 2026-05-26 skip day is
+# the motivating case: 24 score-7/8 names were thrown away; HUBS (OI 733, vol
+# 215) was perfectly fillable and only failed V/OI (0.3). Fallback picks are
+# tagged policy_gate="FALLBACK" end-to-end so their EV is measurable separately
+# from STRICT picks and the fallback can be killed with data if it loses.
+FALLBACK_MONEYNESS_MIN = 0.0   # ATM allowed (strict floor 0.05); ITM still excluded
+FALLBACK_MONEYNESS_MAX = MONEYNESS_MAX   # keep 0.10 cap — no deep-OTM lottery tickets
+# V/OI floor is dropped entirely for the fallback (unusual-flow conviction is
+# precisely what we relax). OI_MIN / VOL_MIN / DTE band are UNCHANGED — a
+# fallback pick must still be fillable, and the active-days gate downstream is
+# the resting-liquidity backstop that keeps thin OI=3 names (CDNS) out.
+POLICY_GATE_STRICT = "STRICT"
+POLICY_GATE_FALLBACK = "FALLBACK"
+
 # V5.3 execution knobs — must mirror forward-paper-trader/main.py.
 # Displayed in the operator email so the routine matches what the simulator
 # actually models. If these diverge from the trader, update both.
@@ -357,6 +379,7 @@ def write_todays_pick_doc(
     vix_now: float | None = None,
     skip_reason: str | None = None,
     v5_4_meta: dict | None = None,
+    policy_gate: str = "STRICT",
 ) -> None:
     """Canonical writer for Firestore ``todays_pick/{scan_date}``.
 
@@ -428,6 +451,10 @@ def write_todays_pick_doc(
             "vix3m_at_enrich": _num("vix3m_at_enrich"),
             "vix_now_at_decision": float(vix_now) if vix_now is not None else None,
             "policy_version": "V5_4_AGENT_RANKER",
+            # STRICT (ranker pick) or FALLBACK (daily-cadence deterministic
+            # pick). Propagated to forward_paper_ledger.policy_gate so fallback
+            # EV is separable. See DECISIONS/2026-06-01-daily-cadence-fallback.md.
+            "policy_gate": policy_gate,
         }
         # V5.4 ranker provenance — present on every has_pick=True doc post-promotion.
         if v5_4_meta:
@@ -1058,6 +1085,79 @@ def compute_and_write_cohort_stats() -> bool:
         return False
 
 
+def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
+    """Build the enriched-candidate SELECT for the strict or fallback gate.
+
+    STRICT (default) is the V5.3 conviction stack: unusual-volume V/OI > 2 in
+    the 5-10% OTM band, ranked by directional V/OI DESC (see the ORDER BY
+    rationale below). FALLBACK (daily-cadence, 2026-06-01) relaxes only the two
+    pure-conviction gates — it drops the V/OI floor entirely and lowers the
+    moneyness floor to ATM — then re-ranks by composite ``overnight_score`` and
+    resting ``recommended_oi`` to pick the *best fillable* candidate. Both modes
+    keep the OI/vol floors and the DTE band; the downstream regime, earnings,
+    and active-days gates run identically on whichever pool this returns.
+    See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
+
+    STRICT ORDER BY (changed 2026-05-01, see DECISIONS): the primary key is
+    DIRECTIONAL volume_oi_ratio DESC (call_vol_oi_ratio for BULLISH,
+    put_vol_oi_ratio for BEARISH). EDA on N=435 V5.3 trades showed dollar volume
+    NEGATIVELY correlates with winning at the -60/+80/3-day bracket; directional
+    V/OI DESC was top-1 win-rate 8/10 vs 1/6 for the old dollar-volume primary.
+    Tiebreakers: tighter spread (cleaner fills) -> overnight_score -> ticker.
+    """
+    if fallback:
+        # Drop the V/OI floor; widen the moneyness floor to ATM. Rank by
+        # composite score, then resting open interest (fillability), then spread.
+        conviction_where = f"""
+      AND moneyness_pct IS NOT NULL
+      AND moneyness_pct BETWEEN {FALLBACK_MONEYNESS_MIN} AND {FALLBACK_MONEYNESS_MAX}"""
+        order_by = """
+        overnight_score DESC,
+        recommended_oi DESC,
+        recommended_spread_pct ASC,
+        ticker ASC"""
+    else:
+        conviction_where = f"""
+      AND volume_oi_ratio IS NOT NULL
+      AND volume_oi_ratio > {VOL_OI_MIN}
+      AND moneyness_pct IS NOT NULL
+      AND moneyness_pct BETWEEN {MONEYNESS_MIN} AND {MONEYNESS_MAX}"""
+        order_by = """
+        COALESCE(
+            CASE WHEN direction = 'BULLISH' THEN call_vol_oi_ratio
+                 ELSE put_vol_oi_ratio END,
+            0
+        ) DESC,
+        recommended_spread_pct ASC,
+        overnight_score DESC,
+        ticker ASC"""
+
+    # LIMIT 10 — the earnings-overlap exclusion (2026-05-06) walks the ranked
+    # list and takes the first ticker NOT reporting in the hold window; if all
+    # 10 overlap the day is skipped.
+    return f"""
+    SELECT
+        ticker, scan_date, direction,
+        recommended_contract, recommended_strike, recommended_expiration,
+        recommended_dte, recommended_volume, recommended_oi,
+        recommended_mid_price, recommended_spread_pct,
+        overnight_score, premium_score,
+        call_dollar_volume, put_dollar_volume, call_uoa_depth, put_uoa_depth,
+        volume_oi_ratio, call_vol_oi_ratio, put_vol_oi_ratio,
+        moneyness_pct, vix3m_at_enrich
+    FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+    WHERE DATE(scan_date) = "{target_date}"
+      AND recommended_strike IS NOT NULL
+      AND recommended_expiration IS NOT NULL{conviction_where}
+      AND vix3m_at_enrich IS NOT NULL
+      AND recommended_oi >= {OI_MIN}
+      AND recommended_volume >= {VOL_MIN}
+      AND recommended_dte BETWEEN {DTE_MIN} AND {DTE_MAX}
+    ORDER BY{order_by}
+    LIMIT 10
+    """
+
+
 def run_notifier(target_date: date | None = None):
     if not target_date:
         target_date = get_previous_trading_day(datetime.now(est).date())
@@ -1071,69 +1171,36 @@ def run_notifier(target_date: date | None = None):
 
     client = bigquery.Client(project=PROJECT_ID)
 
-    # V5.3 filter stack. The ranker leads with DIRECTIONAL volume_oi_ratio
-    # (call_vol_oi_ratio for BULLISH, put_vol_oi_ratio for BEARISH) — i.e.,
-    # the strongest unusual-flow imbalance in the trade direction.
-    #
-    # Why this ORDER BY (changed 2026-05-01, see DECISIONS):
-    # The previous primary key was directional dollar volume (biggest UOA wins).
-    # EDA on N=435 V5.3 trades showed dollar volume NEGATIVELY correlates with
-    # winning at the -60/+80/3-day bracket: bigger flows lose more often. Top-1
-    # win-rate by ranker (10 V5.3 days): directional V/OI DESC = 8/10 (80%);
-    # old dollar-volume primary = 1/6 (17%) — held in walk-forward halves
-    # (4/5 + 4/5). Switching the primary key flips the sign on the lead signal.
-    #
-    # Tiebreakers: tighter spread (cleaner fills) -> overnight_score (composite
-    # signal strength) -> ticker (alphabetical, deterministic). COALESCE keeps
-    # rows with NULL directional V/OI participating instead of going first.
-    query = f"""
-    SELECT
-        ticker, scan_date, direction,
-        recommended_contract, recommended_strike, recommended_expiration,
-        recommended_dte, recommended_volume, recommended_oi,
-        recommended_mid_price, recommended_spread_pct,
-        overnight_score, premium_score,
-        call_dollar_volume, put_dollar_volume, call_uoa_depth, put_uoa_depth,
-        volume_oi_ratio, call_vol_oi_ratio, put_vol_oi_ratio,
-        moneyness_pct, vix3m_at_enrich
-    FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
-    WHERE DATE(scan_date) = "{target_date}"
-      AND recommended_strike IS NOT NULL
-      AND recommended_expiration IS NOT NULL
-      AND volume_oi_ratio IS NOT NULL
-      AND volume_oi_ratio > {VOL_OI_MIN}
-      AND moneyness_pct IS NOT NULL
-      AND moneyness_pct BETWEEN {MONEYNESS_MIN} AND {MONEYNESS_MAX}
-      AND vix3m_at_enrich IS NOT NULL
-      AND recommended_oi >= {OI_MIN}
-      AND recommended_volume >= {VOL_MIN}
-      AND recommended_dte BETWEEN {DTE_MIN} AND {DTE_MAX}
-    ORDER BY
-        COALESCE(
-            CASE WHEN direction = 'BULLISH' THEN call_vol_oi_ratio
-                 ELSE put_vol_oi_ratio END,
-            0
-        ) DESC,
-        recommended_spread_pct ASC,
-        overnight_score DESC,
-        ticker ASC
-    LIMIT 10
-    """
-    # LIMIT 10 (was LIMIT 1) — earnings-overlap exclusion (2026-05-06) walks
-    # the ranked list and takes the first ticker NOT reporting in the hold
-    # window. If rank-1 has earnings we fall to rank-2, etc. If all 10 are
-    # earnings-overlap the day is skipped (skip_reason=earnings_overlap_all_candidates).
-
+    # Strict conviction gate first (V5.3 stack). On a zero-candidate day we no
+    # longer skip — we run the daily-cadence fallback (drop V/OI floor, allow
+    # ATM) to surface the best fillable candidate. gate_mode is threaded into
+    # todays_pick (policy_gate) and onward to the ledger so fallback EV is
+    # measurable separately. See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
+    gate_mode = POLICY_GATE_STRICT
     try:
-        df = client.query(query).to_dataframe()
+        df = client.query(_build_candidate_query(target_date, fallback=False)).to_dataframe()
     except Exception as e:
         logger.error(f"Failed to query BigQuery: {e}")
         return False, f"Error querying BQ: {e}"
 
-    logger.info(f"Post-filter candidates: {len(df)} for {target_date}")
+    if len(df) == 0:
+        logger.info(
+            "Strict conviction gates left 0 candidates — running daily-cadence "
+            "fallback (relax V/OI + moneyness floor; tradeability gates intact)."
+        )
+        gate_mode = POLICY_GATE_FALLBACK
+        try:
+            df = client.query(_build_candidate_query(target_date, fallback=True)).to_dataframe()
+        except Exception as e:
+            logger.error(f"Fallback BigQuery query failed: {e}")
+            return False, f"Error querying BQ (fallback): {e}"
+
+    logger.info(f"Post-filter candidates: {len(df)} for {target_date} (gate_mode={gate_mode})")
 
     if len(df) == 0:
-        logger.info("No eligible candidates for this scan_date. No email sent.")
+        # Genuinely barren scan_date — neither the strict nor the fallback pool
+        # had a fillable candidate. This is an honest skip, not starvation.
+        logger.info("No eligible candidates (strict or fallback). No email sent.")
         # Fail-closed: write the empty-state todays_pick doc so every downstream
         # reader (webapp banner, MCP, GTM) learns the skip reason atomically.
         write_todays_pick_doc(target_date, has_pick=False, skip_reason="no_candidates_passed_gates")
@@ -1315,73 +1382,103 @@ def run_notifier(target_date: date | None = None):
         ))
         return True, "No eligible signal after active-days liquidity gate."
 
-    # V5.4 IS the picker — no V5.3 SQL "rank-1" fallback. signal-ranker uptime
-    # is the SLO. On any error: fail-closed (no email, empty-state todays_pick).
-    # Decision lock: docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md.
-    v5_4_response: dict | None = None
-    try:
-        report_md = fetch_report_md(target_date)
-        ledger_summary = compute_14d_ledger_summary(target_date)
-        v5_4_response = call_signal_ranker(
-            df, target_date, entry_day, report_md, ledger_summary
+    # Pick selection. On STRICT days the V5.4 Scorer/Picker LLM pair ranks the
+    # pool. On FALLBACK days we bypass the ranker entirely: the pool is already
+    # "best fillable candidate" by construction (ORDER BY score, OI), and ranking
+    # ~1 low-conviction name only re-introduces a mass-leakage skip that would
+    # defeat the daily-cadence guarantee. The regime, earnings, and active-days
+    # gates above have already run on the fallback pool, so what survives here is
+    # tradeable. See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
+    if gate_mode == POLICY_GATE_FALLBACK:
+        top = df.iloc[0]
+        v5_4_meta = {
+            "runner_up": str(df.iloc[1]["ticker"]) if len(df) > 1 else None,
+            "justification": (
+                "Fallback pick — no signal cleared the strict conviction gates "
+                "(unusual-volume V/OI > 2 or the 5-10% OTM band). Selected the "
+                "best fillable candidate by composite score and resting open "
+                "interest; the regime, earnings, and liquidity gates all passed. "
+                "Low conviction by construction — tagged FALLBACK in the ledger."
+            ),
+            "confidence": "LOW",
+            "run_id": None,
+            "scorer_prompt_version": None,
+            "picker_prompt_version": None,
+            "scorer_model": None,
+            "picker_model": None,
+        }
+        logger.info(
+            f"FALLBACK pick (ranker bypassed): {top['ticker']} {top['direction']} "
+            f"score={top.get('overnight_score')} oi={top.get('recommended_oi')}"
         )
-    except Exception as e:
-        logger.error(f"V5.4 path raised: {e}")
-        v5_4_response = None
+    else:
+        # V5.4 IS the picker — no V5.3 SQL "rank-1" fallback. signal-ranker uptime
+        # is the SLO. On any error: fail-closed (no email, empty-state todays_pick).
+        # Decision lock: docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md.
+        v5_4_response: dict | None = None
+        try:
+            report_md = fetch_report_md(target_date)
+            ledger_summary = compute_14d_ledger_summary(target_date)
+            v5_4_response = call_signal_ranker(
+                df, target_date, entry_day, report_md, ledger_summary
+            )
+        except Exception as e:
+            logger.error(f"V5.4 path raised: {e}")
+            v5_4_response = None
 
-    if v5_4_response is None:
-        logger.error("V5.4 signal-ranker unavailable. Fail-closed: no email, no WhatsApp pick.")
-        write_todays_pick_doc(target_date, has_pick=False, skip_reason="v5_4_unavailable")
-        post_to_openclaw(format_whatsapp_message(
-            None, target_date, None, has_pick=False, skip_reason="v5_4_unavailable"
-        ))
-        return True, "V5.4 signal-ranker unavailable. Fail-closed."
+        if v5_4_response is None:
+            logger.error("V5.4 signal-ranker unavailable. Fail-closed: no email, no WhatsApp pick.")
+            write_todays_pick_doc(target_date, has_pick=False, skip_reason="v5_4_unavailable")
+            post_to_openclaw(format_whatsapp_message(
+                None, target_date, None, has_pick=False, skip_reason="v5_4_unavailable"
+            ))
+            return True, "V5.4 signal-ranker unavailable. Fail-closed."
 
-    # Mass-leakage skip. signal-ranker sets skip=True when every top-5 candidate
-    # scored 1/1/1 (per scorer_v4.md:29 leakage rule) — picking the "least bad"
-    # of identically-floored candidates would ship a coin flip. Treat it like
-    # any other fail-closed reason: no email, empty-state todays_pick, alert
-    # the WhatsApp channel that the engine stood down.
-    if v5_4_response.get("skip"):
-        skip_reason_raw = v5_4_response.get("skip_reason") or "mass_leakage"
-        skip_reason_full = f"v5_4_{skip_reason_raw}"
-        logger.error(
-            f"V5.4 ranker returned skip={skip_reason_full}. Fail-closed: no email."
-        )
-        write_todays_pick_doc(target_date, has_pick=False, skip_reason=skip_reason_full)
-        post_to_openclaw(format_whatsapp_message(
-            None, target_date, None, has_pick=False, skip_reason=skip_reason_full
-        ))
-        return True, f"V5.4 skip ({skip_reason_full}). Fail-closed."
+        # Mass-leakage skip. signal-ranker sets skip=True when every top-5 candidate
+        # scored 1/1/1 (per scorer_v4.md:29 leakage rule) — picking the "least bad"
+        # of identically-floored candidates would ship a coin flip. Treat it like
+        # any other fail-closed reason: no email, empty-state todays_pick, alert
+        # the WhatsApp channel that the engine stood down.
+        if v5_4_response.get("skip"):
+            skip_reason_raw = v5_4_response.get("skip_reason") or "mass_leakage"
+            skip_reason_full = f"v5_4_{skip_reason_raw}"
+            logger.error(
+                f"V5.4 ranker returned skip={skip_reason_full}. Fail-closed: no email."
+            )
+            write_todays_pick_doc(target_date, has_pick=False, skip_reason=skip_reason_full)
+            post_to_openclaw(format_whatsapp_message(
+                None, target_date, None, has_pick=False, skip_reason=skip_reason_full
+            ))
+            return True, f"V5.4 skip ({skip_reason_full}). Fail-closed."
 
-    # V5.4 chose a ticker — find its enriched row in df for contract details.
-    pick_ticker = v5_4_response.get("pick")
-    picked_rows = df[df["ticker"] == pick_ticker]
-    if picked_rows.empty:
-        # Picker out-of-set — signal-ranker should have caught this and
-        # returned 500. If it slipped through, fail-closed (don't fabricate a
-        # pick from a ticker not in df).
-        logger.error(
-            f"V5.4 picked {pick_ticker} but it's not in the candidate df. "
-            f"Out-of-set bug. Fail-closed."
-        )
-        write_todays_pick_doc(target_date, has_pick=False, skip_reason="v5_4_out_of_set")
-        post_to_openclaw(format_whatsapp_message(
-            None, target_date, None, has_pick=False, skip_reason="v5_4_out_of_set"
-        ))
-        return True, f"V5.4 returned out-of-set ticker {pick_ticker}. Fail-closed."
+        # V5.4 chose a ticker — find its enriched row in df for contract details.
+        pick_ticker = v5_4_response.get("pick")
+        picked_rows = df[df["ticker"] == pick_ticker]
+        if picked_rows.empty:
+            # Picker out-of-set — signal-ranker should have caught this and
+            # returned 500. If it slipped through, fail-closed (don't fabricate a
+            # pick from a ticker not in df).
+            logger.error(
+                f"V5.4 picked {pick_ticker} but it's not in the candidate df. "
+                f"Out-of-set bug. Fail-closed."
+            )
+            write_todays_pick_doc(target_date, has_pick=False, skip_reason="v5_4_out_of_set")
+            post_to_openclaw(format_whatsapp_message(
+                None, target_date, None, has_pick=False, skip_reason="v5_4_out_of_set"
+            ))
+            return True, f"V5.4 returned out-of-set ticker {pick_ticker}. Fail-closed."
 
-    top = picked_rows.iloc[0]
-    v5_4_meta = {
-        "runner_up": v5_4_response.get("runner_up"),
-        "justification": v5_4_response.get("justification"),
-        "confidence": v5_4_response.get("confidence"),
-        "run_id": v5_4_response.get("run_id"),
-        "scorer_prompt_version": v5_4_response.get("scorer_prompt_version"),
-        "picker_prompt_version": v5_4_response.get("picker_prompt_version"),
-        "scorer_model": v5_4_response.get("scorer_model"),
-        "picker_model": v5_4_response.get("picker_model"),
-    }
+        top = picked_rows.iloc[0]
+        v5_4_meta = {
+            "runner_up": v5_4_response.get("runner_up"),
+            "justification": v5_4_response.get("justification"),
+            "confidence": v5_4_response.get("confidence"),
+            "run_id": v5_4_response.get("run_id"),
+            "scorer_prompt_version": v5_4_response.get("scorer_prompt_version"),
+            "picker_prompt_version": v5_4_response.get("picker_prompt_version"),
+            "scorer_model": v5_4_response.get("scorer_model"),
+            "picker_model": v5_4_response.get("picker_model"),
+        }
 
     # Happy path: write todays_pick doc BEFORE sending email. Fail-closed —
     # if the Firestore write raises, we do NOT send an email (the operator
@@ -1389,13 +1486,17 @@ def run_notifier(target_date: date | None = None):
     # preventing with the single-source-of-truth contract).
     write_todays_pick_doc(
         target_date, has_pick=True, top=top, vix_now=vix_now, v5_4_meta=v5_4_meta,
+        policy_gate=gate_mode,
     )
 
     # Single email path — operator + paid subscribers see the SAME html with
     # V5.4 justification embedded under the contract card. No operator-only
-    # shadow block (retired with V5.3 promotion 2026-05-08).
+    # shadow block (retired with V5.3 promotion 2026-05-08). Fallback picks are
+    # marked in the subject so the recipient knows it's a low-conviction day.
     html_content = format_email_html(top, target_date, entry_day, v5_4_meta=v5_4_meta)
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
+    if gate_mode == POLICY_GATE_FALLBACK:
+        subject += " [FALLBACK]"
 
     success = send_email(subject, html_content)
 

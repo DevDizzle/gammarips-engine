@@ -460,7 +460,11 @@ def run_forward_paper_trading(target_date: date = None):
         "is_premium_signal": bool(row["is_premium_signal"]) if pd.notna(row["is_premium_signal"]) else False,
         "premium_score": int(row["premium_score"]) if pd.notna(row["premium_score"]) else 0,
         "policy_version": POLICY_VERSION,
-        "policy_gate": POLICY_GATE,
+        # Propagate the signal-notifier gate tag (STRICT vs FALLBACK) so
+        # daily-cadence fallback trades are measurable separately in the ledger.
+        # Falls back to the service constant for pre-fallback docs that omit it.
+        # See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
+        "policy_gate": (pick_doc.get("policy_gate") if pick_doc else None) or POLICY_GATE,
         "is_skipped": False,
         "skip_reason": None,
         "VIX_at_entry": float(vix_level) if vix_level is not None else None,

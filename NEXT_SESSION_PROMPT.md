@@ -1,5 +1,17 @@
 # Next Session Prompt
 
+**2026-06-01 session — Daily-cadence fallback SHIPPED + verified; lock-in/Alpaca decisions made (design-only, no trader-mechanics change).** Two threads this session:
+
+**(A) Daily-cadence fallback — DEPLOYED to prod.** Problem: cadence is the bottleneck (~6 trades in ~13 trading days vs ≥10/mo target); the strict conviction funnel empties on too many days even in a rip (scan 2026-05-26 skipped with 24 score-7/8 names in the pool). Fix: when the strict stack leaves **zero** candidates, `signal-notifier` no longer skips — it re-queries with **only conviction gates relaxed** (drops `volume_oi_ratio > 2`; moneyness floor `0.05 → 0.0`) and surfaces the single **best fillable** candidate (`ORDER BY overnight_score DESC, recommended_oi DESC, spread ASC, ticker`). **Every tradeability/literature gate stays** (OI≥10, vol≥50, DTE 7-45, regime VIX≤VIX3M, earnings-overlap, active_days_20d≥5 — all run on the fallback pool). On fallback days the **V5.4 ranker is BYPASSED** (deterministic top row, `confidence=LOW`, email subject `[FALLBACK]`). Strict days unchanged. Tagged `policy_gate=FALLBACK` in `todays_pick` → propagated to `forward_paper_ledger.policy_gate` so fallback EV is separable. Verified on real data: scan 05-26 (was a skip) → surfaces ADBE BEARISH (OI 109, vol 322); scan 05-27 strict → PAAS unchanged. `gammarips-review` verdict **GO**. Deployed: `signal-notifier 00025-xxg`, `forward-paper-trader 00036-8jt` (both booted clean). Decision: [`docs/DECISIONS/2026-06-01-daily-cadence-fallback.md`](docs/DECISIONS/2026-06-01-daily-cadence-fallback.md). **Revisit trigger: N≥10 closed FALLBACK trades** → compare FALLBACK vs STRICT EV (`GROUP BY policy_gate`; treat legacy `ENRICHMENT_ONLY_NO_TRADER_GATE` + `STRICT` as one non-fallback baseline); kill or tighten the fallback if it loses. **NOT a V5.3 fallback** — this is conviction-relaxation within V5.4, not a strategy fallback; does not violate the "no V5.3 fallback" rule.
+
+**(B) Lock-in gains ("issue #2") — DECISION: leave it alone until N≥15.** Operator wanted to lock gains after the PAAS give-back (peaked +31%, timed out flat). Resolved with data: a **ratcheting** trail provably does NOT kill the +80% winners (HTZ ran $0.40→$0.74 and filled the +80% target *on the way up*; a trailing stop only fires on a drop, so it never threatens a trade that reaches target). BUT the current −25%-off-peak trail is too loose to lock much (on PAAS's $3.00 peak it sits at ~break-even), and with only **2 trades** ever reaching the +30% zone you cannot calibrate arm/trail levels. So: **keep clean +80/−60, no trail change now**; revisit the ratchet at N≥15 with a real peak distribution. (A +25% scalp target was rejected earlier — it would have ~halved cohort return by clipping the HTZ tail.)
+
+**(C) Alpaca platform constraints (verified for the eventual agent) — design-only, nothing built.** Alpaca **options** support market / limit / **stop / stop-limit**; they do **NOT** support trailing-stop, bracket, OCO, or OTO (all equity-only). Consequences for the future agent: (1) lock-in must be **agent-coded** (a ratcheting native *stop*, not a trailing-stop order type); (2) **no OCO** → cannot rest the −60% stop AND +80% limit simultaneously on one contract — the agent holds ONE resting protective stop and fires the target via a poll loop. Capital/velocity: Alpaca accounts are **margin/limited-margin by default and float settlement**, so unsettled proceeds recycle immediately (same as Robinhood Instant) — velocity is NOT a blocker (confirm options-proceeds behavior via paper test). Real capital need is **overlap** (daily entry × 3-day hold = ~3 concurrent positions = ~$1.5–2k working capital), inherent to the strategy, not a settlement problem. 3-day holds are NOT day trades, so the $25k PDT floor doesn't bind. The agent ("Gemini Spark" — operator's term; clarify the specific runtime/framework next time) stays **DEFERRED** per the unchanged 3-part go-live trigger (N≥30 + EV≥0 + 15 manual matches). Next step when signal is good: draft the agent exit state-machine spec (poll loop, one-resting-order constraint, target-fire logic) so paper-sim == live-execution. **No code for this thread this session.**
+
+**⚠️ Not committed to git.** This session's working-tree changes (`signal-notifier/main.py`, `forward-paper-trader/main.py`, `docs/TRADING-STRATEGY.md`, new `docs/DECISIONS/2026-06-01-daily-cadence-fallback.md`) were **deployed but NOT committed** — same pattern as prior sessions' uncommitted state. Commit when convenient (branch off `master`).
+
+---
+
 **2026-05-28 session — Gemini model migration SHIPPED + verified.** Migrated every text-generation Gemini call `gemini-3-flash-preview` → `gemini-3.5-flash` across the engine. Voluntary quality upgrade — `profitscout-fida8` calls the old model daily so it keeps access past the 2026-06-15 deprecation regardless (NOT a forced migration). **Deployed + verified on 3.5-flash:** `overnight-report-generator` (00016-txd, trace ok), `gammarips-eval` (00006-t8p, judge logs ok + `config.yaml` bug fixed), `x-poster` (00036-kj6, dry-run APPROVE; DRY_RUN restored false), `enrichment-trigger` (00038-6xf — verified by its live 05:30 ET cron: 79 ok grounded calls on 3.5-flash), `signal-ranker` (00010-bmt — verified via `/rank` smoke: `scorer_model=gemini-3.5-flash`). **Untouched (deliberate):** Picker (`gemini-3.1-pro-preview`), x-poster image model (`gemini-3-pro-image-preview`), VAPO (`gemini-2.5-pro`), agent-arena (dead). **Behavioral:** Scorer `temperature=0.2` dropped (response_schema enforces structure); enrichment sampling knobs incl `seed=42` dropped; report temp dropped; **eval judges keep temp=0.0**. `thinking_level` NOT set — deployed `google-genai==1.22.0` rejects the field (caught live by smoke test, a green build hid it); thinking stays at 3.x server default. **Cohort:** segmented by `v5_4_scorer_model` — the 3 pre-migration closed trades (`gemini-3-flash-preview`) are NOT pooled with new-model trades for the 15/30-trade EV gates. `gammarips-review` PASSED. Decision: [`docs/DECISIONS/2026-05-27-gemini-3-5-flash-migration.md`](docs/DECISIONS/2026-05-27-gemini-3-5-flash-migration.md). Model→function registry: [`docs/MODELS.md`](docs/MODELS.md). Committed + pushed (`3fa3cea` on `origin/master`); CLAUDE.md / GEMINI.MD / CHEAT-SHEET synced.
 
 ---
@@ -14,7 +26,7 @@
 
 **Prior sessions:** 2026-05-27 diagnostic + liquidity decision (this session); 2026-05-19 active-days liquidity gate + fixed-$500 sizing; 2026-05-15 trader resurrection + EOD MTM; 2026-05-12 V5.4 pipeline alignment; 2026-05-09 V5.4 promotion; 2026-05-08 V5.4 spec lock.
 
-**Current policy:** V5.4 Agent Ranker — sole live strategy. **Unchanged.** No execution-policy change this session. Decision lock: [`docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md`](docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md).
+**Current policy:** V5.4 Agent Ranker — sole live strategy. Trader mechanics **unchanged** (entry 10:00 ET, −60% stop, +80% target, trail, 3-day hold). Selection changed 2026-06-01: **daily-cadence fallback** added to `signal-notifier` (see top block). Decision lock: [`docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md`](docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md) + [`docs/DECISIONS/2026-06-01-daily-cadence-fallback.md`](docs/DECISIONS/2026-06-01-daily-cadence-fallback.md).
 
 ---
 
@@ -22,7 +34,7 @@
 
 **Default mode is monitor + park.** Code work is paused while the ledger accumulates closed trades. Return triggers:
 
-1. **15-closed-trade interim checkpoint** (operator plan, set 2026-05-27). When `forward_paper_ledger` reaches **15 closed/counted trades** (distinct scan_date with a realized exit — excludes SKIPPED and INVALID_LIQUIDITY), run the **evals + a diagnostic** as a GO/NO-GO health check. Currently **3/15**. At ~1-2 counted trades/week this lands roughly **mid-to-late July 2026**. This is a checkpoint, NOT the real-money gate.
+1. **15-closed-trade interim checkpoint** (operator plan, set 2026-05-27). When `forward_paper_ledger` reaches **15 closed/counted trades** (distinct scan_date with a realized exit — excludes SKIPPED and INVALID_LIQUIDITY), run the **evals + a diagnostic** as a GO/NO-GO health check. Currently **4/15** closed (PAAS + CIEN land 06-01/06-02 → ~6/15 mid-week). At ~1-2 counted trades/week this lands roughly **mid-to-late July 2026**. This is a checkpoint, NOT the real-money gate. **Add to the diagnostic: FALLBACK-vs-STRICT EV split (`GROUP BY policy_gate`) once N≥10 fallback closes, and the trailing-stop ratchet calibration (N≥15).**
 2. The 30-trade DoD email (`evan@gammarips.com`, subject `[GammaRips] 30-trade gate reached — return trigger active`).
 3. The Phase 4 trigger (N ≥ 10 V5.4 closes) — flip `signal-ranker DRY_RUN=false` so per-row Scorer/Picker provenance lands in `signal_ranker_runs`, then build the IC join in `gammarips-eval`. Close at current pace.
 4. The "5 consecutive V5.4 losses with no skipped days" rule (`docs/research_reports/V5_4_METHODOLOGY_AUDIT_2026_05_09.md`).
@@ -54,6 +66,9 @@ Until those fire, the system is paper-only. Founder pricing $29/mo continues as 
 - Trader mechanics: entry 10:00 ET, stop −60% initial, trail +30% gain / 25% off peak, target +80%, 3-day hold, exit 15:50 ET day-3. STOP/TRAIL wins on ambiguous bars.
 - Composite weights 60/25/15 flow/regime/narrative. `scorer_v5` + `picker_v4`.
 - **INVALID_LIQUIDITY accepted as a paper-only artifact (2026-05-27). Do NOT build another trailing-liquidity gate — tested and dead.**
+- **Daily-cadence fallback LIVE (2026-06-01).** Relaxes ONLY conviction gates on strict-skip days; all tradeability gates kept; ranker bypassed; tagged FALLBACK. Revisit at N≥10 fallback closes. Do NOT relitigate or "tidy" it before then. NOT a V5.3 fallback.
+- **Lock-in / trailing stop: LEAVE IT ALONE until N≥15 (2026-06-01).** Keep clean +80/−60. A ratcheting trail doesn't kill +80% winners (target fills on the way up) but can't be calibrated on the 2 trades that reached +30%. +25% scalp target REJECTED (halves return by clipping the HTZ tail). Revisit the ratchet at N≥15.
+- **Alpaca options order facts (verified 2026-06-01):** market/limit/stop/stop-limit supported; trailing-stop, bracket, OCO, OTO NOT (equity-only). Lock-in must be agent-coded (ratcheting native stop); no OCO → one resting exit order at a time. Margin/float = velocity preserved; ~$1.5–2k overlap capital; 3-day holds don't trip PDT. Agent ("Gemini Spark") deferred per the 3-part trigger.
 - No real-money trading until the three-part go-live trigger fires (see above).
 - No new trader-side gates. Ever.
 
@@ -63,9 +78,9 @@ Until those fire, the system is paper-only. Founder pricing $29/mo continues as 
 
 | Service | Revision | Status |
 |---|---|---|
-| `signal-notifier` | `00024-xh7` | LIVE V5.4-only fail-closed. `active_days_20d >= 5` gate + fixed-$500 sizing. Cron `30 7 * * 1-5` ET. Refreshes `cohort_stats/current` per run. |
+| `signal-notifier` | `00025-xxg` | LIVE V5.4-only fail-closed. `active_days_20d >= 5` gate + fixed-$500 sizing. **Daily-cadence fallback (2026-06-01): on a strict-skip day, surfaces best fillable candidate, ranker bypassed, `policy_gate=FALLBACK`.** Cron `30 7 * * 1-5` ET. Refreshes `cohort_stats/current` per run. |
 | `signal-ranker` | `00010-bmt` | Scorer fanout (`gemini-3.5-flash` since 2026-05-27) + Picker (`gemini-3.1-pro-preview`). IAM-only. `DRY_RUN=false` (live; table previously mis-stated `true`). |
-| `forward-paper-trader` | `00035-72h` | Deferred simulator (today − 3 trading days). Two crons + `/mark_to_market`. |
+| `forward-paper-trader` | `00036-8jt` | Deferred simulator (today − 3 trading days). Two crons + `/mark_to_market`. **Propagates `policy_gate` (STRICT/FALLBACK) from `todays_pick` into the ledger (2026-06-01).** |
 | `win-tracker` | `00011-5l9` | 30-trade DoD gate. Cron `30 16 * * 1-5` ET. |
 | `x-poster` | `00036-kj6` | LIVE, DRY_RUN=false. 5 schedulers active. Text on `gemini-3.5-flash` (2026-05-27). |
 | `enrichment-trigger` | `00038-6xf` | gates: score≥1, spread≤8%, UOA>$500K. Thesis on `gemini-3.5-flash` (2026-05-27). |
@@ -172,7 +187,9 @@ DO NOT read first: `_archive/`, retired `PROMPT-*` docs, anything pre-2026-04 �
 - Do NOT modify V5.4 trader mechanics. Entry 10:00 ET / stop −60% / trail +30% gain / 25% off peak / target +80% / 3-day hold / exit 15:50 ET day-3.
 - Do NOT add gates to `forward-paper-trader`. Gates live in `enrichment-trigger` + `signal-notifier`.
 - **Do NOT build another trailing-liquidity gate (volume floor, OI floor, day-before-scan, etc.) — tested and rejected 2026-05-27. INVALID_LIQUIDITY is accepted as paper-only.**
-- Do NOT add a V5.3 fallback path to signal-notifier. Fail-closed on signal-ranker error is the SLO.
+- Do NOT add a V5.3 fallback path to signal-notifier. Fail-closed on signal-ranker *error* is the SLO. (The 2026-06-01 **daily-cadence fallback** is unrelated — it relaxes conviction gates on zero-candidate days and is allowed/live; it is NOT a V5.3 strategy fallback and NOT a ranker-error fallback.)
+- Do NOT relitigate or refactor the daily-cadence fallback before N≥10 closed FALLBACK trades. Let it run and collect EV.
+- Do NOT change the trailing stop / add a tighter lock-in before N≥15. Decision 2026-06-01: keep +80/−60 clean; the ratchet can't be calibrated on 2 data points and a mis-tuned trail risks the convex tail.
 - Do NOT use FMP in forward-paper-trader. Retired 2026-04-08.
 - Do NOT modify `scripts/research/` or `signals_labeled_v1`. Frozen.
 - Do NOT add NOT NULL constraints back to `ticker / recommended_contract / direction` on `forward_paper_ledger`.
@@ -209,6 +226,8 @@ In `.claude/agents/`:
 ## Memory entries (auto-loaded)
 
 `/home/user/.claude/projects/-home-user-gammarips-engine/memory/MEMORY.md` indexes all project memories. Latest additions:
+- **2026-06-01** `project_daily_cadence_fallback.md` — daily-cadence fallback LIVE; relax conviction, keep tradeability, ranker bypassed, tagged FALLBACK; revisit at N≥10 fallback closes.
+- **2026-06-01** `project_ledger_written_in_arrears.md` — `forward_paper_ledger` rows appear only at day-3 exit (~16:30 ET); emitted/emailed in-flight signals look "missing" but aren't — don't misread an empty ledger.
 - **2026-05-27** `project_invalid_liquidity_root_cause.md` — INVALID_LIQUIDITY is a thin-contract artifact; trailing-liquidity gating tested and rejected; accepted as paper-only.
 - **2026-05-20** `project_first_v5_4_win_and_callback_2026_05_20.md` — HTZ +80% win + callback loop verified.
 - **2026-05-20** `project_scheduler_retry_hardening_2026_05_20.md` — 19/22 jobs retry; trader jobs pending review; no catch-up loop.
@@ -217,4 +236,4 @@ In `.claude/agents/`:
 
 ---
 
-*End of handoff. The engine is rolling: 3 closed trades (+31.8% ROI), BLK + ADI landing this week on the natural 3-day-lag cadence. Liquidity gating is parked by operator decision. Next scheduled wake-up is the 15-closed-trade interim checkpoint (~mid-to-late July) for an evals + diagnostic pass — or earlier if a cron breaks or Phase 4 (N≥10) lands first.*
+*End of handoff (2026-06-01). The engine is rolling: **4 closed trades** (OKTA, HTZ +80%, BBY, ADI) + **PAAS lands 06-01, CIEN lands 06-02** on the natural 3-day-lag cadence → ~6 closed by mid-week. This session shipped the **daily-cadence fallback** (surfaces a trade on strict-skip days, tagged FALLBACK) and **decided to leave the lock-in/trail alone until N≥15**. Alpaca platform constraints are documented for the eventual (deferred) agent. **Default mode is monitor + park — let trades build, evaluate ROI at the N≥10 (fallback EV) / N≥15 (checkpoint + trail calibration) / N≥30 (go-live) milestones.** Next scheduled wake-up: the 15-closed-trade interim checkpoint, or earlier if a cron breaks, Phase 4 (N≥10) lands, or the operator surfaces an issue. Working tree is deployed-but-uncommitted.*
