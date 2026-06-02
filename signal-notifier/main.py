@@ -6,10 +6,14 @@ ONE email with that pick to operator + paid subscribers (same content). On
 any V5.4 error (timeout, 5xx, picker out-of-set), fails CLOSED — no email.
 
 Gate stack (run UPSTREAM of the V5.4 picker):
-  - ``volume_oi_ratio > 2.0``                 fresh flow, not stale OI
-  - ``moneyness_pct BETWEEN 0.05 AND 0.10``   5-10% OTM (tightened 2026-05-06
-        per H12 lit-audit; Aretz et al. 2023 RoF documents the deep-OTM EV
-        cliff above ~10% on 9-DTE contracts).
+  - ``volume_oi_ratio > 2.0`` — REMOVED 2026-06-02. Realized option-PnL
+        backtest (N=1,375) showed it dropped ~55-63% of real winners for
+        precision lift <= 0; it was the main cause of picker-slate starvation
+        (~2 candidates/day). See DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md.
+  - ``moneyness_pct BETWEEN 0.05 AND 0.13``   5-13% OTM (cap widened 0.10->0.13
+        on 2026-06-02; the H12 deep-OTM-cliff lit is hold-to-expiry, not our
+        3-day bracket. See DECISIONS/2026-06-02-moneyness-cap-widen-to-13.md.
+        FALLBACK path keeps the 0.10 cap.).
   - ``vix3m_at_enrich`` present AND ``VIX <= VIX3M`` (no backwardation)
         Fail-closed: a NULL vix3m_at_enrich or a missing current VIX means we
         skip the email for the day entirely.
@@ -116,12 +120,20 @@ est = pytz.timezone("America/New_York")
 # V5.3 filter thresholds — canonical in CHEAT-SHEET.md
 VOL_OI_MIN = 2.0
 MONEYNESS_MIN = 0.05
-# MONEYNESS_MAX tightened 0.15 -> 0.10 on 2026-05-06 per H12 (lit-audit).
-# Aretz et al. 2023 RoF: ITM calls +7% / DOTM calls -27% systematic
-# spread; at 9 DTE / 15% OTM, delta is 0.10-0.15 (lottery zone).
-# Augustin et al. 2022 J. Fin. Markets: informed traders prefer slightly
-# OTM, not deep-OTM, because B/A spreads scale inversely with price.
-MONEYNESS_MAX = 0.10
+# MONEYNESS_MAX history:
+#   0.15 -> 0.10 on 2026-05-06 (H12 lit-audit; Aretz 2023 / Augustin 2022 deep-OTM cliff).
+#   0.10 -> 0.13 on 2026-06-02 (owner-directed; see DECISIONS/2026-06-02-moneyness-cap-widen-to-13).
+# Mechanism correction: the Aretz/Augustin deep-OTM EV cliff is a HOLD-TO-EXPIRY
+# phenomenon (VRP/theta bled over the option's life). We hold MAX 3 days on a
+# +80/-60 bracket of a 7-45 DTE option conditioned on directional UOA flow —
+# theta is negligible over 3 days and we never ride to expiry, so that literature
+# is about a different trade. Realized-option-PnL backtest (N=1,375 fills,
+# backtesting_and_research/moneyness_band_study.py) showed the 10-13% increment
+# at +8.9% mean (90% CI [+0.014,+0.163], flat cost) while the toxic (0.14,0.15]
+# bin was -15% (excluded). STRICT path only — the FALLBACK cap stays pinned at
+# 0.10 (see below). Thin/single-regime evidence; reversible — revert to 0.10 if
+# the 10-13% pick cohort underperforms on the live ledger.
+MONEYNESS_MAX = 0.13
 # Liquidity floors relaxed 2026-05-12 (Scenario C, picker starvation fix; see
 # docs/DECISIONS/2026-05-12-v5-4-pipeline-alignment.md). Pre-relaxation values
 # (OI_MIN=20, VOL_MIN=100) were chosen as defensive defaults at the 2026-04-30
@@ -176,7 +188,11 @@ ACTIVE_DAYS_MIN = 5
 # tagged policy_gate="FALLBACK" end-to-end so their EV is measurable separately
 # from STRICT picks and the fallback can be killed with data if it loses.
 FALLBACK_MONEYNESS_MIN = 0.0   # ATM allowed (strict floor 0.05); ITM still excluded
-FALLBACK_MONEYNESS_MAX = MONEYNESS_MAX   # keep 0.10 cap — no deep-OTM lottery tickets
+# DECOUPLED from MONEYNESS_MAX on 2026-06-02. Previously `= MONEYNESS_MAX`, which
+# would silently widen the fallback cap whenever the strict cap moved. Fallback
+# fires only on zero-strict-candidate (lowest-conviction) days — the worst place
+# for deeper-OTM names — so it stays pinned at 0.10 even though STRICT is now 0.13.
+FALLBACK_MONEYNESS_MAX = 0.10   # pinned; do NOT inherit MONEYNESS_MAX — no deep-OTM on fallback days
 # V/OI floor is dropped entirely for the fallback (unusual-flow conviction is
 # precisely what we relax). OI_MIN / VOL_MIN / DTE band are UNCHANGED — a
 # fallback pick must still be fillable, and the active-days gate downstream is
@@ -1088,22 +1104,24 @@ def compute_and_write_cohort_stats() -> bool:
 def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
     """Build the enriched-candidate SELECT for the strict or fallback gate.
 
-    STRICT (default) is the V5.3 conviction stack: unusual-volume V/OI > 2 in
-    the 5-10% OTM band, ranked by directional V/OI DESC (see the ORDER BY
-    rationale below). FALLBACK (daily-cadence, 2026-06-01) relaxes only the two
-    pure-conviction gates — it drops the V/OI floor entirely and lowers the
-    moneyness floor to ATM — then re-ranks by composite ``overnight_score`` and
-    resting ``recommended_oi`` to pick the *best fillable* candidate. Both modes
-    keep the OI/vol floors and the DTE band; the downstream regime, earnings,
-    and active-days gates run identically on whichever pool this returns.
+    STRICT (default), as of 2026-06-02, is the 5-10% OTM band only (the
+    unusual-volume V/OI > 2 gate was REMOVED — see the conviction_where comment
+    and DECISIONS/2026-06-02). As of the same date STRICT and FALLBACK share the
+    SAME ranking — composite ``overnight_score`` DESC, then resting
+    ``recommended_oi`` DESC (fillability), then spread — so both pick the best
+    fillable high-signal candidate. FALLBACK (daily-cadence, 2026-06-01)
+    additionally lowers the moneyness floor to ATM. Both modes keep the OI/vol
+    floors and the DTE band; the downstream regime, earnings, and active-days
+    gates run identically on whichever pool this returns.
     See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
 
-    STRICT ORDER BY (changed 2026-05-01, see DECISIONS): the primary key is
-    DIRECTIONAL volume_oi_ratio DESC (call_vol_oi_ratio for BULLISH,
-    put_vol_oi_ratio for BEARISH). EDA on N=435 V5.3 trades showed dollar volume
-    NEGATIVELY correlates with winning at the -60/+80/3-day bracket; directional
-    V/OI DESC was top-1 win-rate 8/10 vs 1/6 for the old dollar-volume primary.
-    Tiebreakers: tighter spread (cleaner fills) -> overnight_score -> ticker.
+    STRICT ORDER BY: re-ranked 2026-06-02 to ``overnight_score`` DESC primary,
+    SUPERSEDING the 2026-05-01 directional-V/OI-DESC primary. Rationale in the
+    order_by comment below: the 2026-05-01 EDA (N=435 V5.3) only established
+    V/OI-DESC over a dollar-volume primary, and the 2026-06-02 realized-PnL
+    analysis (N=1,375) shows V/OI carries no selection value — so it should not
+    rank the pool the picker draws from. The scorer re-scores survivors by
+    composite, making overnight_score the aligned pre-LIMIT sort.
     """
     if fallback:
         # Drop the V/OI floor; widen the moneyness floor to ATM. Rank by
@@ -1117,19 +1135,28 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
         recommended_spread_pct ASC,
         ticker ASC"""
     else:
+        # V/OI > 2 conviction gate REMOVED 2026-06-02 (owner-directed; see
+        # docs/DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md). Realized
+        # option-PnL backtest (N=1,375 fills) showed V/OI>2 drops ~55-63% of
+        # real +80%/+25% winners for precision lift statistically <= 0
+        # (90% CI [-0.061, -0.001]). It was strangling the picker's slate to a
+        # median of ~2 candidates/day. The moneyness band and ALL tradeability
+        # gates (OI/vol/DTE/regime/earnings/active-days) are unchanged.
         conviction_where = f"""
-      AND volume_oi_ratio IS NOT NULL
-      AND volume_oi_ratio > {VOL_OI_MIN}
       AND moneyness_pct IS NOT NULL
       AND moneyness_pct BETWEEN {MONEYNESS_MIN} AND {MONEYNESS_MAX}"""
+        # ORDER BY re-ranked 2026-06-02 to match FALLBACK: composite
+        # ``overnight_score`` first, then resting ``recommended_oi`` (fillability),
+        # then spread. This SUPERSEDES the 2026-05-01 directional-V/OI-DESC primary
+        # — that EDA (N=435 V5.3) only beat a dollar-volume primary, and the
+        # 2026-06-02 realized-PnL work (N=1,375) shows V/OI has no selection value,
+        # so ranking the picker's pre-LIMIT pool by it is backwards. The LIMIT 10
+        # only binds on high-inventory days; the scorer re-scores the survivors by
+        # composite anyway, so overnight_score is the aligned pre-filter.
         order_by = """
-        COALESCE(
-            CASE WHEN direction = 'BULLISH' THEN call_vol_oi_ratio
-                 ELSE put_vol_oi_ratio END,
-            0
-        ) DESC,
-        recommended_spread_pct ASC,
         overnight_score DESC,
+        recommended_oi DESC,
+        recommended_spread_pct ASC,
         ticker ASC"""
 
     # LIMIT 10 — the earnings-overlap exclusion (2026-05-06) walks the ranked
@@ -1256,8 +1283,8 @@ def run_notifier(target_date: date | None = None):
         return True, "Earnings calendar unavailable (fail-closed)."
 
     # Earnings-overlap exclusion: build the candidate pool V5.4 will rank.
-    # The V5.3 hard gates (V/OI > 2, moneyness 5-10%, OI/vol floors, spread
-    # ≤8%, regime VIX≤VIX3M) ran upstream in the SELECT/QUALIFY that produced
+    # The hard gates (moneyness 5-13%, OI/vol floors, spread ≤8%, regime
+    # VIX≤VIX3M; V/OI removed 2026-06-02) ran upstream in the SELECT that produced
     # df. Earnings overlap is the last hard filter — anything that touches an
     # earnings print in [scan_date, exit_day] is removed before V5.4 sees it.
     skipped_for_earnings: list[str] = [

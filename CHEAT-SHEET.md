@@ -24,8 +24,8 @@ Hard gates run UPSTREAM of the agent ranker. Only signals passing ALL get into t
 1. Overnight score >= 1
 2. Spread <= 8% (tightened from 10% on 2026-05-06 per lit-audit H11)
 3. Directional UOA > $500k
-4. V/OI ratio > 2.0 at focal strike
-5. Moneyness 5–10% OTM (tightened from 15% on 2026-05-06 per lit-audit H12)
+4. ~~V/OI ratio > 2.0~~ **REMOVED 2026-06-02** — realized option-PnL backtest (N=1,375) showed it dropped ~55-63% of real winners for ~0 edge and was starving the picker's slate to ~2/day; kept only as a ranking tiebreak (see `docs/DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md`)
+5. Moneyness 5–13% OTM (cap widened 10%→13% on 2026-06-02 — the H12 deep-OTM-cliff lit is hold-to-expiry, not our 3-day bracket; realized-PnL backtest backed it. Fallback path keeps the 10% cap. See `docs/DECISIONS/2026-06-02-moneyness-cap-widen-to-13.md`)
 6. VIX <= VIX3M (skip entire day if backwardation)
 7. Recommended contract OI >= 10 (relaxed from 20 on 2026-05-12 to lift picker-starvation floor)
 8. Recommended contract volume >= 50 (relaxed from 100 on 2026-05-12, same reason)
