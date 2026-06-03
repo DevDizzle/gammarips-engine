@@ -68,3 +68,9 @@ backtesting_and_research/cache/
 # dbt — incomplete/stale project, not in use. Ignore the whole directory.
 dbt/
 .user.yml
+
+# SEO scripts local venv
+scripts/seo/.venv/
+
+# Realized-option-PnL label artifact (738K binary; regenerate via realized_option_label.py)
+backtesting_and_research/realized_label.pkl

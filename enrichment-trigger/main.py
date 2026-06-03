@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import time
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -95,6 +96,59 @@ def _parse_fred_csv_for_date(text: str, scan_date: str) -> float | None:
     return best[1] if best else None
 
 
+def _fetch_fred_csv(url: str, retries: int = 3, timeout: int = 30) -> str:
+    """GET a FRED CSV with bounded retries; raise on final failure.
+
+    FRED's fredgraph.csv endpoint intermittently 504s / read-times-out. A single
+    transient failure must not poison a whole scan_date — on 2026-06-02 one 15s
+    read-timeout stored a NULL VIX3M for all 101 rows, which wiped the entire
+    signal-notifier slate (both STRICT and FALLBACK require vix3m_at_enrich) and
+    cost a trading day. Retry with linear backoff before giving up.
+    """
+    retries = max(1, retries)
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp.text
+        except Exception as e:
+            last_exc = e
+            logger.warning(f"FRED fetch attempt {attempt}/{retries} failed for {url}: {e}")
+            if attempt < retries:
+                time.sleep(2 * attempt)
+    raise last_exc  # type: ignore[misc]
+
+
+# Carry-forward staleness bound. VIX3M is slow-moving, so reusing the last known
+# close across a transient FRED outage is a sound regime proxy — but only briefly.
+# Past this many calendar days we fail-closed (store NULL → signal-notifier skips)
+# rather than gate trades on a stale regime read.
+VIX3M_CARRY_FORWARD_MAX_AGE_DAYS = 7
+
+
+def _last_known_vix3m(scan_date: str) -> tuple[float | None, str | None]:
+    """Most recent non-null vix3m_at_enrich strictly before scan_date.
+
+    Returns (value, as_of_date_str) or (None, None) if none exists or the lookup
+    fails. Used only on the FRED-failure path, so the extra BQ client is rare.
+    """
+    try:
+        client = bigquery.Client(project=PROJECT_ID)
+        q = f"""
+            SELECT vix3m_at_enrich AS v, CAST(DATE(scan_date) AS STRING) AS d
+            FROM `{ENRICHED_SIGNALS_TABLE}`
+            WHERE vix3m_at_enrich IS NOT NULL AND DATE(scan_date) < "{scan_date}"
+            ORDER BY scan_date DESC
+            LIMIT 1
+        """
+        for r in client.query(q).result():
+            return float(r["v"]), str(r["d"])
+    except Exception as e:
+        logger.warning(f"VIX3M carry-forward lookup failed: {e}")
+    return None, None
+
+
 def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
     """Return the VIX3M (3-month VIX) close on or before `scan_date`.
 
@@ -109,23 +163,43 @@ def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
     if _VIX3M_CACHE.get("as_of") == scan_date and _VIX3M_CACHE.get("value") != "unset":
         return _VIX3M_CACHE.get("value")
 
+    val: float | None = None
     try:
-        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXVCLS"
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        val = _parse_fred_csv_for_date(resp.text, scan_date)
-        _VIX3M_CACHE["value"] = val
-        _VIX3M_CACHE["as_of"] = scan_date
+        text = _fetch_fred_csv("https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXVCLS")
+        val = _parse_fred_csv_for_date(text, scan_date)
         if val is None:
             logger.warning(f"VIX3M: FRED VXVCLS returned no usable rows on/before {scan_date}")
         else:
             logger.info(f"VIX3M: {val:.2f} on/before {scan_date} (FRED VXVCLS)")
-        return val
     except Exception as e:
-        logger.warning(f"VIX3M: FRED fetch failed: {e}. Storing NULL.")
-        _VIX3M_CACHE["value"] = None
-        _VIX3M_CACHE["as_of"] = scan_date
-        return None
+        logger.warning(f"VIX3M: FRED fetch failed after retries: {e}")
+
+    # Carry-forward: FRED was unreachable or returned nothing usable. Reuse the
+    # last known VIX3M (slow-moving) rather than NULL-ing the whole scan_date's
+    # regime gate — but only if it is recent enough to be a valid proxy.
+    if val is None:
+        cf_val, cf_asof = _last_known_vix3m(scan_date)
+        if cf_val is not None and cf_asof is not None:
+            try:
+                age = (datetime.strptime(scan_date, "%Y-%m-%d").date()
+                       - datetime.strptime(cf_asof, "%Y-%m-%d").date()).days
+            except ValueError:
+                age = None
+            if age is not None and age <= VIX3M_CARRY_FORWARD_MAX_AGE_DAYS:
+                logger.warning(
+                    f"VIX3M: carrying forward {cf_val:.2f} from {cf_asof} "
+                    f"({age}d old) — FRED unavailable for {scan_date}."
+                )
+                val = cf_val
+            else:
+                logger.warning(
+                    f"VIX3M: last known value from {cf_asof} too stale "
+                    f"(age={age}d > {VIX3M_CARRY_FORWARD_MAX_AGE_DAYS}d); storing NULL."
+                )
+
+    _VIX3M_CACHE["value"] = val
+    _VIX3M_CACHE["as_of"] = scan_date
+    return val
 
 
 def fetch_vix_for_scan_date(scan_date: str) -> float | None:
@@ -139,10 +213,8 @@ def fetch_vix_for_scan_date(scan_date: str) -> float | None:
         return _VIX_CACHE.get("value")
 
     try:
-        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        val = _parse_fred_csv_for_date(resp.text, scan_date)
+        text = _fetch_fred_csv("https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS")
+        val = _parse_fred_csv_for_date(text, scan_date)
         _VIX_CACHE["value"] = val
         _VIX_CACHE["as_of"] = scan_date
         if val is None:
@@ -151,7 +223,7 @@ def fetch_vix_for_scan_date(scan_date: str) -> float | None:
             logger.info(f"VIX: {val:.2f} on/before {scan_date} (FRED VIXCLS)")
         return val
     except Exception as e:
-        logger.warning(f"VIX: FRED fetch failed: {e}. Storing NULL.")
+        logger.warning(f"VIX: FRED fetch failed after retries: {e}. Storing NULL.")
         _VIX_CACHE["value"] = None
         _VIX_CACHE["as_of"] = scan_date
         return None
@@ -330,7 +402,7 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
            recommended_iv, recommended_volume, recommended_oi, recommended_dte,
            call_dollar_volume, put_dollar_volume, call_uoa_depth, put_uoa_depth,
            call_active_strikes, put_active_strikes, call_vol_oi_ratio, put_vol_oi_ratio,
-           sector
+           sector, industry
     FROM `{SIGNALS_TABLE}`
     WHERE scan_date = '{scan_date}'
       AND overnight_score >= {MIN_SCORE}
@@ -1081,6 +1153,10 @@ def write_enriched_signals(
             "overnight_score": sig["overnight_score"],
             "price_change_pct": sig["price_change_pct"],
             "underlying_price": sig["underlying_price"],
+            # Sector/industry (SIC-mapped at scan time) — carried for cohort
+            # analysis parity with the raw signals table and the Firestore doc.
+            "sector": sig.get("sector"),
+            "industry": sig.get("industry"),
             # Flow data
             "call_dollar_volume": sig.get("call_dollar_volume"),
             "put_dollar_volume": sig.get("put_dollar_volume"),
@@ -1216,7 +1292,9 @@ def write_enriched_signals(
             ALTER TABLE `{ENRICHED_SIGNALS_TABLE}`
             ADD COLUMN IF NOT EXISTS volume_oi_ratio FLOAT64,
             ADD COLUMN IF NOT EXISTS moneyness_pct FLOAT64,
-            ADD COLUMN IF NOT EXISTS vix3m_at_enrich FLOAT64
+            ADD COLUMN IF NOT EXISTS vix3m_at_enrich FLOAT64,
+            ADD COLUMN IF NOT EXISTS sector STRING,
+            ADD COLUMN IF NOT EXISTS industry STRING
         """).result()
     except Exception as e:
         logger.warning(f"V5.2 schema ensure failed (will still attempt load): {e}")
@@ -1270,6 +1348,10 @@ def sync_to_firestore(signals: list[dict], technicals: dict, news_analysis: dict
             "price_change_pct": sig["price_change_pct"],
             "underlying_price": sig["underlying_price"],
             "signals": sig.get("signals", []),
+            # Sector/industry (SIC-mapped at scan time) — powers same-sector
+            # related-signals matching in the webapp. NULL-safe.
+            "sector": sig.get("sector"),
+            "industry": sig.get("industry"),
             # Flow
             "call_dollar_volume": sig.get("call_dollar_volume"),
             "put_dollar_volume": sig.get("put_dollar_volume"),

@@ -41,6 +41,7 @@ Unchanged across V5.3 → V5.4 — the picker change is what V5.4 introduced.
 
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -466,6 +467,7 @@ def write_todays_pick_doc(
             "put_dollar_volume": _num("put_dollar_volume"),
             "vix3m_at_enrich": _num("vix3m_at_enrich"),
             "vix_now_at_decision": float(vix_now) if vix_now is not None else None,
+            "vix_source": _LAST_VIX_SOURCE,
             "policy_version": "V5_4_AGENT_RANKER",
             # STRICT (ranker pick) or FALLBACK (daily-cadence deterministic
             # pick). Propagated to forward_paper_ledger.policy_gate so fallback
@@ -503,16 +505,122 @@ def write_todays_pick_doc(
         logger.info(f"Mirrored todays_pick/{entry_day_iso} (entry day)")
 
 
-def fetch_vix_close(scan_date: date) -> float | None:
-    """Return the VIX close on or before ``scan_date`` via FRED VIXCLS.
+# VIX sanity + fallback-corroboration policy --------------------------------
+VIX_PLAUSIBLE_MIN = 1.0     # below this is a parse/garbage artifact, not a real VIX
+VIX_PLAUSIBLE_MAX = 200.0   # 2020's intraday peak was ~85; 200 is a generous garbage bound
+VIX_FALLBACK_TOLERANCE = 1.5  # two non-FRED sources must agree within this (vol pts)
+# Source that produced the VIX used in the most recent fetch_vix_close call
+# ("FRED" / "Stooq+Yahoo"). Read by write_todays_pick_doc so every pick is
+# auditable to its regime-data source after logs age out. The notifier is a
+# once-daily single-request job, so this module-global is safe.
+_LAST_VIX_SOURCE = "unknown"
 
-    Returns None on any failure. Callers must fail closed (skip the day) when
-    we cannot determine the current VIX regime.
+
+def _plausible_vix(v: float | None) -> float | None:
+    """Return v only if it is in a sane VIX range, else None (garbage guard)."""
+    if v is None:
+        return None
+    return v if VIX_PLAUSIBLE_MIN < v < VIX_PLAUSIBLE_MAX else None
+
+
+def _vix_date_ok(d: date, scan_date: date) -> bool:
+    """Accept a bar dated on/before scan_date AND strictly before today (ET).
+
+    The second clause stops a live/partial CURRENT-session bar (which Stooq and
+    Yahoo can carry intraday) from feeding the regime gate. In normal cron use
+    scan_date is the prior trading day, so ``d <= scan_date`` already implies
+    this; the guard only bites if fetch_vix_close is ever called with
+    scan_date == today.
     """
+    return d <= scan_date and d < datetime.now(est).date()
+
+
+def _fetch_vix_from_stooq(scan_date: date) -> float | None:
+    """Fallback VIX source: Stooq daily CSV (Date,Open,High,Low,Close,Volume)."""
     try:
-        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(
+            "https://stooq.com/q/d/l/?s=%5Evix&i=d",
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
         resp.raise_for_status()
+        best: tuple[date, float] | None = None
+        for ln in resp.text.strip().splitlines()[1:]:
+            parts = ln.split(",")
+            if len(parts) < 6:  # real schema is 6 cols; a short/garbled row is not data
+                continue
+            try:
+                d = datetime.strptime(parts[0].strip(), "%Y-%m-%d").date()
+                v = _plausible_vix(float(parts[4].strip()))
+            except ValueError:
+                continue
+            if v is not None and _vix_date_ok(d, scan_date) and (best is None or d > best[0]):
+                best = (d, v)
+        return best[1] if best else None
+    except Exception as e:
+        logger.warning(f"VIX Stooq fallback failed: {e}")
+        return None
+
+
+def _fetch_vix_from_yahoo(scan_date: date) -> float | None:
+    """Fallback VIX source: Yahoo Finance ^VIX daily chart JSON."""
+    try:
+        resp = requests.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1mo",
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        resp.raise_for_status()
+        result = resp.json()["chart"]["result"][0]
+        ts = result["timestamp"]
+        closes = result["indicators"]["quote"][0]["close"]
+        best: tuple[date, float] | None = None
+        for t, c in zip(ts, closes):
+            v = _plausible_vix(float(c)) if c is not None else None
+            if v is None:
+                continue
+            d = datetime.utcfromtimestamp(t).date()
+            if _vix_date_ok(d, scan_date) and (best is None or d > best[0]):
+                best = (d, v)
+        return best[1] if best else None
+    except Exception as e:
+        logger.warning(f"VIX Yahoo fallback failed: {e}")
+        return None
+
+
+def fetch_vix_close(scan_date: date) -> float | None:
+    """Return the VIX close on or before ``scan_date``.
+
+    Primary source FRED VIXCLS (single-source-trusted). On FRED failure, fall
+    back to free public sources (Stooq, Yahoo) — but because the regime gate is
+    one-sided (``vix_now > vix3m`` => skip), a single fallback source biased LOW
+    could MASK a backwardation regime. So a fallback value is trusted only when
+    BOTH Stooq and Yahoo corroborate within ``VIX_FALLBACK_TOLERANCE`` vol pts;
+    otherwise we fail-closed (return None), exactly as if FRED were down.
+    Consequence: a FRED-outage day on which only one backup answers now SKIPS
+    (the 2026-06-03 Yahoo-only DAVE pick would have skipped under this rule).
+    Records the winning source in ``_LAST_VIX_SOURCE`` for pick provenance.
+
+    Hardened per gammarips-review of the 2026-06-03 live-VIX fallback.
+    """
+    global _LAST_VIX_SOURCE
+    # FRED's fredgraph.csv intermittently 504s / read-times-out — retry with
+    # linear backoff before giving up.
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
+    fred_val: float | None = None
+    try:
+        resp = None
+        for attempt in range(1, 4):
+            try:
+                resp = requests.get(url, timeout=30)
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                logger.warning(f"VIX fetch attempt {attempt}/3 failed: {e}")
+                if attempt < 3:
+                    time.sleep(2 * attempt)
+                else:
+                    raise
         lines = resp.text.strip().splitlines()[1:]
         best: tuple[date, float] | None = None
         for ln in lines:
@@ -524,15 +632,47 @@ def fetch_vix_close(scan_date: date) -> float | None:
                 continue
             try:
                 d = datetime.strptime(dstr, "%Y-%m-%d").date()
-                v = float(vstr)
+                v = _plausible_vix(float(vstr))
             except ValueError:
                 continue
-            if d <= scan_date and (best is None or d > best[0]):
+            if v is not None and _vix_date_ok(d, scan_date) and (best is None or d > best[0]):
                 best = (d, v)
-        return best[1] if best else None
+        fred_val = best[1] if best else None
     except Exception as e:
-        logger.warning(f"VIX fetch failed: {e}")
+        logger.warning(f"VIX FRED fetch failed: {e}")
+
+    if fred_val is not None:
+        _LAST_VIX_SOURCE = "FRED"
+        return fred_val
+
+    # FRED down: require TWO independent public sources to corroborate before
+    # trusting a fallback value for the gate (guards against a single low-biased
+    # source masking backwardation).
+    stooq = _fetch_vix_from_stooq(scan_date)
+    yahoo = _fetch_vix_from_yahoo(scan_date)
+    got = [(n, v) for n, v in (("Stooq", stooq), ("Yahoo", yahoo)) if v is not None]
+    if len(got) < 2:
+        have = ", ".join(f"{n}={v:.2f}" for n, v in got) or "none"
+        logger.warning(
+            f"VIX: FRED down and fallback uncorroborated (have: {have}); fail-closed "
+            f"(need 2 sources within {VIX_FALLBACK_TOLERANCE} vol pts)."
+        )
         return None
+    spread = abs(got[0][1] - got[1][1])
+    if spread > VIX_FALLBACK_TOLERANCE:
+        logger.warning(
+            f"VIX: fallback sources disagree ({got[0][0]}={got[0][1]:.2f}, "
+            f"{got[1][0]}={got[1][1]:.2f}, spread {spread:.2f} > "
+            f"{VIX_FALLBACK_TOLERANCE}); fail-closed."
+        )
+        return None
+    val = round((got[0][1] + got[1][1]) / 2, 2)
+    _LAST_VIX_SOURCE = f"{got[0][0]}+{got[1][0]}"
+    logger.warning(
+        f"VIX: FRED unavailable; corroborated fallback = {val:.2f} "
+        f"({got[0][0]}={got[0][1]:.2f}, {got[1][0]}={got[1][1]:.2f})."
+    )
+    return val
 
 
 def send_email(subject: str, html_content: str, to: str | None = None) -> bool:
