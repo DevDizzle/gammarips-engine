@@ -1,5 +1,27 @@
 # Next Session Prompt
 
+**2026-06-03 session — PICKER CASE-MEMORY HARNESS built + wired + DEPLOYED + verified live (`signal-ranker` rev `00011-pw9`, `picker_v5`). Owner-directed; owner WAIVED the N≥15/30-day-OOS/DoD ceremony for this (it's advisory/non-gating). Leakage was NOT waived — audited by `gammarips-review` = SHIP-WITH-FIXES, all fixed.**
+
+Owner's idea: give the LLM Picker a *curated, causally-labeled memory* of past option winners/losers ("cleaner than RAG") so it reasons by analogy. Two deep-research workflows (the first over-constrained by my own prompt — it banned post-entry "why" tokens and reduced to a moneyness-CI test, killing the idea; the second, correctly framed, delivered it). **Key reframe that unlocked it:** leakage protects only TODAY's live pick — explaining a CLOSED past trade with full hindsight is allowed and is the whole point.
+
+**What shipped:**
+- `scripts/ledger_and_tracking/build_case_memory.py` (read-only) joins `realized_label.pkl` (FILLED option outcome + underlying path) ⨝ `overnight_signals_enriched` (greeks/IV/catalyst/flow) on `(recommended_contract, scan_date)`, overlays the 6 matched live `forward_paper_ledger` closes → emits `signal-ranker/case_memory/{bull.md (846), bear.md (529), exemplars.md (~50 curated, the injection block), case_index.parquet, build_manifest.json}`. `quant.md` (12 priors Q1–Q12) is hand-authored, NOT regenerated.
+- **Outcome keyed on `realized_ret>0` (option PnL), NOT `is_win` (stock direction) — they disagree 44.2%.** That "two-label trap" (stock moved your way, option still lost — short-DTE theta cliff) is the central lesson. WHY is **deterministic option physics** (theta drag / delta capture / inferred IV residual), no LLM-authored cause.
+- Wired into the Picker the house way: fenced `{case_memory_block}` in `_build_picker_instruction` (agent.py), renderer `tools.render_case_memory_for_picker()` (cached, ~46.7KB), `picker_v5.md` (v4 + §1a "how to use case memory"), `Dockerfile` ships `case_memory/`, `PICKER_PROMPT_VERSION=5`. **NOT ADK MemoryService** (that's session-recall RAG — wrong tool).
+- Review fixes: (1) **fail CLOSED** if v5 ships w/o memory (no silent v4 degrade), `RankResponse.case_memory_bytes`; (2) `deploy.sh` preflight assert; (3) decision note `docs/DECISIONS/2026-06-03-picker-case-memory.md` naming the accepted+bounded **same-ticker outcome-import** vector.
+- Verified: smoke test `case_memory_bytes=46673` live, clean pick, no guard trip; 25/25 unit tests pass. Picker latency ~39s now (bigger context, fine vs 540s timeout).
+
+**OPEN / NEXT (owner queued, take a step at a time):**
+1. **V5.5 promotion** — owner wants to brand this V5.5 + show it in the **webapp** (separate repo `gammarips-webapp`). Lever: `policy_version='V5_4_AGENT_RANKER'` set in `signal-notifier/main.py` (~430, 471, 1220, 1327) + queries (1198, 1291), and `forward-paper-trader/main.py` (316, 322).
+2. **Ledger truncate vs tag** — owner proposed TRUNCATE `forward_paper_ledger` for a fresh V5.5 cohort. **RECOMMENDED tag-don't-destroy:** bump `policy_version='V5_5_CASE_MEMORY'` going forward + filter the webapp to V5.5 — same clean-slate UX, no data loss (truncate would also wipe the 6 live case-memory exemplars). DECISION PENDING owner.
+3. Prompt alignment — DONE (picker_v5 §1a). Optional flash-narrative prose pass over the deterministic WHY = deferred polish.
+
+**⚠️ Case-memory changes: committed this session (branch `gate-changes-2026-06-02`).** Smoke test wrote one stray audit row to `signal_ranker_runs` (`run_id v5_4_2026-05-28_eaaa64c9`) — harmless, deletable.
+
+Memory: `project_picker_memory_harness`, `feedback_dont_gate_owner_innovation`.
+
+---
+
 **2026-06-02 session — THREE signal-quality changes SHIPPED to `signal-notifier` + deep-research triage. Owner-directed; overrode the N≥15 lock for gate-*removals/selection* (NOT trader mechanics).** Operator was frustrated with a thin picker slate (~2 candidates/day) and weak picks (CIEN BEARISH entered 05-29, underlying +8%). Goal: *more good options for the picker.*
 
 **NEW: first leak-free realized-option-PnL backtest infrastructure (reusable, the new arbiter).** Backfilled full 3-day option **minute** bars for all labeled candidates from live Polygon (`backtesting_and_research/fetch_hold_window_bars.py`; the cache previously held only entry-day bars, which had made an earlier replay 99% day-1 truncations), replayed the exact +80/−60/trail bracket → `realized_label.pkl` (**1,375 fills**). Analysis scripts: `realized_option_label.py`, `gate_recall.py`, `gate_validity_checks.py`, `moneyness_band_study.py`, `exit_design_study.py`. **Lesson reinforced all session: literature/AI is for framing; our realized option bars are the arbiter.**

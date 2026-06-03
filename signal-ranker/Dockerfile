@@ -9,6 +9,9 @@ COPY ./pyproject.toml ./README.md* ./uv.lock* ./
 
 COPY ./app ./app
 COPY ./prompts ./prompts
+# Picker case-memory harness (quant priors + curated forensic exemplars).
+# render_case_memory_for_picker() reads quant.md + exemplars.md at request time.
+COPY ./case_memory ./case_memory
 
 RUN uv sync
 

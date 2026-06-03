@@ -183,15 +183,19 @@ async def score_candidates(
 
 # --- Picker (ADK LlmAgent) --------------------------------------------------
 def _build_picker_instruction() -> str:
-    """Picker instruction = picker_v4.md + slot for top_5_block, report_md, ledger.
+    """Picker instruction = picker_v5.md + slots for top_5_block, report_md,
+    ledger_block, and case_memory_block.
 
-    State keys read at runtime: top_5_block, report_md, ledger_block, scan_date.
-    The picker is an LlmAgent with output_schema=PickerOutput.
+    State keys read at runtime: top_5_block, report_md, ledger_block,
+    case_memory_block, scan_date. The picker is an LlmAgent with
+    output_schema=PickerOutput.
 
     LLM-generated state values are fenced upstream in run_picker() to neutralize
     prompt-injection from upstream narrative strings (audit 2026-05-08 item 3).
+    The case_memory_block is static, repo-authored content (not upstream LLM
+    output), fenced for consistency; it is advisory and fails open to "".
     """
-    rubric = tools.load_prompt("picker_v4.md")
+    rubric = tools.load_prompt("picker_v5.md")
     return (
         f"{rubric}\n\n"
         f"=== INPUTS ===\n"
@@ -199,7 +203,8 @@ def _build_picker_instruction() -> str:
         f"scan_date: {{scan_date}}\n\n"
         f"{{top_5_block}}\n\n"
         f"{{report_md}}\n\n"
-        f"{{ledger_block}}\n"
+        f"{{ledger_block}}\n\n"
+        f"{{case_memory_block}}\n"
     )
 
 
@@ -240,6 +245,22 @@ async def run_picker(
         "ledger_summary_14d", tools.render_ledger_summary_for_picker(ledger_summary)
     )
     report_block = _fence("overnight_report_md", report_md)
+    # Static repo-authored case memory (quant priors + curated closed-trade
+    # exemplars). Advisory, never gates the pick. Not a leakage source: every case
+    # is a closed past trade, none dated to scan_date (see DECISIONS 2026-06-03).
+    #
+    # Fail CLOSED (not open) when picker_v5 ships without the block: an empty
+    # case_memory under PICKER_PROMPT_VERSION>=5 is a misconfiguration (the
+    # case_memory/ dir didn't ship), and silently degrading to v4 behavior while
+    # persisting picker_prompt_version=5 would corrupt cohort attribution. Refuse
+    # the rank loudly so signal-notifier fails closed (no mislabeled trade).
+    case_memory = tools.render_case_memory_for_picker()
+    if tools.PICKER_PROMPT_VERSION >= 5 and not case_memory.strip():
+        raise RuntimeError(
+            "case_memory_empty_under_v5: picker_v5 requires case_memory/ to ship; "
+            "refusing to run with a mislabeled picker_prompt_version"
+        )
+    case_memory_block = _fence("closed_trades_case_memory", case_memory)
 
     session_service = InMemorySessionService()
     session = await session_service.create_session(
@@ -250,6 +271,7 @@ async def run_picker(
             "top_5_block": top_5_block,
             "report_md": report_block,
             "ledger_block": ledger_block,
+            "case_memory_block": case_memory_block,
         },
     )
     picker = create_picker()
@@ -301,6 +323,7 @@ async def run_pipeline(req: RankRequest) -> RankResponse:
     """
     run_id = tools.build_run_id(req.scan_date)
     candidates_by_ticker = {c.ticker: c for c in req.candidates}
+    cm_bytes = len(tools.render_case_memory_for_picker())  # cached; 0 == block didn't ship
 
     # Scorer fanout (leakage assert is inside _score_one)
     scorer_outputs, scorer_latency_ms = await score_candidates(
@@ -361,6 +384,7 @@ async def run_pipeline(req: RankRequest) -> RankResponse:
             dry_run=tools.DRY_RUN,
             skip=True,
             skip_reason="mass_leakage",
+            case_memory_bytes=cm_bytes,
         )
 
     picker_output, picker_latency_ms = await run_picker(
@@ -398,4 +422,5 @@ async def run_pipeline(req: RankRequest) -> RankResponse:
         scorer_latency_ms=scorer_latency_ms,
         picker_latency_ms=picker_latency_ms,
         dry_run=tools.DRY_RUN,
+        case_memory_bytes=cm_bytes,
     )

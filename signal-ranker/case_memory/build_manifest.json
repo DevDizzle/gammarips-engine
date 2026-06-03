@@ -1,0 +1,16 @@
+{
+  "generated_utc": "2026-06-03 23:05Z",
+  "n_cases": 1375,
+  "n_bull": 846,
+  "n_bear": 529,
+  "n_won": 568,
+  "n_lost": 807,
+  "n_live": 6,
+  "n_backtest": 1369,
+  "greeks_coverage": 1.0,
+  "scan_date_min": "2026-04-10",
+  "scan_date_max": "2026-05-28",
+  "label_disagreement_is_win_vs_option": 0.442,
+  "source_pickle": "backtesting_and_research/realized_label.pkl",
+  "note": "READ-ONLY build; deterministic physics WHY; outcome keyed on option PnL."
+}

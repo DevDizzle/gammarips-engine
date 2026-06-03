@@ -34,7 +34,7 @@ TABLE_RUNS = f"{PROJECT_ID}.{DATASET}.signal_ranker_runs"
 SCORER_MODEL = os.getenv("SCORER_MODEL", "gemini-3.5-flash")
 PICKER_MODEL = os.getenv("PICKER_MODEL", "gemini-3.1-pro-preview")
 SCORER_PROMPT_VERSION = int(os.getenv("SCORER_PROMPT_VERSION", "5"))
-PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "4"))
+PICKER_PROMPT_VERSION = int(os.getenv("PICKER_PROMPT_VERSION", "5"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 # Floor for partial-Scorer-failure tolerance (audit 2026-05-08 item 6). If
@@ -263,3 +263,36 @@ def load_prompt(name: str) -> str:
     path = os.path.join(here, "prompts", name)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+_CASE_MEMORY_CACHE: str | None = None
+
+
+def render_case_memory_for_picker() -> str:
+    """Assemble the static case-memory block injected into the Picker.
+
+    = quant.md (ledger-independent priors) + exemplars.md (bounded curated cases),
+    both generated/maintained under signal-ranker/case_memory/ and deployed with
+    the service. Static per deploy, so cached after first read.
+
+    NON-GATING and FAIL-OPEN: any read error returns "" so the Picker still runs
+    (it simply sees an empty memory fence). This block is advisory context only.
+
+    NOT leakage: every case is a CLOSED past trade; nothing here is dated relative
+    to today's scan_date, and it is read for a *future* contract whose outcome is
+    unknown. The live decision is still gated by assert_no_leakage on candidates.
+    """
+    global _CASE_MEMORY_CACHE
+    if _CASE_MEMORY_CACHE is not None:
+        return _CASE_MEMORY_CACHE
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cm_dir = os.path.join(here, "case_memory")
+    parts: list[str] = []
+    for name in ("quant.md", "exemplars.md"):
+        try:
+            with open(os.path.join(cm_dir, name), "r", encoding="utf-8") as f:
+                parts.append(f.read().strip())
+        except OSError as e:  # missing file / read error — degrade gracefully
+            logger.warning(f"case_memory: could not read {name}: {e}")
+    _CASE_MEMORY_CACHE = "\n\n".join(parts)
+    return _CASE_MEMORY_CACHE

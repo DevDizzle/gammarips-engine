@@ -8,7 +8,23 @@
 # Prompts bumped to scorer_v5 / picker_v4 2026-05-12 — DTE band widened 7-30 → 7-45
 # to match the relaxed signal-notifier hard gate; see
 # docs/DECISIONS/2026-05-12-v5-4-pipeline-alignment.md.
+# Picker bumped to picker_v5 2026-06-03 — injects closed_trades_case_memory
+# (case-memory harness: quant priors + curated forensic exemplars from
+# case_memory/, which ships with --source=.). Advisory, fails open to "".
+# See docs/DECISIONS/2026-06-03-picker-case-memory.md.
 set -e
+
+# Pre-deploy guard: the picker_v5 case-memory block must actually be present and
+# non-empty in the build context, or the deploy ships a v5 service whose memory
+# silently didn't make it. (Runtime also fails closed, but catch it here first.)
+for f in case_memory/quant.md case_memory/exemplars.md; do
+  if [ ! -s "$f" ]; then
+    echo "FATAL: $f missing/empty — run scripts/ledger_and_tracking/build_case_memory.py" >&2
+    exit 1
+  fi
+done
+python3 -c "import json,sys; json.load(open('case_memory/build_manifest.json'))" \
+  || { echo "FATAL: case_memory/build_manifest.json missing or invalid JSON" >&2; exit 1; }
 
 # Stage shared gammarips_content lib into build context (mirrors x-poster).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +51,7 @@ gcloud run deploy signal-ranker \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3.5-flash,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=5,PICKER_PROMPT_VERSION=4,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false,MIN_SCORER_SUCCESS_FRAC=0.5"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3.5-flash,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=5,PICKER_PROMPT_VERSION=5,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false,MIN_SCORER_SUCCESS_FRAC=0.5"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

@@ -164,6 +164,10 @@ class RankResponse(BaseModel):
     picker_prompt_version: int
     scorer_model: str
     picker_model: str
+    # Bytes of case-memory actually injected into the Picker this run. 0 means the
+    # case_memory/ block did not ship — under picker_prompt_version>=5 the pipeline
+    # fails closed before reaching here, so a persisted run with v5 always has >0.
+    case_memory_bytes: int | None = None
     composite_weights: dict[str, float] = Field(default_factory=lambda: dict(COMPOSITE_WEIGHTS))
     run_id: str  # UUID, persisted to signal_ranker_runs
     scorer_latency_ms: int | None = None

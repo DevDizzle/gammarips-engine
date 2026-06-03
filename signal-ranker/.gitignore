@@ -1,0 +1,9 @@
+# Generated build / run artifacts
+uv.lock
+__pycache__/
+.pytest_cache/
+_gammarips_content_vendor/
+# Case-memory provenance index is a regenerated binary artifact (the .md files
+# and build_manifest.json ARE committed; the parquet is derived, rebuild via
+# scripts/ledger_and_tracking/build_case_memory.py).
+case_memory/*.parquet
