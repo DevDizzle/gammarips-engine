@@ -1241,6 +1241,105 @@ def compute_and_write_cohort_stats() -> bool:
         return False
 
 
+def _parse_occ_contract(occ: str | None) -> dict:
+    """Parse an OCC option symbol into {option_type, strike, expiration}.
+
+    Example: ``O:CIEN260605P00525000`` -> PUT, 525.0, 2026-06-05. The tail is a
+    fixed 6-digit date + 1 type char + 8-digit (strike*1000) suffix; the root is
+    variable-length and ignored here. Best-effort: returns Nones on any failure.
+    """
+    out = {"option_type": None, "strike": None, "expiration": None}
+    try:
+        s = (occ or "").split(":", 1)[-1]  # drop the 'O:' prefix if present
+        if len(s) < 15:
+            return out
+        tail = s[-15:]               # YYMMDD + C/P + 8-digit strike
+        yymmdd, cp, strike_raw = tail[0:6], tail[6].upper(), tail[7:15]
+        out["expiration"] = f"20{yymmdd[0:2]}-{yymmdd[2:4]}-{yymmdd[4:6]}"
+        out["option_type"] = "CALL" if cp == "C" else "PUT" if cp == "P" else None
+        out["strike"] = int(strike_raw) / 1000.0
+    except Exception:
+        return {"option_type": None, "strike": None, "expiration": None}
+    return out
+
+
+def compute_and_write_ledger_trades() -> bool:
+    """Sync closed V5.4 cohort trades to Firestore ``ledger_trades/{scan_date}_{ticker}``.
+
+    Powers the public scorecard per-trade ledger table. Uses the SAME cohort
+    definition and fixed-dollar sizing as ``compute_and_write_cohort_stats``
+    (``DATE(entry_timestamp) >= LIVE_COHORT_START_DATE`` AND
+    ``policy_version = 'V5_4_AGENT_RANKER'`` AND closed), so the table rows and
+    the aggregate tiles can never disagree. Idempotent (merge by doc id).
+    Non-fatal: never raises into the email path. Returns True on success.
+    """
+    try:
+        client = bigquery.Client(project=PROJECT_ID)
+        query = f"""
+        WITH sized AS (
+          SELECT
+            CAST(DATE(scan_date) AS STRING) AS scan_date,
+            ticker, direction, recommended_contract, recommended_dte, policy_gate,
+            CAST(DATE(entry_timestamp) AS STRING) AS entry_date,
+            entry_price,
+            CAST(DATE(exit_timestamp) AS STRING) AS exit_date,
+            DATE_DIFF(DATE(exit_timestamp), DATE(entry_timestamp), DAY) AS hold_days,
+            exit_reason, realized_return_pct,
+            GREATEST(1, CAST(ROUND({POSITION_SIZE_USD} / (entry_price * 100)) AS INT64)) AS n_contracts
+          FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
+          WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
+            AND policy_version = "V5_4_AGENT_RANKER"
+            AND realized_return_pct IS NOT NULL
+            AND entry_price IS NOT NULL
+            AND entry_price > 0
+        )
+        SELECT *,
+          ROUND(n_contracts * entry_price * 100, 2) AS capital_usd,
+          ROUND(n_contracts * entry_price * 100 * realized_return_pct, 2) AS pl_usd
+        FROM sized
+        ORDER BY entry_date
+        """
+        rows = list(client.query(query).result())
+
+        db = firestore.Client(project=PROJECT_ID)
+        batch = db.batch()
+        n = 0
+        for r in rows:
+            parsed = _parse_occ_contract(r["recommended_contract"])
+            doc = {
+                "scan_date": r["scan_date"],
+                "ticker": r["ticker"],
+                "direction": r["direction"],
+                "recommended_contract": r["recommended_contract"],
+                "option_type": parsed["option_type"],
+                "strike": parsed["strike"],
+                "expiration": parsed["expiration"],
+                "dte": int(r["recommended_dte"]) if r["recommended_dte"] is not None else None,
+                "entry_date": r["entry_date"],
+                "entry_price": float(r["entry_price"]),
+                "exit_date": r["exit_date"],
+                "hold_days": int(r["hold_days"]) if r["hold_days"] is not None else None,
+                "exit_reason": r["exit_reason"],
+                "return_pct": float(r["realized_return_pct"]),
+                "capital_usd": float(r["capital_usd"]),
+                "pl_usd": float(r["pl_usd"]),
+                "policy_gate": r["policy_gate"],
+                "policy_version": "V5_4_AGENT_RANKER",
+                "as_of": firestore.SERVER_TIMESTAMP,
+            }
+            batch.set(db.collection("ledger_trades").document(f"{r['scan_date']}_{r['ticker']}"), doc, merge=True)
+            n += 1
+            if n % 400 == 0:
+                batch.commit()
+                batch = db.batch()
+        batch.commit()
+        logger.info(f"ledger_trades synced: {n} V5.4 trades")
+        return True
+    except Exception as e:  # noqa: BLE001 — intentional broad catch
+        logger.warning(f"ledger_trades sync failed (non-fatal): {e}")
+        return False
+
+
 def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
     """Build the enriched-candidate SELECT for the strict or fallback gate.
 
@@ -1331,10 +1430,11 @@ def run_notifier(target_date: date | None = None):
 
     logger.info(f"Running V5.4 Signal Notifier for scan_date={target_date}")
 
-    # Refresh public cohort stats once per run. Independent of the day's
-    # pick / skip outcome — the panel reflects ledger state, not today's
+    # Refresh public cohort stats + per-trade ledger once per run. Independent
+    # of the day's pick / skip outcome — they reflect ledger state, not today's
     # decision. Non-fatal: a stats blow-up never affects the email path.
     compute_and_write_cohort_stats()
+    compute_and_write_ledger_trades()
 
     client = bigquery.Client(project=PROJECT_ID)
 
@@ -1696,14 +1796,15 @@ def refresh_stats():
     """Ad-hoc seed / recovery for ``cohort_stats/current``.
 
     Safe to curl any time. Does NOT send email or WhatsApp; only refreshes
-    the public-stats Firestore doc. Used post-deploy to seed the empty-state
-    doc and any time the operator wants to force a refresh outside the
-    daily cron cadence.
+    the public-stats Firestore doc + per-trade ledger_trades. Used post-deploy
+    to seed the empty-state doc and any time the operator wants to force a
+    refresh outside the daily cron cadence.
     """
     ok = compute_and_write_cohort_stats()
-    if ok:
-        return jsonify({"status": "success", "message": "cohort_stats/current refreshed."}), 200
-    return jsonify({"status": "error", "message": "cohort_stats refresh failed; check logs."}), 500
+    ledger_ok = compute_and_write_ledger_trades()
+    if ok and ledger_ok:
+        return jsonify({"status": "success", "message": "cohort_stats/current + ledger_trades refreshed."}), 200
+    return jsonify({"status": "error", "message": "stats/ledger refresh failed; check logs."}), 500
 
 
 @app.route("/", methods=["GET", "POST"])

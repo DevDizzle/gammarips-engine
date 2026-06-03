@@ -119,6 +119,16 @@ Daily EOD snapshots of open V5.4 positions. Pure observability — never feeds b
 
 Idempotent per `snapshot_date`: `DELETE FROM forward_paper_ledger_intraday WHERE snapshot_date = CURRENT_DATE()` before append. Same write pattern as the canonical ledger.
 
+## Firestore — `ledger_trades/{scan_date}_{ticker}` (added 2026-06-03)
+
+Per-trade publish of the closed V5.4 cohort for the public webapp scorecard table (`/scorecard`). Written by `signal-notifier/main.py:compute_and_write_ledger_trades` alongside `cohort_stats/current`, on the same daily cron and the `/refresh_stats` endpoint. **Uses the identical cohort filter and fixed-dollar sizing as `cohort_stats/current`** (`DATE(entry_timestamp) >= LIVE_COHORT_START_DATE` AND `policy_version = 'V5_4_AGENT_RANKER'` AND `realized_return_pct IS NOT NULL` AND `entry_price > 0`; `n_contracts = GREATEST(1, ROUND(POSITION_SIZE_USD/(entry_price*100)))`), so the table rows and the aggregate tiles can never disagree. Idempotent upsert (`merge=True`) keyed by `{scan_date}_{ticker}`; non-gating, display-only. Read-only consumer; never feeds any execution gate.
+
+### Fields
+- `scan_date`, `ticker`, `direction` (`BULLISH`/`BEARISH`)
+- `recommended_contract` (raw OCC) + parsed `option_type` (`CALL`/`PUT`/null), `strike` (float/null), `expiration` (ISO/null), `dte` (int/null) — parsed via `_parse_occ_contract`; null on malformed symbols
+- `entry_date`, `entry_price`, `exit_date`, `hold_days`, `exit_reason` (`TARGET`/`STOP`/`TIMEOUT`/`TRAIL`)
+- `return_pct` (decimal; ×100 for %), `capital_usd`, `pl_usd` (sized P&L — the per-trade summand of the tile total), `policy_gate`, `policy_version`, `as_of` (server ts)
+
 ## Firestore — `x_posts/{scan_date}_{post_type}` (added 2026-04-24)
 
 Audit log + idempotency store for `x-poster` (Cloud Run service). One doc per published or rejected X post. Doc id pattern: `2026-04-24_signal`, `2026-04-24_standby`, `2026-04-24_teaser`, `2026-04-24_callback`, `2026-04-24_scorecard`. Scorecard thread tweets get suffixed: `..._scorecard_0`, `_1`, `_2`.
