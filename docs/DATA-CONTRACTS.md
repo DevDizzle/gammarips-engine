@@ -28,6 +28,9 @@ Expected fields used by policy logic include:
 - `moneyness_pct` — `abs(recommended_strike - underlying_price) / underlying_price`. Notifier requires 5–15% OTM. Falls back to Polygon scan_date close when `underlying_price` is missing.
 - `vix3m_at_enrich` — FRED `VXVCLS` close at or before `scan_date`. Notifier requires `VIX <= VIX3M` (skip day if backwardated). Fail-closed on NULL.
 
+**Metadata columns (added 2026-06-03, NULLABLE, NON-GATING):**
+- `sector` / `industry` — SIC-mapped at scan time in `overnight_scanner.py` (per-ticker Polygon detail endpoint), already present on the raw `overnight_signals` table; now carried through to the enriched table and the Firestore doc. **Read by no gate, WHERE, or ranking** — purely descriptive. Consumed only by the webapp's same-sector related-signals ranking and available for post-hoc cohort analysis. `None` on Polygon detail failures. See `docs/DECISIONS/2026-06-03-sector-persistence-and-webapp-internal-linking.md`.
+
 Schema is ensured idempotently via `ALTER TABLE ADD COLUMN IF NOT EXISTS` on every enrichment run. Old rows retain NULL and are automatically excluded by the notifier's fail-closed filter.
 
 ## Forward ledger — `profitscout-fida8.profit_scout.forward_paper_ledger`
