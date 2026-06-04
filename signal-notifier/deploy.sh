@@ -15,7 +15,7 @@ gcloud run deploy $SERVICE_NAME \
   --clear-base-image \
   --allow-unauthenticated \
   --memory=512Mi \
-  --timeout=300 \
+  --timeout=540 \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=1 \

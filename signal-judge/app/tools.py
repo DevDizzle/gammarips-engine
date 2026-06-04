@@ -54,8 +54,10 @@ MIN_SCORER_SUCCESS_FRAC = float(os.getenv("MIN_SCORER_SUCCESS_FRAC", "0.5"))
 # in signal_ranker_runs (mode=REQUIRED columns can't be nulled), so the
 # post-collapse cohort is cleanly separable from the v5 two-stage cohort.
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", PICKER_MODEL)
-JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "6"))
-JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "judge_v6")
+# version 7 = bracket tournament (2026-06-04); 6 = judge_v6 single call; 5 = two-stage.
+# Mirrored into BOTH scorer_/picker_prompt_version (REQUIRED cols) so cohorts stay separable.
+JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "7"))
+JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1")
 # Bounded retry for the single fused call — one malformed structured output no
 # longer forfeits the whole slate (replaces the gather+MIN_SCORER_SUCCESS_FRAC
 # partial-failure tolerance lost in the collapse).
@@ -238,6 +240,82 @@ def persist_run(
         logger.error(f"signal_ranker_runs insert errors for {run_id}: {errors}")
     else:
         logger.info(f"signal_ranker_runs: wrote {len(rows)} rows for {run_id}")
+
+
+def persist_tournament_run(
+    *,
+    run_id: str,
+    scan_date: str,
+    entry_day: str,
+    candidates: list[Candidate],
+    winner: str,
+    runner_up: str,
+    why: str,
+    confidence: str,
+    advancement: dict[str, int],
+    latency_ms: int | None,
+) -> None:
+    """Write the bracket result to signal_ranker_runs (DDL unchanged).
+
+    The tournament has no per-candidate rubric scores, so the REQUIRED rubric
+    columns are populated with an ADVANCEMENT proxy (how far each ticker got in
+    the bracket: round1 win=6, round2=9, final/winner=10) — flow/regime/narrative
+    all carry that proxy. version 7 (`tournament_v1`) keeps the cohort separable.
+    We persist only the finalists + winner + runner_up (the round-1 losers don't
+    get a row — the tournament didn't evaluate them on the merits).
+    """
+    if DRY_RUN:
+        logger.info(f"DRY_RUN=true — skipping signal_ranker_runs write for {run_id}")
+        return
+
+    def _score(rounds: int) -> int:
+        return max(1, min(10, 3 + 3 * rounds))  # 0->3, 1->6, 2->9, 3+->10
+
+    static_rank_by_ticker = {c.ticker: getattr(c, "static_rank", None) for c in candidates}
+    keep = {t for t, r in advancement.items() if r >= 1} | {winner, runner_up}
+    weights_json = json.dumps(COMPOSITE_WEIGHTS)
+    now_ts = datetime.now(timezone.utc).isoformat()
+
+    rows: list[dict[str, Any]] = []
+    for t in keep:
+        rnd = advancement.get(t, 0)
+        sc = 10 if t == winner else _score(rnd)
+        is_pick = t == winner
+        is_runner = t == runner_up and t != winner
+        rows.append(
+            {
+                "run_id": run_id,
+                "scan_date": scan_date,
+                "entry_day": entry_day,
+                "candidate_ticker": t,
+                "candidate_rank_static": static_rank_by_ticker.get(t),
+                "composite_score": float(sc),
+                "flow_conviction": sc,
+                "regime_alignment": sc,
+                "narrative_coherence": sc,
+                "scorer_reasoning": why if is_pick else None,
+                "in_top_5": rnd >= 2 or is_pick,
+                "picker_chose": is_pick,
+                "picker_runner_up": is_runner,
+                "picker_justification": why if (is_pick or is_runner) else None,
+                "picker_confidence": confidence if (is_pick or is_runner) else None,
+                "scorer_prompt_version": JUDGE_PROMPT_VERSION,
+                "picker_prompt_version": JUDGE_PROMPT_VERSION,
+                "scorer_model": JUDGE_MODEL,
+                "picker_model": JUDGE_MODEL,
+                "composite_weights_json": weights_json,
+                "scorer_latency_ms": latency_ms,
+                "picker_latency_ms": None,
+                "created_at": now_ts,
+            }
+        )
+
+    client = bigquery.Client(project=PROJECT_ID)
+    errors = client.insert_rows_json(TABLE_RUNS, rows)
+    if errors:
+        logger.error(f"signal_ranker_runs insert errors for {run_id}: {errors}")
+    else:
+        logger.info(f"signal_ranker_runs: wrote {len(rows)} tournament rows for {run_id}")
 
 
 def render_candidate_for_scorer(c: Candidate) -> str:

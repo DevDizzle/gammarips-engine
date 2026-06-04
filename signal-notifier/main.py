@@ -1014,12 +1014,14 @@ def call_signal_ranker(
             f"{SIGNAL_JUDGE_URL}/rank",
             json=payload,
             headers=headers,
-            # 300s — signal-judge is min_instances=0 so cold start can add
+            # 480s — the bracket tournament makes ~39 model calls (3 brackets x
+            # ~13), so it runs longer than the old single call; plus signal-judge
+            # is min_instances=0 so cold start can add
             # 30-60s on top of the ~30-45s Scorer fanout + Picker call. Cloud
             # Run service-to-service calls without warm pools regularly take
             # 60-120s on the first request after idle. Trader's own timeout
             # is 540s so we have plenty of headroom.
-            timeout=300,
+            timeout=480,
         )
         if resp.status_code != 200:
             logger.error(
@@ -1386,29 +1388,42 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
         recommended_spread_pct ASC,
         ticker ASC"""
 
-    # LIMIT 10 — the earnings-overlap exclusion (2026-05-06) walks the ranked
-    # list and takes the first ticker NOT reporting in the hold window; if all
-    # 10 overlap the day is skipped.
+    # 2026-06-04 bracket-tournament: the SELECTION gates (moneyness, OI, vol, DTE,
+    # V/OI) are REMOVED — ALL enriched signals get a chance and the tournament in
+    # signal-judge does the picking. Only SAFETY rails remain: a tradeable contract
+    # must exist (strike/expiration NOT NULL), regime data present (vix3m), and the
+    # earnings-overlap exclusion still runs downstream in run_notifier. The rich
+    # feature columns (technicals, narrative, greeks) are added so the judge gets
+    # the full structured JSON. Leakage cols (next_day*/day2_*/day3_*/peak_return/
+    # is_win/outcome_tier) are DELIBERATELY NOT selected. {conviction_where} is now
+    # unused in strict mode. See docs/DECISIONS/2026-06-04-bracket-tournament.md.
+    _unused = conviction_where  # fallback path retains it; strict mode ungated
     return f"""
     SELECT
-        ticker, scan_date, direction,
+        ticker, scan_date, direction, underlying_price, price_change_pct,
         recommended_contract, recommended_strike, recommended_expiration,
         recommended_dte, recommended_volume, recommended_oi,
         recommended_mid_price, recommended_spread_pct,
+        recommended_delta, recommended_gamma, recommended_theta, recommended_iv,
         overnight_score, premium_score,
         call_dollar_volume, put_dollar_volume, call_uoa_depth, put_uoa_depth,
+        call_active_strikes, put_active_strikes,
         volume_oi_ratio, call_vol_oi_ratio, put_vol_oi_ratio,
-        moneyness_pct, vix3m_at_enrich
+        moneyness_pct, vix3m_at_enrich,
+        flow_intent, flow_intent_reasoning,
+        rsi_14, macd, sma_50, sma_200, atr_normalized_move,
+        golden_cross, above_sma_50, above_sma_200,
+        support, resistance, high_52w, low_52w,
+        thesis, news_summary, key_headline, catalyst_type, catalyst_score,
+        mean_reversion_risk, move_overdone, reversal_probability, risk_reward_ratio,
+        premium_bull_flow, premium_bear_flow, premium_high_rr, premium_high_atr, premium_hedge
     FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
     WHERE DATE(scan_date) = "{target_date}"
       AND recommended_strike IS NOT NULL
-      AND recommended_expiration IS NOT NULL{conviction_where}
+      AND recommended_expiration IS NOT NULL
       AND vix3m_at_enrich IS NOT NULL
-      AND recommended_oi >= {OI_MIN}
-      AND recommended_volume >= {VOL_MIN}
-      AND recommended_dte BETWEEN {DTE_MIN} AND {DTE_MAX}
     ORDER BY{order_by}
-    LIMIT 10
+    LIMIT 200
     """
 
 
@@ -1548,76 +1563,14 @@ def run_notifier(target_date: date | None = None):
     #                                   fail-closed at the candidate level
     # The KBR Jun-18 27.5P 2026-05-14 INVALID_LIQUIDITY incident is the
     # motivating case (4 active days, scan-day vol=323 was a single block).
-    pre_liquidity_n = len(df)
-    keep_mask: list[bool] = []
-    active_days_per_row: list[int | None] = []
-    liquidity_rejections: list[dict] = []
-    for _, cand in df.iterrows():
-        ticker = str(cand.get("ticker", ""))
-        contract = str(cand.get("recommended_contract", "") or "")
-        if not contract:
-            # Defensive — the SELECT already requires strike + expiration,
-            # but a NULL recommended_contract slipping through should not
-            # crash the loop. Fail-closed on the candidate.
-            logger.info(
-                f"Active-days gate: {ticker} has no recommended_contract; "
-                f"removing from pool (liquidity_check_unavailable)."
-            )
-            keep_mask.append(False)
-            active_days_per_row.append(None)
-            liquidity_rejections.append({
-                "ticker": ticker,
-                "contract": contract,
-                "active_days_20d": None,
-                "reason": "liquidity_check_unavailable",
-            })
-            continue
-        active, status = compute_active_days_20d(contract, target_date)
-        if status != "ok":
-            logger.info(
-                f"Active-days gate: {ticker} {contract} status={status} "
-                f"-> liquidity_check_unavailable (removed)."
-            )
-            keep_mask.append(False)
-            active_days_per_row.append(None)
-            liquidity_rejections.append({
-                "ticker": ticker,
-                "contract": contract,
-                "active_days_20d": None,
-                "reason": "liquidity_check_unavailable",
-            })
-            continue
-        if active < ACTIVE_DAYS_MIN:
-            logger.info(
-                f"Active-days gate: {ticker} {contract} "
-                f"active_days_20d={active} < {ACTIVE_DAYS_MIN} "
-                f"-> thin_contract_liquidity (removed)."
-            )
-            keep_mask.append(False)
-            active_days_per_row.append(active)
-            liquidity_rejections.append({
-                "ticker": ticker,
-                "contract": contract,
-                "active_days_20d": active,
-                "reason": "thin_contract_liquidity",
-            })
-            continue
-        keep_mask.append(True)
-        active_days_per_row.append(active)
-
-    # Attach the computed value as a column so the ranker payload carries it
-    # forward as ranker context (signal-judge ignores unknown keys; this is
-    # purely additive). NaN-safe — None becomes NaN under pandas, which the
-    # _candidate_for_ranker helper drops on isna check.
-    df = df.assign(active_days_20d=active_days_per_row)
-    df = df[keep_mask].reset_index(drop=True)
-
-    if liquidity_rejections:
-        logger.info(
-            f"Active-days liquidity gate: removed {len(liquidity_rejections)} "
-            f"of {pre_liquidity_n} candidates; {len(df)} candidates passed to V5.4. "
-            f"Rejections: {liquidity_rejections}"
-        )
+    # 2026-06-04 bracket-tournament: the active-days liquidity gate is BYPASSED.
+    # All signals get a chance — the early/illiquid sweeps (OI builds AFTER our
+    # 10:00 entry, so scan-time OI is a stale snapshot) are exactly what we want the
+    # tournament to weigh, not filter out. This also drops the ~N per-candidate
+    # Polygon calls (latency). Column kept NULL for payload compat. compute_active_
+    # days_20d / ACTIVE_DAYS_MIN remain defined but unused on the strict path. See
+    # docs/DECISIONS/2026-06-04-bracket-tournament.md.
+    df = df.assign(active_days_20d=None)
 
     if len(df) == 0:
         # The pool emptied here even though it was non-empty before this gate
