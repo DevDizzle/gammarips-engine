@@ -1,6 +1,14 @@
 # Next Session Prompt
 
-**2026-06-04 session — SCORER→PICKER COLLAPSED into one memory-aware judge (`judge_v6`). IMPLEMENTED + unit-tested (32 pass) + LIVE gemini smoke passed. NOT yet deployed; pending `gammarips-review` leakage audit (the one non-negotiable; owner waived the rest of the G-Stack ceremony).**
+**2026-06-04 session — SCORER→PICKER COLLAPSED into one memory-aware judge (`judge_v6`) + renamed `signal-ranker`→`signal-judge`. SHIPPED: committed `0dd21c8`, `gammarips-review`=SHIP, DEPLOYED (`signal-judge-00001-4kn`, `signal-notifier-00035-bvh` repointed), live `/rank` validated (pick BBWI, version=6 row persisted), old `signal-ranker` service DELETED. Owner waived the G-Stack 30-day-OOS ceremony; leakage audit (the non-negotiable) passed.**
+
+**STATE:** judge_v6 is LIVE. Tomorrow's 07:30 ET cron is the first production judge_v6 pick. Today's live pick (scan 2026-06-03 = BBWI) was LEFT AS-IS — the deployed judge produces the identical pick, so re-triggering would only re-email subscribers a duplicate (no no-send mode). A version=6 validation row exists for scan_date 2026-06-03 (`run_id v5_4_2026-06-03_955a37a8`) alongside the version=5 cron row — harmless, cohort-separable, deletable. **ROLLBACK** (old service deleted): `git revert 0dd21c8` restores the `signal-ranker` dir + 2-stage code → redeploy → repoint `signal-notifier` `SIGNAL_JUDGE_URL`→old `SIGNAL_RANKER_URL`.
+
+**FOLLOW-UPS (none blocking):** docs/MODELS.md still describes the old Scorer/Picker (content rewrite, not a rename — update to single judge); older NEXT_SESSION blocks + historical docs/DECISIONS keep "signal-ranker" as record; eval gaps from the workflow (poisoned-slate mass-leakage fixture, fat-day N>5 anti-anchoring A/B, optional first-class `judge_prompt_version` BQ column). The original V5.5 relabel below remains independent + open.
+
+---
+
+**2026-06-04 (earlier) — pre-deploy notes (superseded by the SHIPPED block above):**
 
 Owner-directed simplification. A multi-agent workflow (16 agents) evaluated the 2-stage ranker: across 13 V5.4-era slates the single judge agreed 9/13 with the logged baseline and was structurally sounder 4-to-1 on the divergences (every divergence was the judge REJECTING a two-label-trap the 2-stage fell into — OKTA→BX, KBR→MCO, EQIX-LEAP→RDDT, CIEN-theta-cliff→GE). The Scorer's top-5 cut was a no-op on ~80% of days (slates ≤5); structural rules were triple-encoded (gates + scorer + picker). Decision: `docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md`.
 
