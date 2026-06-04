@@ -5,7 +5,11 @@ Document the key data objects used by the current forward-trading workflow.
 
 ## Enriched signals table — `profitscout-fida8.profit_scout.overnight_signals_enriched`
 
-Primary upstream table for paper-trader execution. Populated by `enrichment-trigger` (Cloud Scheduler `enrichment-trigger-daily`, 05:30 ET Mon-Fri). Enrichment gate: `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, and directional UOA > $500K. ~70 tickers/day.
+Primary upstream table for paper-trader execution. Populated by `enrichment-trigger` (Cloud Scheduler `enrichment-trigger-daily`, 05:30 ET Mon-Fri). Enrichment gate: `overnight_score >= 1`, `recommended_spread_pct <= 0.30`, and directional UOA > $500K. ~70 tickers/day. (Spread cap loosened `0.08 → 0.30` on 2026-06-04 once `recommended_spread_pct` became the REAL quoted spread — see field-quality notes below and `docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md`.)
+
+**Field-quality caveats (2026-06-04 bug-hunt — read before any analysis on this table):**
+- `recommended_spread_pct` is now the REAL quoted bid/ask spread: `NULL` when no live quote was available at scan time, a real fraction otherwise. Historically (~43% of older rows) it was a fake day-range/0% placeholder. Treat pre-2026-06-04 spread values as unreliable. See `docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md`.
+- `recommended_oi` and `recommended_volume` are still SESSION-FROZEN snapshots — `recommended_oi` is prior-session open interest, `recommended_volume` is the cumulative-frozen scan-session volume. Do NOT treat them as fresh, point-in-time per-`scan_date` values. The PIT fix is deferred.
 
 All premium flags (`premium_hedge`, `premium_high_rr`, `premium_bull_flow`, `premium_bear_flow`, `premium_high_atr`, `premium_score`) are still computed and stored — they are features for post-hoc discovery, not gates.
 
@@ -24,9 +28,9 @@ Expected fields used by policy logic include:
 - any market context fields needed for telemetry
 
 **Quality-gate feature columns (added 2026-04-17, NULLABLE):**
-- `volume_oi_ratio` — `recommended_volume / NULLIF(recommended_oi, 0)` at focal strike. Notifier requires > 2.0 (new positioning, not unwinding).
-- `moneyness_pct` — `abs(recommended_strike - underlying_price) / underlying_price`. Notifier requires 5–13% OTM (cap widened 0.10→0.13 on 2026-06-02). Falls back to Polygon scan_date close when `underlying_price` is missing.
-- `vix3m_at_enrich` — FRED `VXVCLS` close at or before `scan_date`. Notifier requires `VIX <= VIX3M` (skip day if backwardated). Fail-closed on NULL.
+- `volume_oi_ratio` — `recommended_volume / NULLIF(recommended_oi, 0)` at focal strike. **No longer a gate** (removed 2026-06-02; selection-gate teardown completed in V6). Retained as a descriptive feature only. Note: derived from session-frozen `recommended_volume`/`recommended_oi` (see field-quality caveats above).
+- `moneyness_pct` — `abs(recommended_strike - underlying_price) / underlying_price`. **No longer a selection gate** (notifier moneyness band removed 2026-06-04 with the V6 selection-gate teardown). Retained as a descriptive/cohort feature. Falls back to Polygon scan_date close when `underlying_price` is missing.
+- `vix3m_at_enrich` — FRED `VXVCLS` close at or before `scan_date`. Notifier still enforces the `VIX <= VIX3M` regime safety rail (skip day if backwardated). Fail-closed on NULL.
 
 **Metadata columns (added 2026-06-03, NULLABLE, NON-GATING):**
 - `sector` / `industry` — SIC-mapped at scan time in `overnight_scanner.py` (per-ticker Polygon detail endpoint), already present on the raw `overnight_signals` table; now carried through to the enriched table and the Firestore doc. **Read by no gate, WHERE, or ranking** — purely descriptive. Consumed only by the webapp's same-sector related-signals ranking and available for post-hoc cohort analysis. `None` on Polygon detail failures. See `docs/DECISIONS/2026-06-03-sector-persistence-and-webapp-internal-linking.md`.
@@ -35,7 +39,7 @@ Schema is ensured idempotently via `ALTER TABLE ADD COLUMN IF NOT EXISTS` on eve
 
 ## Forward ledger — `profitscout-fida8.profit_scout.forward_paper_ledger`
 
-Active forward paper-trading ledger. Written by `forward-paper-trader/main.py:run_forward_paper_trading` via delete-then-load JSON-L. One row per `scan_date` (V5.4-only ledger; the trader simulates ONLY the ticker named in `todays_pick/{scan_date}`). **V5.4 mechanics:** 10:00 ET entry, −60% initial stop, trail at +30% gain / 25% off peak, +80% target, 3-day hold, 15:50 ET exit; STOP/TRAIL wins over TARGET on ambiguous bars. Rows tagged `policy_version = V5_4_AGENT_RANKER`. V5.3 rows were truncated when V5.4 was promoted 2026-05-08. Populated by Cloud Scheduler `forward-paper-trader-trigger` at 16:30 ET Mon-Fri. The cron resolves `scan_date` such that `exit_day = today` (walks back `HOLD_DAYS=3` trading days from today via `get_canonical_scan_date`).
+Active forward paper-trading ledger. Written by `forward-paper-trader/main.py:run_forward_paper_trading` via delete-then-load JSON-L. One row per `scan_date` (one-pick-per-day ledger; the trader simulates ONLY the ticker named in `todays_pick/{scan_date}`). **Mechanics (unchanged in V6):** 10:00 ET entry, −60% initial stop, trail at +30% gain / 25% off peak, +80% target, 3-day hold, 15:50 ET exit; STOP/TRAIL wins over TARGET on ambiguous bars. Rows are tagged `policy_version = 'V6_TOURNAMENT'`. **The ledger was truncated 2026-06-04** on the V6 cutover (prior `V5_4_AGENT_RANKER` rows wiped); do NOT mix V6 rows with the retired V5.4 cohort. Populated by Cloud Scheduler `forward-paper-trader-trigger` at 16:30 ET Mon-Fri. The cron resolves `scan_date` such that `exit_day = today` (walks back `HOLD_DAYS=3` trading days from today via `get_canonical_scan_date`).
 
 **Skip rows are first-class.** When the picker abstains (`todays_pick/{scan_date}.has_pick = false`), the trader writes one ledger row with `is_skipped=true`, `skip_reason=<reason>`, and `ticker/recommended_contract/direction` all NULL. Those three columns are NULLABLE (relaxed 2026-05-15 — see `docs/DECISIONS/2026-05-15-trader-resurrection-and-mtm.md`).
 
@@ -60,6 +64,12 @@ Active forward paper-trading ledger. Written by `forward-paper-trader/main.py:ru
 **Execution:**
 - `entry_timestamp`, `entry_price`, `target_price`, `stop_price`
 - `exit_timestamp`, `exit_reason`, `realized_return_pct`
+- `exit_reason` values: `TARGET` / `STOP` / `TRAIL` / `TIMEOUT` / `STALE_NO_TIMEOUT_PRINT` (added 2026-06-04 — the 15:50 ET exit window had no print, so the position is marked at the last available bar rather than a fresh timeout fill).
+
+**Liquidity/fill quality (added 2026-06-04, all NULLABLE):**
+- `exit_slippage` — FLOAT64. Modeled slippage applied at exit; `NULL` on clean fills.
+- `illiquid_exit` — BOOL. `TRUE` when the exit had to be reconstructed from a stale/illiquid book. **Exclude `illiquid_exit = TRUE` rows from EV / IC computations** — those exits are not faithfully tradeable.
+- `late_fill_minutes` — FLOAT64. Minutes between the intended exit stamp and the bar actually used; `NULL` when the fill was on-time.
 
 **Benchmarking (all FLOAT64 nullable):**
 - `underlying_entry_price` — stock price at `entry_timestamp`. Polygon minute bar, at-or-after the entry stamp.
@@ -180,11 +190,11 @@ Output collection for `blog-generator` ADK service. Webapp `/blog/[slug]` route 
 | `preview_v2/` | Second-round themed-editorial previews (signal_app, signal_nvda, teaser, standby + manual_nvda_test). Used by Evan to eyeball image-gen output before flipping DRY_RUN=false. |
 | `_archive/` | Misc snapshots. |
 
-## Current policy contract (V5.4 Agent Ranker — no trader-side gates)
+## Current policy contract (V6 Tournament — no trader-side gates)
 
-> The ranker is the single `judge_v6` LLM on the `signal-judge` Cloud Run service (collapsed from Scorer→Picker 2026-06-04). The ledger `policy_version` label remains `V5_4_AGENT_RANKER`; the `signal_ranker_runs` trace table keeps its name (the single judge is mirrored into both `scorer_*`/`picker_*` columns at `*_prompt_version=6`).
+> The ranker is a bracket **TOURNAMENT** (`tournament_v1`, version 7, `gemini-3.1-pro-preview`) on the `signal-judge` Cloud Run service — NOT a single `judge_v6` call. The tournament seeds gated candidates into brackets and writes finalists + the winner row, encoding an ADVANCEMENT proxy in the rubric columns. The `signal_ranker_runs` trace table name is **UNCHANGED**; tournament output is mirrored into the existing `scorer_*`/`picker_*` columns at `*_prompt_version = 7` and `*_model = 'gemini-3.1-pro-preview'`. Cohort labels: `5` = two-stage Scorer→Picker, `6` = `judge_v6` single judge, `7` = tournament. The Firestore `v5_4_*` provenance keys are KEPT (name retained for continuity; do not rename). The ledger `policy_version` label is now `'V6_TOURNAMENT'`.
 
-All signals that pass the enrichment filter (`overnight_score >= 1 AND recommended_spread_pct <= 0.08 AND directional UOA > $500K`) are simulated by the paper trader. Human alerting is gated separately in `signal-notifier` by the gate stack (`moneyness_pct BETWEEN 0.05 AND 0.13`, `VIX <= VIX3M`, no earnings during hold, `recommended_dte BETWEEN 7 AND 45`, `OI >= 10`, `vol >= 50`) with `LIMIT 1`. The `volume_oi_ratio > 2` conviction gate was **removed 2026-06-02** (realized-PnL showed no selection value — see `docs/DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md`); spread tightened `0.10 → 0.08` and the moneyness cap widened `0.10 → 0.13` the same window. Premium flags are computed and stored as features for post-hoc discovery. See `docs/DECISIONS/2026-04-17-v5-3-target-80.md`.
+All signals that pass the enrichment filter (`overnight_score >= 1 AND recommended_spread_pct <= 0.30 AND directional UOA > $500K`) are simulated by the paper trader. **The `signal-notifier` selection gates were REMOVED in V6 (2026-06-04)** — the `moneyness_pct`, `volume_oi_ratio`, `recommended_dte`, `OI`, and `vol` selection filters no longer run. Only two safety rails remain in `signal-notifier`: **no earnings during the hold window** and the **`VIX <= VIX3M` regime check**. Candidate selection among the survivors is the tournament's job. Premium flags and the former-gate feature columns are still computed and stored for post-hoc discovery. See `docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md`.
 
 ## Notes
 - `VIX_at_entry`, `vix_5d_delta_entry`, and `SPY_trend_state` are retained as telemetry only. None of them gate execution.

@@ -1,18 +1,23 @@
 # MODELS.md — Model → Function Registry
 
-> **Last updated:** 2026-06-04 (Scorer→Picker collapsed into one `judge_v6` call;
-> service renamed `signal-ranker` → `signal-judge` — see
-> `docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md`).
+> **Last updated:** 2026-06-04 (tournament). V6 "Tournament" launched — the ranker
+> is now a randomized bracket **tournament** (`tournament_v1`, version 7) at the
+> `signal-judge` service; V5.4 retired, ledger truncated, `policy_version='V6_TOURNAMENT'`.
+> No Scorer/Picker stages, no `judge_v6`, no memory/rubric/composite weights.
 > This is the authoritative map of which model powers which function. Keep it in
 > sync whenever a model id changes. Model ids are **env-driven** (see "How to swap" below);
 > the defaults below are what ships in each service's `deploy.sh` / code.
+>
+> *History: `judge_v6` (one memory-aware Scorer+Picker call, version 6) was the ranker
+> 2026-06-04 only and was superseded same-day by the tournament; the two-stage
+> Scorer→Picker pair (version 5) preceded it.*
 
 ## At a glance
 
 | Model | Role | Where it runs | Notes |
 |---|---|---|---|
-| **`gemini-3.5-flash`** | **Text generation** (the workhorse) | enrichment thesis, overnight report, x-poster text agents, blog-generator, eval **judges** | GA 2026-05-19. Global-endpoint only. Migrated from `gemini-3-flash-preview` 2026-05-27. (No longer powers any signal-judge stage — the Scorer it used to run was removed 2026-06-04.) |
-| **`gemini-3.1-pro-preview`** | **Reasoning** — the single high-stakes daily decision | **signal-judge** `judge_v6` | Deliberate pro tier. One call scores every gated candidate (flow/regime/narrative 1-10) AND selects the pick, reading enriched candidates + report + 14d ledger + case-memory. Collapsed from the former 3.5-flash Scorer + 3.1-pro Picker on 2026-06-04. Not migrated (not flash, not on cull list). |
+| **`gemini-3.5-flash`** | **Text generation** (the workhorse) | enrichment thesis, overnight report, x-poster text agents, blog-generator, eval **judges** | GA 2026-05-19. Global-endpoint only. Migrated from `gemini-3-flash-preview` 2026-05-27. Never touches the daily pick. |
+| **`gemini-3.1-pro-preview`** | **Reasoning** — the tournament judge (the one daily pick) | **signal-judge** `tournament_v1` | Deliberate pro tier. Runs the randomized bracket tournament: all enriched signals → 3 brackets × (batches ≤10, top-2 advance, 94→20→4→1) → consensus pick. Dead-simple prompt + daily report + per-contract JSON. **No** memory, rubric, or composite weights. Not migrated (not flash, not on cull list). |
 | **`gemini-3-pro-image-preview`** | **Image generation** (Nano Banana Pro) | x-poster editorial/OG/brand images | Separate deprecation track from text models. |
 | **`gemini-2.5-pro`** | **Prompt tuning** (offline, not runtime) | `signal-judge/scripts/vapo_zeroshot.py` (VAPO lint) | Tuning/optimization only — never serves a live request. |
 | `gemini-3-flash-preview` | *(retired in this engine)* | only `agent-arena` (DEAD service) | On the 2026-06-15 cull list, but agent-arena is deprecated and not run. |
@@ -29,12 +34,12 @@ The general-purpose workhorse for everything that writes prose:
 - **enrichment-trigger** — grounded-search thesis / flow-intent per ticker (`MODEL_NAME`). Google Search tool attached; no `response_schema` (incompatible with grounding) — relies on a strict-JSON prompt contract.
 - **overnight-report-generator** — daily editorial report (`GEMINI_MODEL`). `response_schema=ReportResponse`.
 - **x-poster** — Planner→Writer→Reviewer ADK agents draft tweets (`GEMINI_MODEL`).
-- **blog-generator** — weekly blog + newsletter (`GEMINI_MODEL`). *Code migrated but service not deployed.*
+- **blog-generator** — weekly blog + newsletter (`GEMINI_MODEL`). **Deployed.**
 - **gammarips-eval judges** — LLM-as-judge for `report_factuality` + `quality` (`config.yaml: judge_model`). **`temperature=0.0`** kept for deterministic judging.
-- *(Until 2026-06-04, flash also ran the signal-judge **Scorer**. That stage was removed when the ranker collapsed to `judge_v6`; flash no longer touches the daily pick.)*
+- *(Flash never touches the daily pick. The Scorer stage it briefly ran was removed 2026-06-04 when the ranker first collapsed to `judge_v6` and then moved to the tournament — see history below.)*
 
-### The daily pick (scoring + final selection) → `gemini-3.1-pro-preview`
-- **signal-judge `judge_v6`** (`JUDGE_MODEL`) — ONE call does both jobs the old Scorer+Picker split: scores every gated candidate on flow/regime/narrative 1-10 AND selects the pick. `response_schema=JudgeOutput`. Temperature intentionally **unset** (3.x degrades under pinned low temp; schema enforces structure). Bounded retry `JUDGE_MAX_ATTEMPTS=3` replaces the old fanout's partial-failure tolerance. Pro tier earns its keep on the single high-stakes decision; deliberately *not* downgraded to flash.
+### The daily pick (the tournament) → `gemini-3.1-pro-preview`
+- **signal-judge `tournament_v1`** (`JUDGE_MODEL`) — a randomized bracket tournament over all enriched signals: 3 brackets × (batches of ≤`TOURNEY_BATCH` ≤10 contracts, top-2 advance per batch, 94→20→4→1) → consensus pick. Dead-simple prompt, plus a daily report and a per-contract JSON verdict. **No** case-memory, **no** scoring rubric, **no** composite weights — pure head-to-head bracket. The judge call uses **google-genai direct** (`response_mime_type="application/json"`) with **bounded retry**. Stale liquidity fields (`recommended_volume`, `recommended_oi`, `volume_oi_ratio`, `call_vol_oi_ratio`, `put_vol_oi_ratio`) are **stripped** from the prompt; `recommended_spread_pct` **is** shown (now real after the 2026-06-04 #1 fix). Pro tier earns its keep on the single high-stakes decision; deliberately *not* downgraded to flash.
 
 ### Images → `gemini-3-pro-image-preview`
 - **x-poster** image generation (`IMAGE_MODEL`) + the `scripts/generate_*` brand/OG helpers.
@@ -56,12 +61,13 @@ The general-purpose workhorse for everything that writes prose:
    a green build hid it until a live smoke test.)
 3. **Eval judge model lives in `gammarips-eval/config.yaml` (`judge_model`)**, which **overrides** the
    `JUDGE_MODEL` env var and the code default. Change the YAML, not just the env, or the swap is a no-op.
-4. **Cohort attribution:** every V5.4 pick records `v5_4_scorer_model` + `v5_4_picker_model`
-   (`signal-notifier` writes them to `todays_pick`; these Firestore keys + the `signal_ranker_runs`
-   table name were intentionally NOT renamed in the 2026-06-04 collapse — migration/webapp landmines).
-   Post-collapse both `*_model` fields hold the single `JUDGE_MODEL`, and both `*_prompt_version`
-   columns hold `6`. Segment EV by `scorer_prompt_version` — **5 = the two-stage Scorer/Picker cohort,
-   6 = the single `judge_v6` cohort** — and do not pool across the boundary.
+4. **Cohort attribution:** the legacy `v5_4_scorer_model` / `v5_4_picker_model` Firestore keys and the
+   `signal_ranker_runs` table name were intentionally NOT renamed across the 2026-06-04 collapse +
+   tournament (migration/webapp landmines). On the tournament path both `*_model` fields hold the single
+   `JUDGE_MODEL` and both `*_prompt_version` columns hold `7`. Segment EV by the `signal_ranker_runs`
+   cohort label and **do not pool across boundaries**: **5 = two-stage Scorer/Picker, 6 = single
+   `judge_v6` (2026-06-04 only), 7 = `tournament_v1`** (live). Ledger rows carry
+   `policy_version='V6_TOURNAMENT'`; pre-V6 rows were truncated at launch.
 
 ## How to swap a model (one line, no code edit)
 
@@ -71,7 +77,7 @@ Model ids are env vars pinned in each service's `deploy.sh`; flip the value and 
 |---|---|---|
 | enrichment-trigger | `MODEL_NAME` (+ `VERTEX_LOCATION=global`) | thesis |
 | overnight-report-generator | `GEMINI_MODEL` | report |
-| signal-judge | `JUDGE_MODEL` (+ `GOOGLE_CLOUD_LOCATION=global`) | judge_v6 (the daily pick) |
+| signal-judge | `JUDGE_MODEL` (+ `GOOGLE_CLOUD_LOCATION=global`, `TOURNEY_BATCH`) | tournament_v1 (the daily pick) |
 | x-poster | `GEMINI_MODEL` (text), `IMAGE_MODEL` (image) | tweets / images |
 | blog-generator | `GEMINI_MODEL` | blog/newsletter |
 | gammarips-eval | **`config.yaml: judge_model`** (authoritative; `JUDGE_MODEL` env is inert) | judges |

@@ -1,7 +1,7 @@
-# GammaRips Cheat Sheet — V5.4
+# GammaRips Cheat Sheet — V6 "Tournament"
 
 ## What this system does
-Scans overnight unusual options activity → a single memory-aware LLM judge (`judge_v6`) chooses one trade per day with a written justification → emails you the pick (with a clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM → stop + target pre-set → sell at 3:50 PM day-3 if neither hit. Public live-stats panel (`cohort_stats/current` Firestore doc) reflects the V5.4 cohort starting 2026-05-08 (forward_paper_ledger truncated when V5.3 was retired).
+Scans overnight unusual options activity → a randomized bracket **tournament** over ALL enriched signals picks one trade per day → emails you the pick (with a clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM → stop + target pre-set → sell at 3:50 PM day-3 if neither hit. Public live-stats panel (`cohort_stats/current` Firestore doc) reflects the V6 cohort starting 2026-06-04 (forward_paper_ledger truncated when V5.4 was retired; `policy_version='V6_TOURNAMENT'`).
 
 ## Your daily routine
 | Time | Action |
@@ -18,21 +18,20 @@ Scans overnight unusual options activity → a single memory-aware LLM judge (`j
 - Stop: −60% option premium (GTC stop-limit)
 - Target: +80% option premium (GTC limit sell)
 - Timeout: 3:50 PM on day 3 (3 full trading days held)
+- Fill realism (2026-06-04): symmetric slippage on entry/exit + stale-TIMEOUT and late-fill guards in the simulator
 
 ## The signal filter (what reaches your inbox)
-Hard gates run UPSTREAM of the agent ranker. Only signals passing ALL get into the candidate pool:
-1. Overnight score >= 1
-2. Spread <= 8% (tightened from 10% on 2026-05-06 per lit-audit H11)
-3. Directional UOA > $500k
-4. ~~V/OI ratio > 2.0~~ **REMOVED 2026-06-02** — realized option-PnL backtest (N=1,375) showed it dropped ~55-63% of real winners for ~0 edge and was starving the picker's slate to ~2/day; kept only as a ranking tiebreak (see `docs/DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md`)
-5. Moneyness 5–13% OTM (cap widened 10%→13% on 2026-06-02 — the H12 deep-OTM-cliff lit is hold-to-expiry, not our 3-day bracket; realized-PnL backtest backed it. Fallback path keeps the 10% cap. See `docs/DECISIONS/2026-06-02-moneyness-cap-widen-to-13.md`)
-6. VIX <= VIX3M (skip entire day if backwardation)
-7. Recommended contract OI >= 10 (relaxed from 20 on 2026-05-12 to lift picker-starvation floor)
-8. Recommended contract volume >= 50 (relaxed from 100 on 2026-05-12, same reason)
-9. DTE 7-45 (added 2026-05-11 at 7-30, widened to 7-45 on 2026-05-12 — picker rubrics penalize >45 DTE)
-10. **No earnings near hold window** — exclude any ticker reporting in `[scan_date, entry_day+2 trading days]`. Window includes scan_date to catch AMC prints that contaminate the V/OI signal pre-entry. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*: retail loses 5–9% per event). Fail-closed if FMP earnings calendar is unreachable OR returns a non-list payload (quota-exhausted).
+V6 has **no selection gates** — every enriched signal enters the tournament. Only the enrichment bar plus two safety rails apply:
+1. Overnight score >= 1 (enrichment)
+2. Spread <= 30% (enrichment)
+3. Directional UOA > $500k (enrichment)
+4. **No earnings in the hold window** — exclude any ticker reporting in `[scan_date, entry_day+2 trading days]`. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*: retail loses 5–9% per event). Fail-closed if the earnings calendar is unreachable.
+5. **VIX <= VIX3M** — skip the entire day if backwardation.
 
-Gate-clean candidates fed to the V5.4 **signal-judge** (`judge_v6`, `gemini-3.1-pro-preview`). In ONE call it scores every candidate on three rubrics (1-10) — `flow_conviction` (60% weight), `regime_alignment` (25%, must cite the daily report), `narrative_coherence` (15%); HEDGING-tagged flow hard-capped at flow_conviction ≤4 — AND selects the pick. It reads all gated candidates' enriched data + the daily report markdown + 14d ledger summary + a **closed-trade case-memory block** (forensic exemplars of past option winners/losers keyed on realized *option* PnL not stock direction, plus quant priors Q1–Q12; advisory/non-gating, now **load-bearing** — fails CLOSED if it doesn't ship; see `docs/DECISIONS/2026-06-03-picker-case-memory.md`). It trusts the upstream gates (does NOT re-litigate ITM/earnings/spread) and returns a per-candidate verdict array + one ticker + runner-up + justification + confidence enum (`high`/`medium`/`low`). Collapsed from the former Scorer+Picker pair on 2026-06-04 (`docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md`); a `JUDGE_MAX_ATTEMPTS=3` bounded retry replaces the old fanout's partial-failure tolerance. **No abstain** except mass-leakage. **Fail-closed on any error** — no fallback ranker; signal-judge uptime is the SLO.
+The old moneyness / OI / volume / DTE / V-OI selection gates were **REMOVED 2026-06-04** — the tournament now ranks the full enriched slate directly.
+
+## The pick (V6 Tournament)
+The full enriched slate (~94 signals on a typical day) goes to **signal-judge** (`tournament_v1`, `gemini-3.1-pro-preview`). It runs **3 independent randomized brackets**, each: shuffle signals into batches of ≤10 → the LLM picks the top 2 per batch → advance and repeat (~94 → 20 → 4 → 1). Each batch call gets a simple prompt + the daily report + per-contract JSON; **no memory, no rubrics, no weights**. The 3 bracket winners vote: 3/3 agree → `confidence=high`, 2/3 → `medium`, 1/3 → `low`. One ticker emailed. **Fail-closed on any error** — no fallback; signal-judge uptime is the SLO.
 
 ## Math
 - Deep Research modeled EV +1.8% to +3.2% per trade post-upgrade
@@ -53,7 +52,7 @@ Gate-clean candidates fed to the V5.4 **signal-judge** (`judge_v6`, `gemini-3.1-
 - If EV < 0 → pause, rerun Deep Research angle
 
 ## Services (reference only)
-`overnight-scanner → enrichment-trigger → signal-notifier ← signal-judge (V5.4 judge_v6) → email + Firestore todays_pick → forward-paper-trader (ledger)`
+`overnight-scanner (23:00 ET) → enrichment-trigger (05:30 ET) → overnight-report-generator → signal-notifier (07:30 ET) ← signal-judge (V6 tournament_v1) → email + Firestore todays_pick → forward-paper-trader (ledger)`
 
 ## Source of truth
-This file + `docs/TRADING-STRATEGY.md` + `docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.
+This file + `docs/TRADING-STRATEGY.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.

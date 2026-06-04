@@ -1,5 +1,26 @@
 # Next Session Prompt
 
+**2026-06-04 (late) — PIPELINE BUG-HUNT: 13 silent data bugs fixed + deployed; all living docs reconciled to V6. LIVE.**
+
+An adversarial multi-agent audit (every finding re-verified vs code+BQ) found **16 silent bugs corrupting picks since day one**. 13 fixed (confirm-pass = GO, 0 blockers), 3 deferred. Trigger: the OKTA $127 untradeable-ghost pick. Decision: `docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md`.
+
+**Root cause + key fixes (committed `6b2a6dc`, deployed all 5 services):**
+- **#1 CRITICAL** `polygon_client._extract_best_price_fields` substituted day LOW/HIGH for a missing bid/ask → fake/exactly-0% spreads on **~43% of picks** (718/1815 rows = 0.0). Now: missing quote → NULL spread; real otherwise. Enrichment spread gate loosened `0.08→0.30` (was filtering fake 0s). Judge now SEES the real spread (#5 un-blocked it).
+- **#2** divergence-flip scoring reordered BEFORE conviction signals (was scoring flipped names on the abandoned side → ~87% of the best setups suppressed below MIN_SCORE).
+- **#8** technicals lookahead: window bounded to `scan_date` (was `date.today()`).
+- Scanner contract selection now **liquidity-aware** (OI-primary, real spread, no-quote strikes dropped) — picks the $130 not the $127 ghost.
+- Judge: stale `volume`/`OI`/`V-OI` stripped from prompt (#5); batch-loss re-queue (#11); real top-5 (#14). Trader: fill-realism (#9/#12/#13). Notifier: dead gates/docs cleaned (#6/#7/#10).
+
+**Deployed:** overnight-scanner-00011-kzh, enrichment-trigger-00042-9n4, signal-judge-00003-rgc, signal-notifier-00039-9ml, forward-paper-trader-00039-qfp.
+
+**WATCH (the one open risk):** #1 ghost-removal could shrink the pool if post-close quotes are sparse. **Tomorrow after the 23:00-ET scan, check the `has_contract` rate vs the ~58% baseline (41,156/71,167).** If it collapses below ~40%, add a point-in-time day-bar VWAP/close fallback (NOT day low/high) — which is ALSO the proper fix for the deferred items.
+
+**DEFERRED (need PIT data / schema):** #3 OI + #4 volume = session-frozen snapshots, walled off from the judge (used only in scanner relative ranking); real fix = Polygon flat files / day-bars per scan_date — **next data task**. #15-full = `under_enriched` flag (schema add). Stats: exclude `illiquid_exit=TRUE`/`STALE_NO_TIMEOUT_PRINT` from the ledger.
+
+**Docs:** all living docs reconciled to V6 (CLAUDE.md, GEMINI.MD, CHEAT-SHEET, TRADING-STRATEGY, ARCHITECTURE, MODELS, GLOSSARY, DATA-CONTRACTS). Historical DECISIONS/EXEC-PLANS left as record.
+
+---
+
 **2026-06-04 session — V6 "TOURNAMENT" LAUNCHED; V5.4 retired + ledger TRUNCATED. LIVE.**
 
 The gated single-judge (V5.4) was a dud — **13 live closes, avg 0.0%**. Replaced it with a **randomized bracket tournament over ALL enriched signals** (no selection gates) and relabeled the cohort V6.

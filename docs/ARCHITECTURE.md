@@ -11,7 +11,7 @@ Core scoring and overnight signal generation.
 Scanner-facing package / service wrapper for market-wide overnight options flow scanning.
 
 ### `enrichment-trigger/`
-Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, directional UOA > $500K. Writes to `overnight_signals_enriched`. Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime.
+Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 1`, `recommended_spread_pct <= 0.30` (loosened from 0.08 on 2026-06-04 once spreads became real), directional UOA > $500K. Writes to `overnight_signals_enriched`. Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime.
 
 ### `overnight-report-generator/`
 Daily report generation for the overnight signal set.
@@ -20,15 +20,15 @@ Daily report generation for the overnight signal set.
 Multi-model debate / consensus service for ranking or adjudicating signal quality. **Deprecated 2026-05-04 — not run.**
 
 ### `signal-judge/`
-The V5.4 ranker (renamed from `signal-ranker` on 2026-06-04). Cloud Run, `POST /rank` (IAM-only). One memory-aware `gemini-3.1-pro-preview` judge (`judge_v6`) receives all gate-cleared candidates + the daily report + 14d ledger summary + a closed-trade case-memory block, scores each candidate on flow/regime/narrative 1-10, and selects one pick + runner-up + confidence (or a mass-leakage skip) in a single structured call. `JUDGE_MAX_ATTEMPTS=3` bounded retry; fails closed (no V5.3 fallback). Collapsed from a Scorer fanout + Picker on 2026-06-04 — see `docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md`. Writes one trace row per candidate to `signal_ranker_runs` (table name unchanged; single judge mirrored into both `scorer_*`/`picker_*` columns at version 6).
+The V6 ranker (renamed from `signal-ranker` on 2026-06-04). Cloud Run, `POST /rank` (IAM-only). Runs a **randomized bracket tournament** (`tournament_v1`, version 7, `gemini-3.1-pro-preview`) over **all** enriched candidates passed by `signal-notifier` — no upstream selection gating. Three independent brackets each seed the candidate field randomly and reduce it in batches of ≤10 (top-2 advance per batch), collapsing ~94 → 20 → 4 → 1, then a consensus pick is taken across the three bracket winners. The LLM call is a **simple prompt + daily report + per-contract JSON** — there is **no memory, no curated rubric, and no flow/regime/narrative weights** (those belonged to the prior `judge_v6` single-judge era, now retired). Fails closed (no V5.3 fallback). Writes trace rows to `signal_ranker_runs` (table name unchanged) at version 7.
 
 ### `signal-notifier/`
-Builds the daily candidate pool from `overnight_signals_enriched` under the gate stack, calls `signal-judge /rank` for the pick, writes it to Firestore `todays_pick/{scan_date}` (+ `{entry_day}`), and emails / WhatsApps it. Fail-closed (no email, empty-state `todays_pick`) on any ranker error or skip.
+Builds the **full** enriched candidate pool from `overnight_signals_enriched` — the selection gates (moneyness / OI / vol / DTE / V-OI / active-days) were **removed 2026-06-04**, leaving only the no-earnings-during-hold and regime (`VIX <= VIX3M`) safety rails. Calls `signal-judge /rank` (the tournament) for the pick, writes it to Firestore `todays_pick/{scan_date}` (+ `{entry_day}`), and emails / WhatsApps it. Fail-closed (no email, empty-state `todays_pick`) on any ranker error or skip.
 
 ### `forward-paper-trader/`
 Cloud Run service for forward paper-trading and IV cache maintenance. Single container, two endpoints:
 
-- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V5.4 Agent Ranker** policy (Target-80 trader mechanics inherited from V5.3 unchanged) (`10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit`; STOP wins on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V5_4_AGENT_RANKER`. No trader-side filters — signal-quality gates live in `enrichment-trigger` and `signal-notifier`.
+- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V6 Tournament** policy (Target-80 trader mechanics unchanged) (`10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit`; STOP wins on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V6_TOURNAMENT` (ledger truncated 2026-06-04). No trader-side filters — signal-quality lives upstream in `signal-judge` / `signal-notifier`.
 - **`POST /cache_iv`** — daily IV cache refresh (Cloud Scheduler `polygon-iv-cache-daily`, 16:30 ET Mon-Fri). Pulls trailing-30-day watchlist, fetches each underlying's options chain via Polygon, computes ATM ~30-DTE IV, appends to `polygon_iv_history`.
 - **`benchmark_context.py`** — non-blocking helper module. Hosts: FRED VIX CSV fetcher, Polygon options-chain fetcher, ATM IV extractor, HV-20d compute, SPY minute-bar cache, price-at-timestamp locators, and BigQuery IV rank query. Every function returns `None` on failure — benchmarking cannot block a trade.
 
@@ -60,11 +60,11 @@ Shared content lib vendored at deploy time into `x-poster` + `blog-generator` (a
 
 1. Overnight scanner produces signal candidates in `overnight_signals`.
 2. `enrichment-trigger` enriches signals with `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, and directional UOA > $500K. Writes to `overnight_signals_enriched`. ~70 tickers/day.
-3. `overnight-report-generator` adds the daily report (regime + narrative context the judge reads).
-4. `signal-notifier` applies the gate stack (`moneyness_pct` 5–13%, `VIX <= VIX3M`, no earnings during hold, DTE 7–45, OI/vol floors — the `volume_oi_ratio > 2` gate was **removed 2026-06-02**), then calls `signal-judge` (`judge_v6`), which scores every candidate and selects **at most one** pick in a single call. `signal-notifier` emails it (or fails closed).
-5. `forward-paper-trader` simulates the **V5.4 Agent Ranker** policy (Target-80 trader mechanics inherited from V5.3 unchanged) on all enriched signals (no trader-side filters), writes to `forward_paper_ledger`.
+3. `overnight-report-generator` adds the daily report (regime + narrative context the tournament reads).
+4. `signal-notifier` builds the **full** enriched candidate pool — selection gates removed 2026-06-04, only the no-earnings-during-hold and `VIX <= VIX3M` regime safety rails remain — then calls `signal-judge` (`tournament_v1`), which runs a randomized bracket tournament (3 brackets × batches of ≤10, top-2 advance, ~94 → 20 → 4 → 1 → consensus) and returns **at most one** pick. `signal-notifier` writes `todays_pick` and emails it (or fails closed).
+5. `forward-paper-trader` simulates the **V6 Tournament** policy (Target-80 trader mechanics unchanged) on all enriched signals (no trader-side filters), writes to `forward_paper_ledger` tagged `policy_version = V6_TOURNAMENT` (truncated 2026-06-04).
 6. Win tracker measures post-entry stock-level outcomes (3-day peak) into `signal_performance`.
-7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until the V5.4 cohort hits 30 closes.
+7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until the V6 cohort hits 30 closes.
 
 **IV cache:** `polygon-iv-cache-daily` hits `POST /cache_iv` at 16:30 ET Mon-Fri, snapshotting ATM 30-DTE IV into `polygon_iv_history`. Read by `benchmark_context.fetch_iv_rank_from_bq` at trade time.
 
@@ -85,6 +85,8 @@ The most important architectural boundary right now is between:
 - **outcome measurement**
 
 Those must stay separable so policy changes can be evaluated cleanly.
+
+**2026-06-04 pipeline bug-fixes** (see `docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md`): scanner contract selection is now liquidity-aware (uses real bid/ask spread, drops no-quote strikes, scores divergence-first); the technicals window is bounded to `scan_date` (lookahead fix); and the trader gained fill-realism. These landed alongside the V6 tournament + selection-gate removal in the same pass.
 
 ## Historical areas
 - `_archive/` contains older legacy code and should not be treated as active runtime infrastructure.
