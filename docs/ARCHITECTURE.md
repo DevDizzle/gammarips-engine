@@ -17,7 +17,13 @@ Enrichment service for news, technicals, and AI-generated context. Reads from `o
 Daily report generation for the overnight signal set.
 
 ### `agent-arena/`
-Multi-model debate / consensus service for ranking or adjudicating signal quality.
+Multi-model debate / consensus service for ranking or adjudicating signal quality. **Deprecated 2026-05-04 — not run.**
+
+### `signal-judge/`
+The V5.4 ranker (renamed from `signal-ranker` on 2026-06-04). Cloud Run, `POST /rank` (IAM-only). One memory-aware `gemini-3.1-pro-preview` judge (`judge_v6`) receives all gate-cleared candidates + the daily report + 14d ledger summary + a closed-trade case-memory block, scores each candidate on flow/regime/narrative 1-10, and selects one pick + runner-up + confidence (or a mass-leakage skip) in a single structured call. `JUDGE_MAX_ATTEMPTS=3` bounded retry; fails closed (no V5.3 fallback). Collapsed from a Scorer fanout + Picker on 2026-06-04 — see `docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md`. Writes one trace row per candidate to `signal_ranker_runs` (table name unchanged; single judge mirrored into both `scorer_*`/`picker_*` columns at version 6).
+
+### `signal-notifier/`
+Builds the daily candidate pool from `overnight_signals_enriched` under the gate stack, calls `signal-judge /rank` for the pick, writes it to Firestore `todays_pick/{scan_date}` (+ `{entry_day}`), and emails / WhatsApps it. Fail-closed (no email, empty-state `todays_pick`) on any ranker error or skip.
 
 ### `forward-paper-trader/`
 Cloud Run service for forward paper-trading and IV cache maintenance. Single container, two endpoints:
@@ -54,8 +60,8 @@ Shared content lib vendored at deploy time into `x-poster` + `blog-generator` (a
 
 1. Overnight scanner produces signal candidates in `overnight_signals`.
 2. `enrichment-trigger` enriches signals with `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, and directional UOA > $500K. Writes to `overnight_signals_enriched`. ~70 tickers/day.
-3. Optional report/arena layers add synthesis.
-4. `signal-notifier` layers the gate stack (`volume_oi_ratio > 2`, `moneyness_pct` 5–15%, `VIX <= VIX3M`), and emails **at most one** signal per day.
+3. `overnight-report-generator` adds the daily report (regime + narrative context the judge reads).
+4. `signal-notifier` applies the gate stack (`moneyness_pct` 5–13%, `VIX <= VIX3M`, no earnings during hold, DTE 7–45, OI/vol floors — the `volume_oi_ratio > 2` gate was **removed 2026-06-02**), then calls `signal-judge` (`judge_v6`), which scores every candidate and selects **at most one** pick in a single call. `signal-notifier` emails it (or fails closed).
 5. `forward-paper-trader` simulates the **V5.4 Agent Ranker** policy (Target-80 trader mechanics inherited from V5.3 unchanged) on all enriched signals (no trader-side filters), writes to `forward_paper_ledger`.
 6. Win tracker measures post-entry stock-level outcomes (3-day peak) into `signal_performance`.
 7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until the V5.4 cohort hits 30 closes.

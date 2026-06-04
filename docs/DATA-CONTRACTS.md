@@ -25,7 +25,7 @@ Expected fields used by policy logic include:
 
 **Quality-gate feature columns (added 2026-04-17, NULLABLE):**
 - `volume_oi_ratio` — `recommended_volume / NULLIF(recommended_oi, 0)` at focal strike. Notifier requires > 2.0 (new positioning, not unwinding).
-- `moneyness_pct` — `abs(recommended_strike - underlying_price) / underlying_price`. Notifier requires 5–15% OTM. Falls back to Polygon scan_date close when `underlying_price` is missing.
+- `moneyness_pct` — `abs(recommended_strike - underlying_price) / underlying_price`. Notifier requires 5–13% OTM (cap widened 0.10→0.13 on 2026-06-02). Falls back to Polygon scan_date close when `underlying_price` is missing.
 - `vix3m_at_enrich` — FRED `VXVCLS` close at or before `scan_date`. Notifier requires `VIX <= VIX3M` (skip day if backwardated). Fail-closed on NULL.
 
 **Metadata columns (added 2026-06-03, NULLABLE, NON-GATING):**
@@ -182,7 +182,9 @@ Output collection for `blog-generator` ADK service. Webapp `/blog/[slug]` route 
 
 ## Current policy contract (V5.4 Agent Ranker — no trader-side gates)
 
-All signals that pass the enrichment filter (`overnight_score >= 1 AND recommended_spread_pct <= 0.10 AND directional UOA > $500K`) are simulated by the paper trader. Human alerting is gated separately in `signal-notifier` by the gate stack (`volume_oi_ratio > 2`, `moneyness_pct BETWEEN 0.05 AND 0.15`, `VIX <= VIX3M`) with `LIMIT 1`. Premium flags are computed and stored as features for post-hoc discovery. See `docs/DECISIONS/2026-04-17-v5-3-target-80.md`.
+> The ranker is the single `judge_v6` LLM on the `signal-judge` Cloud Run service (collapsed from Scorer→Picker 2026-06-04). The ledger `policy_version` label remains `V5_4_AGENT_RANKER`; the `signal_ranker_runs` trace table keeps its name (the single judge is mirrored into both `scorer_*`/`picker_*` columns at `*_prompt_version=6`).
+
+All signals that pass the enrichment filter (`overnight_score >= 1 AND recommended_spread_pct <= 0.08 AND directional UOA > $500K`) are simulated by the paper trader. Human alerting is gated separately in `signal-notifier` by the gate stack (`moneyness_pct BETWEEN 0.05 AND 0.13`, `VIX <= VIX3M`, no earnings during hold, `recommended_dte BETWEEN 7 AND 45`, `OI >= 10`, `vol >= 50`) with `LIMIT 1`. The `volume_oi_ratio > 2` conviction gate was **removed 2026-06-02** (realized-PnL showed no selection value — see `docs/DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md`); spread tightened `0.10 → 0.08` and the moneyness cap widened `0.10 → 0.13` the same window. Premium flags are computed and stored as features for post-hoc discovery. See `docs/DECISIONS/2026-04-17-v5-3-target-80.md`.
 
 ## Notes
 - `VIX_at_entry`, `vix_5d_delta_entry`, and `SPY_trend_state` are retained as telemetry only. None of them gate execution.

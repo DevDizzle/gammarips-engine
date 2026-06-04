@@ -17,7 +17,7 @@ Provide a minimal validation checklist for changes to GammaRips execution policy
 ### 2. Query sanity
 - run a read-only query against `overnight_signals_enriched`
 - confirm the trader has NO execution gates — all enriched signals should execute
-- confirm enrichment gate is applied upstream: `overnight_score >= 1 AND recommended_spread_pct <= 0.10 AND directional UOA > $500K`
+- confirm enrichment gate is applied upstream: `overnight_score >= 1 AND recommended_spread_pct <= 0.08 AND directional UOA > $500K`
 
 ### 3. Dedup sanity
 - verify only one row per `ticker` per `scan_date` is eligible for execution
