@@ -1,7 +1,7 @@
 """Signal Notifier — V5.4 Agent Ranker (canonical 2026-05-08).
 
 Reads `overnight_signals_enriched`, applies the hard gate stack to build the
-candidate pool, calls the V5.4 signal-ranker to pick one ticker, and sends
+candidate pool, calls the V5.4 signal-judge to pick one ticker, and sends
 ONE email with that pick to operator + paid subscribers (same content). On
 any V5.4 error (timeout, 5xx, picker out-of-set), fails CLOSED — no email.
 
@@ -30,7 +30,7 @@ Gate stack (run UPSTREAM of the V5.4 picker):
 The picker (V5.4): Scorer fanout (`gemini-3.5-flash`, scorer_v3 with
 HEDGING flow_conviction ≤4 hard cap) + Picker (`gemini-3.1-pro-preview`,
 picker_v2, enum confidence). Composite weights 60/25/15 flow/regime/narrative
-(weighted sum). Hosted at signal-ranker Cloud Run service. signal-ranker
+(weighted sum). Hosted at signal-judge Cloud Run service. signal-judge
 uptime is the SLO — no V5.3 SQL fallback. See docs/DECISIONS/
 2026-05-08-v5-3-retired-v5-4-promoted.md.
 
@@ -109,11 +109,11 @@ OPENCLAW_GATEWAY_URL = os.environ.get("OPENCLAW_GATEWAY_URL", "").strip()
 OPENCLAW_HOOKS_TOKEN = os.environ.get("OPENCLAW_HOOKS_TOKEN", "").strip()
 OPENCLAW_GROUP_JID = os.environ.get("OPENCLAW_GROUP_JID", "").strip()
 
-# V5.4 signal-ranker — sole live picker (promoted 2026-05-08). If the env var
+# V5.4 signal-judge — sole live picker (promoted 2026-05-08). If the env var
 # is missing or the call fails for any reason, this service fails closed: no
 # pick is published, no email is sent, no `todays_pick` doc is written with
 # `has_pick=True`. There is no V5.3 fallback path.
-SIGNAL_RANKER_URL = os.environ.get("SIGNAL_RANKER_URL", "").strip().rstrip("/")
+SIGNAL_JUDGE_URL = os.environ.get("SIGNAL_JUDGE_URL", "").strip().rstrip("/")
 
 nyse = mcal.get_calendar("NYSE")
 est = pytz.timezone("America/New_York")
@@ -865,9 +865,9 @@ def post_to_openclaw(message: str) -> None:
 # V5.4 picker — canonical (2026-05-08 V5.3 retirement)
 # =====================================================================
 #
-# signal-ranker /rank is BLOCKING — its return is THE pick. On any error
+# signal-judge /rank is BLOCKING — its return is THE pick. On any error
 # (timeout, 5xx, picker out-of-set), signal-notifier fails CLOSED: no email,
-# empty-state todays_pick doc, WhatsApp standby. signal-ranker uptime is the
+# empty-state todays_pick doc, WhatsApp standby. signal-judge uptime is the
 # product SLO. No V5.3 SQL fallback exists post-promotion.
 #
 # The V5.4 ticker lands in Firestore todays_pick/{scan_date} (canonical doc
@@ -880,7 +880,7 @@ def post_to_openclaw(message: str) -> None:
 def fetch_report_md(scan_date: date) -> str:
     """Pull today's overnight report markdown from Firestore daily_reports.
 
-    Returns empty string on miss or error — signal-ranker handles empty
+    Returns empty string on miss or error — signal-judge handles empty
     report_md gracefully (regime_alignment will lean neutral).
     """
     try:
@@ -975,14 +975,14 @@ def call_signal_ranker(
     report_md: str,
     ledger_summary: dict,
 ) -> dict | None:
-    """POST top-10 candidates to signal-ranker /rank.
+    """POST top-10 candidates to signal-judge /rank.
 
     Returns the parsed RankResponse dict on success, None on any failure
     (timeout, 5xx, malformed JSON, missing required fields). Caller MUST
     treat None as "fail-closed today" — no V5.3 fallback exists post-2026-05-08.
     """
-    if not SIGNAL_RANKER_URL:
-        logger.info("SIGNAL_RANKER_URL not set; V5.4 shadow path disabled")
+    if not SIGNAL_JUDGE_URL:
+        logger.info("SIGNAL_JUDGE_URL not set; V5.4 shadow path disabled")
         return None
     if top_10_df is None or len(top_10_df) == 0:
         logger.info("Empty candidate set; skipping V5.4 call")
@@ -1007,14 +1007,14 @@ def call_signal_ranker(
         import google.auth.transport.requests
         from google.oauth2 import id_token as id_token_lib
         auth_req = google.auth.transport.requests.Request()
-        token = id_token_lib.fetch_id_token(auth_req, SIGNAL_RANKER_URL)
+        token = id_token_lib.fetch_id_token(auth_req, SIGNAL_JUDGE_URL)
         headers = {"Authorization": f"Bearer {token}"}
 
         resp = requests.post(
-            f"{SIGNAL_RANKER_URL}/rank",
+            f"{SIGNAL_JUDGE_URL}/rank",
             json=payload,
             headers=headers,
-            # 300s — signal-ranker is min_instances=0 so cold start can add
+            # 300s — signal-judge is min_instances=0 so cold start can add
             # 30-60s on top of the ~30-45s Scorer fanout + Picker call. Cloud
             # Run service-to-service calls without warm pools regularly take
             # 60-120s on the first request after idle. Trader's own timeout
@@ -1023,17 +1023,17 @@ def call_signal_ranker(
         )
         if resp.status_code != 200:
             logger.error(
-                f"signal-ranker /rank returned {resp.status_code}: "
+                f"signal-judge /rank returned {resp.status_code}: "
                 f"{resp.text[:400]}"
             )
             return None
         body = resp.json()
         if not isinstance(body, dict) or "pick" not in body or "confidence" not in body:
-            logger.error(f"signal-ranker malformed response: {str(body)[:400]}")
+            logger.error(f"signal-judge malformed response: {str(body)[:400]}")
             return None
         return body
     except Exception as e:
-        logger.error(f"signal-ranker call failed: {e}")
+        logger.error(f"signal-judge call failed: {e}")
         return None
 
 
@@ -1606,7 +1606,7 @@ def run_notifier(target_date: date | None = None):
         active_days_per_row.append(active)
 
     # Attach the computed value as a column so the ranker payload carries it
-    # forward as ranker context (signal-ranker ignores unknown keys; this is
+    # forward as ranker context (signal-judge ignores unknown keys; this is
     # purely additive). NaN-safe — None becomes NaN under pandas, which the
     # _candidate_for_ranker helper drops on isna check.
     df = df.assign(active_days_20d=active_days_per_row)
@@ -1667,7 +1667,7 @@ def run_notifier(target_date: date | None = None):
             f"score={top.get('overnight_score')} oi={top.get('recommended_oi')}"
         )
     else:
-        # V5.4 IS the picker — no V5.3 SQL "rank-1" fallback. signal-ranker uptime
+        # V5.4 IS the picker — no V5.3 SQL "rank-1" fallback. signal-judge uptime
         # is the SLO. On any error: fail-closed (no email, empty-state todays_pick).
         # Decision lock: docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md.
         v5_4_response: dict | None = None
@@ -1682,17 +1682,18 @@ def run_notifier(target_date: date | None = None):
             v5_4_response = None
 
         if v5_4_response is None:
-            logger.error("V5.4 signal-ranker unavailable. Fail-closed: no email, no WhatsApp pick.")
+            logger.error("V5.4 signal-judge unavailable. Fail-closed: no email, no WhatsApp pick.")
             write_todays_pick_doc(target_date, has_pick=False, skip_reason="v5_4_unavailable")
             post_to_openclaw(format_whatsapp_message(
                 None, target_date, None, has_pick=False, skip_reason="v5_4_unavailable"
             ))
-            return True, "V5.4 signal-ranker unavailable. Fail-closed."
+            return True, "V5.4 signal-judge unavailable. Fail-closed."
 
-        # Mass-leakage skip. signal-ranker sets skip=True when every top-5 candidate
-        # scored 1/1/1 (per scorer_v4.md:29 leakage rule) — picking the "least bad"
-        # of identically-floored candidates would ship a coin flip. Treat it like
-        # any other fail-closed reason: no email, empty-state todays_pick, alert
+        # Mass-leakage skip. signal-judge sets skip=True when every candidate
+        # verdict is flagged leakage (judge_v6 §2; deterministic all-leakage check
+        # in run_pipeline) — picking the "least bad" of identically-poisoned
+        # candidates would ship a coin flip. Treat it like any other fail-closed
+        # reason: no email, empty-state todays_pick, alert
         # the WhatsApp channel that the engine stood down.
         if v5_4_response.get("skip"):
             skip_reason_raw = v5_4_response.get("skip_reason") or "mass_leakage"
@@ -1710,7 +1711,7 @@ def run_notifier(target_date: date | None = None):
         pick_ticker = v5_4_response.get("pick")
         picked_rows = df[df["ticker"] == pick_ticker]
         if picked_rows.empty:
-            # Picker out-of-set — signal-ranker should have caught this and
+            # Picker out-of-set — signal-judge should have caught this and
             # returned 500. If it slipped through, fail-closed (don't fabricate a
             # pick from a ticker not in df).
             logger.error(

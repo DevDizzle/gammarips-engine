@@ -20,6 +20,8 @@ from app.schemas import (
     COMPOSITE_WEIGHTS,
     TOP_N,
     Candidate,
+    JudgeOutput,
+    PerCandidateVerdict,
     PickerOutput,
     ScorerOutput,
     composite,
@@ -218,3 +220,66 @@ def test_picker_output_confidence_enum():
 def test_picker_output_rejects_freeform_confidence():
     with pytest.raises(ValidationError):
         PickerOutput(pick="A", runner_up="B", justification="x", confidence="0.74")  # type: ignore
+
+
+# -- judge_v6: PerCandidateVerdict / JudgeOutput -----------------------------
+
+
+def _verdict(ticker: str, flow: int, regime: int, narrative: int, leakage: bool = False) -> PerCandidateVerdict:
+    return PerCandidateVerdict(
+        ticker=ticker,
+        flow_conviction=flow,
+        regime_alignment=regime,
+        narrative_coherence=narrative,
+        leakage=leakage,
+        reasoning="standalone view",
+    )
+
+
+def test_verdict_bounds_and_composite_match_legacy_scorer():
+    v = _verdict("AAA", 10, 3, 3)
+    # Same 0.60/0.25/0.15 weighting as the legacy ScorerOutput — cohort comparability.
+    assert v.composite_score() == pytest.approx(7.20)
+    assert v.composite_score() == _scorer("AAA", 10, 3, 3).composite_score()
+
+
+@pytest.mark.parametrize("field,bad", [("flow_conviction", 0), ("regime_alignment", 11), ("narrative_coherence", -1)])
+def test_verdict_rejects_out_of_range(field: str, bad: int):
+    kwargs = {"ticker": "AAA", "flow_conviction": 5, "regime_alignment": 5,
+              "narrative_coherence": 5, "reasoning": "x"}
+    kwargs[field] = bad
+    with pytest.raises(ValidationError):
+        PerCandidateVerdict(**kwargs)
+
+
+def test_take_top_n_works_on_verdicts():
+    """take_top_n is duck-typed (composite_score/flow_conviction/ticker) — the
+    judge_v6 path reuses it over PerCandidateVerdict for in_top_5 + ordering."""
+    vs = [_verdict("AAA", 5, 5, 5), _verdict("BBB", 9, 9, 9), _verdict("CCC", 1, 1, 1)]
+    out = take_top_n(vs, n=3)
+    assert [x.ticker for x in out] == ["BBB", "AAA", "CCC"]
+
+
+def test_judge_output_happy_path():
+    j = JudgeOutput(
+        per_candidate=[_verdict("AAA", 8, 7, 6), _verdict("BBB", 5, 5, 5)],
+        pick="AAA",
+        runner_up="BBB",
+        justification="AAA has cleaner OTM structure",
+        confidence="high",
+    )
+    assert j.prompt_version == "judge_v6"
+    assert j.skip is False
+    assert j.skip_reason is None
+
+
+def test_judge_output_mass_leakage_skip_shape():
+    """Skip state: empty pick/runner_up, null confidence, skip_reason set."""
+    j = JudgeOutput(
+        per_candidate=[_verdict("AAA", 1, 1, 1, leakage=True)],
+        skip=True,
+        skip_reason="mass_leakage",
+    )
+    assert j.pick == "" and j.runner_up == ""
+    assert j.confidence is None
+    assert all(v.leakage for v in j.per_candidate)

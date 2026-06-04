@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy signal-ranker to Cloud Run.
+# Deploy signal-judge to Cloud Run.
 #
 # Called inline from signal-notifier's 07:30 ET cron (Phase 3 wires this).
 # DRY_RUN flipped false 2026-05-09 (signal_ranker_runs ledger writes enabled).
@@ -12,6 +12,11 @@
 # (case-memory harness: quant priors + curated forensic exemplars from
 # case_memory/, which ships with --source=.). Advisory, fails open to "".
 # See docs/DECISIONS/2026-06-03-picker-case-memory.md.
+# COLLAPSED to judge_v6 2026-06-04 — Scorer+Picker -> one memory-aware call.
+# JUDGE_PROMPT_VERSION=6 is mirrored into both scorer/picker columns of
+# signal_ranker_runs (REQUIRED cols, DDL unchanged). Case-memory is now
+# load-bearing (fail-closed if absent). The legacy SCORER_*/PICKER_* env vars
+# are retained but inert. See docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md.
 set -e
 
 # Pre-deploy guard: the picker_v5 case-memory block must actually be present and
@@ -41,7 +46,7 @@ trap 'rm -rf "${VENDOR_DIR}"' EXIT
 PROJECT_NUM="406581297632"
 DEFAULT_COMPUTE_SA="${PROJECT_NUM}-compute@developer.gserviceaccount.com"
 
-gcloud run deploy signal-ranker \
+gcloud run deploy signal-judge \
   --project=profitscout-fida8 \
   --region=us-central1 \
   --source=. \
@@ -51,19 +56,19 @@ gcloud run deploy signal-ranker \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,SCORER_MODEL=gemini-3.5-flash,PICKER_MODEL=gemini-3.1-pro-preview,SCORER_PROMPT_VERSION=5,PICKER_PROMPT_VERSION=5,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false,MIN_SCORER_SUCCESS_FRAC=0.5"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=6,JUDGE_PROMPT_LABEL=judge_v6,JUDGE_MAX_ATTEMPTS=3,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also
 # grants the Firebase Admin SA used by signal-notifier — service identity
 # of any caller must be on this list explicitly (no --allow-unauthenticated).
-gcloud run services add-iam-policy-binding signal-ranker \
+gcloud run services add-iam-policy-binding signal-judge \
   --project=profitscout-fida8 \
   --region=us-central1 \
   --member="serviceAccount:${DEFAULT_COMPUTE_SA}" \
   --role="roles/run.invoker"
 
-gcloud run services add-iam-policy-binding signal-ranker \
+gcloud run services add-iam-policy-binding signal-judge \
   --project=profitscout-fida8 \
   --region=us-central1 \
   --member="serviceAccount:firebase-adminsdk-fbsvc@profitscout-fida8.iam.gserviceaccount.com" \

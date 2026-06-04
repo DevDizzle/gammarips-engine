@@ -1,0 +1,10 @@
+# gcloud --source upload excludes. Explicit (not .gitignore-derived) so the
+# vendored gammarips_content lib + case_memory/*.md DO ship while heavy/derived
+# artifacts do not. Keep _gammarips_content_vendor/ and case_memory/*.md uploaded.
+.git/
+.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+*.parquet
+.scratch/

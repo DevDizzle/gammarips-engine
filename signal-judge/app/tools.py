@@ -20,7 +20,9 @@ from app.schemas import (
     COMPOSITE_WEIGHTS,
     TOP_N,
     Candidate,
+    JudgeOutput,
     LedgerSummary,
+    PerCandidateVerdict,
     PickerOutput,
     ScorerOutput,
 )
@@ -41,7 +43,23 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 # fewer than this fraction of candidates produce successful Scorer outputs,
 # the pipeline raises and signal-notifier fails closed (no pick today).
 # Default 0.5 — a 10-candidate scan must score >=5 successfully or we bail.
+# NOTE: inert under judge_v6 (single fused call has no per-candidate fanout);
+# the partial-failure tolerance it bought is re-acquired via JUDGE_MAX_ATTEMPTS
+# bounded retry in agent.run_judge. Kept for legacy code paths / replays.
 MIN_SCORER_SUCCESS_FRAC = float(os.getenv("MIN_SCORER_SUCCESS_FRAC", "0.5"))
+
+# --- judge_v6 single-call collapse (2026-06-04) -----------------------------
+# One memory-aware judge replaces the Scorer fanout + Picker. The integer
+# version 6 is mirrored into BOTH scorer_prompt_version and picker_prompt_version
+# in signal_ranker_runs (mode=REQUIRED columns can't be nulled), so the
+# post-collapse cohort is cleanly separable from the v5 two-stage cohort.
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", PICKER_MODEL)
+JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "6"))
+JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "judge_v6")
+# Bounded retry for the single fused call — one malformed structured output no
+# longer forfeits the whole slate (replaces the gather+MIN_SCORER_SUCCESS_FRAC
+# partial-failure tolerance lost in the collapse).
+JUDGE_MAX_ATTEMPTS = int(os.getenv("JUDGE_MAX_ATTEMPTS", "3"))
 
 
 # Forbidden field-name fragments. Any candidate or ledger field whose key
@@ -140,21 +158,25 @@ def persist_run(
     scan_date: str,
     entry_day: str,
     candidates: list[Candidate],
-    scorer_outputs: list[ScorerOutput],
-    top_5: list[ScorerOutput],
-    picker_output: PickerOutput | None,
-    scorer_latency_ms: int | None,
-    picker_latency_ms: int | None,
+    judge_output: JudgeOutput,
+    judge_latency_ms: int | None,
 ) -> None:
     """Write one row per (run_id, candidate_ticker) to signal_ranker_runs.
 
-    Schema in scripts/ledger_and_tracking/create_signal_ranker_runs.py.
-    No-op on DRY_RUN=true (signal-notifier still gets the response).
+    judge_v6 single-call shape (2026-06-04). One row per ``per_candidate``
+    verdict, preserving the one-row-per-candidate denominator the eval depends on.
 
-    ``picker_output=None`` is the mass-leakage skip path — the Picker never
-    ran, so picker_chose/picker_runner_up are False for every row and the
-    justification/confidence fields are NULL. Audit trail still gets written
-    so forensic queries can find the run.
+    Column mapping (the BQ DDL is UNCHANGED — scorer/picker columns are
+    mode=REQUIRED and cannot be nulled, so the single judge is MIRRORED into
+    both): rubric/composite/scorer_reasoning <- per-candidate verdict;
+    picker_chose/picker_runner_up/justification/confidence <- JudgeOutput
+    selection; *_prompt_version=JUDGE_PROMPT_VERSION (6) and *_model=JUDGE_MODEL
+    in BOTH columns so the post-collapse cohort is cleanly separable. The single
+    judge latency lands in scorer_latency_ms; picker_latency_ms is NULL.
+
+    ``judge_output.skip`` (mass-leakage) writes the audit trail with
+    picker_chose/picker_runner_up all False and justification/confidence NULL.
+    No-op on DRY_RUN=true (signal-notifier still gets the response).
     """
     if DRY_RUN:
         logger.info(f"DRY_RUN=true — skipping signal_ranker_runs write for {run_id}")
@@ -163,52 +185,48 @@ def persist_run(
     static_rank_by_ticker: dict[str, int | None] = {
         c.ticker: c.static_rank for c in candidates
     }
-    top_5_set = {s.ticker for s in top_5}
-    pick = picker_output.pick if picker_output else None
-    runner_up = picker_output.runner_up if picker_output else None
+    verdicts = judge_output.per_candidate
+    # in_top_5 keeps its meaning (was a finalist) on fat slates via the same
+    # deterministic composite ordering the legacy two-stage used.
+    top_set = {v.ticker for v in take_top_n(verdicts)}
+    skipped = judge_output.skip
+    pick = None if skipped else judge_output.pick
+    runner_up = None if skipped else judge_output.runner_up
     weights_json = json.dumps(COMPOSITE_WEIGHTS)
     now_ts = datetime.now(timezone.utc).isoformat()
 
     rows: list[dict[str, Any]] = []
-    for s in scorer_outputs:
-        is_picked = picker_output is not None and s.ticker == pick
-        is_runner = (
-            picker_output is not None
-            and s.ticker == runner_up
-            and s.ticker != pick
-        )
+    for v in verdicts:
+        is_picked = (not skipped) and v.ticker == pick
+        is_runner = (not skipped) and v.ticker == runner_up and v.ticker != pick
         rows.append(
             {
                 "run_id": run_id,
                 "scan_date": scan_date,
                 "entry_day": entry_day,
-                "candidate_ticker": s.ticker,
-                "candidate_rank_static": static_rank_by_ticker.get(s.ticker),
-                "composite_score": s.composite_score(),
-                "flow_conviction": s.flow_conviction,
-                "regime_alignment": s.regime_alignment,
-                "narrative_coherence": s.narrative_coherence,
-                "scorer_reasoning": s.reasoning,
-                "in_top_5": s.ticker in top_5_set,
+                "candidate_ticker": v.ticker,
+                "candidate_rank_static": static_rank_by_ticker.get(v.ticker),
+                "composite_score": v.composite_score(),  # recomputed, never trust model echo
+                "flow_conviction": v.flow_conviction,
+                "regime_alignment": v.regime_alignment,
+                "narrative_coherence": v.narrative_coherence,
+                "scorer_reasoning": v.reasoning,
+                "in_top_5": v.ticker in top_set,
                 "picker_chose": is_picked,
                 "picker_runner_up": is_runner,
                 "picker_justification": (
-                    picker_output.justification
-                    if picker_output and (is_picked or is_runner)
-                    else None
+                    judge_output.justification if (is_picked or is_runner) else None
                 ),
                 "picker_confidence": (
-                    picker_output.confidence
-                    if picker_output and (is_picked or is_runner)
-                    else None
+                    judge_output.confidence if (is_picked or is_runner) else None
                 ),
-                "scorer_prompt_version": SCORER_PROMPT_VERSION,
-                "picker_prompt_version": PICKER_PROMPT_VERSION,
-                "scorer_model": SCORER_MODEL,
-                "picker_model": PICKER_MODEL,
+                "scorer_prompt_version": JUDGE_PROMPT_VERSION,
+                "picker_prompt_version": JUDGE_PROMPT_VERSION,
+                "scorer_model": JUDGE_MODEL,
+                "picker_model": JUDGE_MODEL,
                 "composite_weights_json": weights_json,
-                "scorer_latency_ms": scorer_latency_ms,
-                "picker_latency_ms": picker_latency_ms,
+                "scorer_latency_ms": judge_latency_ms,
+                "picker_latency_ms": None,
                 "created_at": now_ts,
             }
         )
@@ -216,7 +234,7 @@ def persist_run(
     client = bigquery.Client(project=PROJECT_ID)
     errors = client.insert_rows_json(TABLE_RUNS, rows)
     if errors:
-        # Don't raise — picker result already returned to caller; log loudly.
+        # Don't raise — judge result already returned to caller; log loudly.
         logger.error(f"signal_ranker_runs insert errors for {run_id}: {errors}")
     else:
         logger.info(f"signal_ranker_runs: wrote {len(rows)} rows for {run_id}")

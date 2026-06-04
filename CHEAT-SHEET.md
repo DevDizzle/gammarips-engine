@@ -53,7 +53,7 @@ Top 10 gate-clean candidates fed to the V5.4 agent ranker. Scorer (`gemini-3.5-f
 - If EV < 0 → pause, rerun Deep Research angle
 
 ## Services (reference only)
-`overnight-scanner → enrichment-trigger → signal-notifier ← signal-ranker (V5.4 picker) → email + Firestore todays_pick → forward-paper-trader (ledger)`
+`overnight-scanner → enrichment-trigger → signal-notifier ← signal-judge (V5.4 judge_v6) → email + Firestore todays_pick → forward-paper-trader (ledger)`
 
 ## Source of truth
 This file + `docs/TRADING-STRATEGY.md` + `docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.

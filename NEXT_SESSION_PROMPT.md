@@ -1,5 +1,29 @@
 # Next Session Prompt
 
+**2026-06-04 session — SCORER→PICKER COLLAPSED into one memory-aware judge (`judge_v6`). IMPLEMENTED + unit-tested (32 pass) + LIVE gemini smoke passed. NOT yet deployed; pending `gammarips-review` leakage audit (the one non-negotiable; owner waived the rest of the G-Stack ceremony).**
+
+Owner-directed simplification. A multi-agent workflow (16 agents) evaluated the 2-stage ranker: across 13 V5.4-era slates the single judge agreed 9/13 with the logged baseline and was structurally sounder 4-to-1 on the divergences (every divergence was the judge REJECTING a two-label-trap the 2-stage fell into — OKTA→BX, KBR→MCO, EQIX-LEAP→RDDT, CIEN-theta-cliff→GE). The Scorer's top-5 cut was a no-op on ~80% of days (slates ≤5); structural rules were triple-encoded (gates + scorer + picker). Decision: `docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md`.
+
+**What shipped (code, branch `gate-changes-2026-06-02`, NOT committed yet):**
+- `signal-judge/prompts/judge_v6.md` — single-call rubric: trusts upstream gates (no re-litigating ITM/earnings/spread), anti-anchoring ("score each candidate as if it were the only one"), absolute leakage discipline + mass-leakage skip, per-candidate verdict array, deterministic composite/tiebreak.
+- `app/schemas.py` — `PerCandidateVerdict` + `JudgeOutput` (composite weights 60/25/15 unchanged). `ScorerOutput`/`PickerOutput` kept for typecheck/replay. `RankResponse.scorer_outputs` re-typed.
+- `app/agent.py` — removed Scorer fanout + ADK Picker; added `run_judge` (leakage-assert all → ONE structured call → `JUDGE_MAX_ATTEMPTS=3` bounded retry, replacing the lost `MIN_SCORER_SUCCESS_FRAC` partial-failure tolerance); rewired `run_pipeline` (deterministic mass-leakage decision; off-list/poisoned pick fails closed). `root_agent` now a degenerate judge for ADK discovery.
+- `app/tools.py` — `persist_run` writes one row per verdict, **mirrors the judge into both scorer/picker REQUIRED columns** (`*_prompt_version=6`, `*_model=gemini-3.1-pro-preview`) → **BQ DDL UNCHANGED**, cohort separable. New `JUDGE_*` constants.
+- `deploy.sh` env → `JUDGE_*` (legacy `SCORER_*`/`PICKER_*` retained-but-inert). Case-memory now **load-bearing** (`run_pipeline` fails closed if absent).
+- **Wire contract preserved → ZERO signal-notifier changes** (verified: `call_signal_ranker` only guards on `pick`+`confidence`; v5_4_meta fields all present).
+- Docs: TRADING-STRATEGY (lines 4 + 47), CLAUDE.md + GEMINI.MD policy line, this file. Live smoke harness at `.scratch/smoke_judge_v6.py` (reads `.scratch/replay_slates.json`).
+
+**OPEN / NEXT:**
+- (a) **`gammarips-review` leakage audit** of the diff — DONE, verdict SHIP (serial pre-pass assert, deterministic skip, fail-closed all confirmed).
+- (b) Service+dir+code renamed `signal-ranker` → `signal-judge` (2026-06-04). Deploy: `cd signal-judge && bash deploy.sh`. Then live smoke + verify a `signal_ranker_runs` row writes with version=6. **BQ table `signal_ranker_runs` + Firestore `v5_4_*` keys deliberately KEPT (migration/webapp landmines, no payoff).**
+- (c) Commit (working tree has the diff; `.scratch/` is untracked — don't commit it).
+- (d) The V5.5 relabel below is INDEPENDENT and still open — judge_v6 emits the same provenance fields, so it doesn't conflict.
+- Optional follow-ups (from the eval's gaps): poisoned-slate fixture for mass-leakage, fat-day (N>5) anti-anchoring A/B, optional `ALTER` for first-class `judge_prompt_version` column.
+
+Memory: `feedback_dont_gate_owner_innovation`, `feedback_simplicity`, `project_picker_memory_harness`.
+
+---
+
 **2026-06-03 session — PICKER CASE-MEMORY HARNESS built + wired + DEPLOYED + verified live (`signal-ranker` rev `00011-pw9`, `picker_v5`). Owner-directed; owner WAIVED the N≥15/30-day-OOS/DoD ceremony for this (it's advisory/non-gating). Leakage was NOT waived — audited by `gammarips-review` = SHIP-WITH-FIXES, all fixed.**
 
 Owner's idea: give the LLM Picker a *curated, causally-labeled memory* of past option winners/losers ("cleaner than RAG") so it reasons by analogy. Two deep-research workflows (the first over-constrained by my own prompt — it banned post-entry "why" tokens and reduced to a moneyness-CI test, killing the idea; the second, correctly framed, delivered it). **Key reframe that unlocked it:** leakage protects only TODAY's live pick — explaining a CLOSED past trade with full hindsight is allowed and is the whole point.

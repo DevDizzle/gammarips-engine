@@ -96,10 +96,12 @@ def health() -> dict[str, Any]:
     return {
         "service": "signal-ranker",
         "project": project_id,
-        "scorer_model": agent.SCORER_MODEL,
-        "picker_model": agent.PICKER_MODEL,
-        "scorer_prompt_version": agent.tools.SCORER_PROMPT_VERSION,
-        "picker_prompt_version": agent.tools.PICKER_PROMPT_VERSION,
+        # judge_v6 single-call collapse (2026-06-04): Scorer+Picker -> one judge.
+        "architecture": "judge_v6",
+        "judge_model": agent.JUDGE_MODEL,
+        "judge_prompt_version": agent.tools.JUDGE_PROMPT_VERSION,
+        "judge_prompt_label": agent.tools.JUDGE_PROMPT_LABEL,
+        "judge_max_attempts": agent.tools.JUDGE_MAX_ATTEMPTS,
         "dry_run": agent.tools.DRY_RUN,
     }
 
