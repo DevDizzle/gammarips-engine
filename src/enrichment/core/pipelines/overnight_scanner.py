@@ -452,13 +452,24 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
         theta = c.get("theta") or 0
         iv = c.get("implied_volatility") or 0
 
+        # Contract selection optimizes for TRADEABILITY, not unusualness
+        # (fix 2026-06-04). The OLD score rewarded LOW open interest via a
+        # `vol/OI` term — which handed us the swept lottery strike (untradeable:
+        # OKTA $127 6/12 had OI 5 and a ~35% LIVE spread) over the standard
+        # liquid strike (OKTA $130, OI 48). Unusual flow should pick the
+        # NAME+direction; the CONTRACT must be one you can actually fill. Open
+        # interest is the PRIMARY signal here (standing size accumulates and
+        # can't be faked); the snapshot spread is noisy (it read 0.5% on that
+        # 35%-wide OKTA strike) so it's weighted lightly. A live fillability
+        # check at pick time is the belt-and-suspenders layer.
+        # See docs/DECISIONS/2026-06-04-contract-selection-liquidity.md.
         score = (
-            min(vol / 500, 5.0) * 2.0
-            + (1.0 - min(spread_pct, 1.0)) * 3.0
-            + min(vol / max(oi, 1), 3.0) * 1.5
-            + gamma * 20.0
-            + (2.0 if 0.25 <= delta <= 0.50 else 0)  # Sweet spot delta bonus
-            - (abs(theta) / max(mid, 0.01)) * 1.0     # Theta drag penalty
+            min(oi / 200.0, 1.0) * 5.0                 # open interest — PRIMARY liquidity
+            + min(vol / 200.0, 1.0) * 2.0              # volume — secondary liquidity
+            + (1.0 - min(spread_pct, 1.0)) * 1.5       # tight spread — tertiary (snapshot-noisy)
+            + (2.0 if 0.25 <= delta <= 0.50 else 0)    # sweet-spot delta bonus
+            + gamma * 8.0                              # convexity (de-emphasized from 20x)
+            - (abs(theta) / max(mid, 0.01)) * 1.0      # theta drag penalty
         )
         candidates.append({
             "contract_symbol": c.get("contract_symbol"),
