@@ -11,12 +11,26 @@ Owner's idea: give the LLM Picker a *curated, causally-labeled memory* of past o
 - Review fixes: (1) **fail CLOSED** if v5 ships w/o memory (no silent v4 degrade), `RankResponse.case_memory_bytes`; (2) `deploy.sh` preflight assert; (3) decision note `docs/DECISIONS/2026-06-03-picker-case-memory.md` naming the accepted+bounded **same-ticker outcome-import** vector.
 - Verified: smoke test `case_memory_bytes=46673` live, clean pick, no guard trip; 25/25 unit tests pass. Picker latency ~39s now (bigger context, fine vs 540s timeout).
 
-**OPEN / NEXT (owner queued, take a step at a time):**
-1. **V5.5 promotion** — owner wants to brand this V5.5 + show it in the **webapp** (separate repo `gammarips-webapp`). Lever: `policy_version='V5_4_AGENT_RANKER'` set in `signal-notifier/main.py` (~430, 471, 1220, 1327) + queries (1198, 1291), and `forward-paper-trader/main.py` (316, 322).
-2. **Ledger truncate vs tag** — owner proposed TRUNCATE `forward_paper_ledger` for a fresh V5.5 cohort. **RECOMMENDED tag-don't-destroy:** bump `policy_version='V5_5_CASE_MEMORY'` going forward + filter the webapp to V5.5 — same clean-slate UX, no data loss (truncate would also wipe the 6 live case-memory exemplars). DECISION PENDING owner.
-3. Prompt alignment — DONE (picker_v5 §1a). Optional flash-narrative prose pass over the deterministic WHY = deferred polish.
+**DONE 2026-06-03/04:** docs updated (TRADING-STRATEGY, CHEAT-SHEET, DECISIONS note, this file) + **COMMITTED** `f5bd0df` on branch `gate-changes-2026-06-02` (working tree clean; `uv.lock` + `case_memory/*.parquet` gitignored). Prompt alignment DONE (picker_v5 §1a). **LEDGER DECISION MADE: TAG, do NOT truncate** — keep the 13 V5.4 rows as the pre-memory baseline; new rows get `policy_version='V5_5_CASE_MEMORY'`; webapp filters to V5.5 for a clean public view. (Truncate rejected: would wipe the only live track record + the 6 live case-memory exemplars + the A/B baseline for "did memory help".)
 
-**⚠️ Case-memory changes: committed this session (branch `gate-changes-2026-06-02`).** Smoke test wrote one stray audit row to `signal_ranker_runs` (`run_id v5_4_2026-05-28_eaaa64c9`) — harmless, deletable.
+**OPEN / NEXT — V5.5 relabel (NOT started; only the site map below was pulled). Take a step at a time.**
+Note: **V5.5 is already LIVE behaviorally** (picker_v5, `signal-ranker` rev `00011-pw9`); this is cohort-LABELING only, not a behavior change.
+
+**(a) WRITE sites — change the emitted tag `'V5_4_AGENT_RANKER'` → `'V5_5_CASE_MEMORY'` for NEW rows:**
+- `forward-paper-trader/main.py:66` — `POLICY_VERSION = "V5_4_AGENT_RANKER"` constant (used at 238, 462, 1041). **Single constant — change here.**
+- `signal-notifier/main.py:430, 471, 1220, 1327` — literal `"policy_version": "V5_4_AGENT_RANKER"` writes (todays_pick + ledger). Consider hoisting to a module constant while here.
+
+**(b) READ-FILTER sites — CRITICAL coupling. These filter `policy_version = "V5_4_AGENT_RANKER"`; if left as-is they will MISS the new V5.5 rows:**
+- `signal-notifier/main.py:1198, 1291` — feed the picker's 14d ledger summary / stats. **Recommend: filter to BOTH `IN ('V5_4_AGENT_RANKER','V5_5_CASE_MEMORY')`** so the rolling 14d window + track record stay continuous across the relabel (the column still segments cohorts for analysis). The summary builder at 918-949 GROUPs BY policy_version (no filter) — already fine, will show both split out.
+- Downstream consumers that filter V5_4 and would silently drop V5.5 — **decide per surface**: `win-tracker/main.py:165`, `blog-generator/app/tools.py:217,674,741,1189`, `x-poster/app/tools.py:173,439`. For public-facing stats (x-poster/blog/webapp) owner wants a clean **V5.5** view → those can filter V5_5-only OR both; pick deliberately. win-tracker = performance tracking → both.
+
+**(c) Deploy + review:** relabel touches `forward-paper-trader` (rule: ALWAYS `gammarips-review` before deploy) + `signal-notifier` (+ optionally win-tracker/blog/x-poster). Sequence: edit → `gammarips-review` → deploy the touched services. No trader-mechanics change (label only).
+
+**(d) Webapp** — separate repo `/home/user/gammarips-webapp` (Next.js, auto-deploys). Show "V5.5" label + filter public stats to the V5.5 cohort. Do AFTER engine side. It reads `todays_pick` (has `v5_4_*` provenance fields — note the field-name prefix is `v5_4_*` even post-relabel unless we also rename those, which the webapp reads — check before renaming Firestore keys).
+
+**Optional later:** flash-narrative prose pass over the deterministic case WHY (A/B for readability); Phase-2 graph from `case_index.parquet`.
+
+**Housekeeping:** smoke test wrote one stray audit row to `signal_ranker_runs` (`run_id v5_4_2026-05-28_eaaa64c9`) — harmless, deletable.
 
 Memory: `project_picker_memory_harness`, `feedback_dont_gate_owner_innovation`.
 
