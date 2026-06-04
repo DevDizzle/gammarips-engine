@@ -1,5 +1,20 @@
 # Next Session Prompt
 
+**▶ TOMORROW'S JOB (run from `gammarips-engine`, edit the SEPARATE repo `/home/user/gammarips-webapp`): bring the public SITE to the V6 reality.**
+The webapp still markets the OLD pipeline. Go through the gammarips-webapp code + Firestore content and reconcile:
+- **The big stale narrative:** README + pricing tiers + how-it-works + methodology still describe a *"5-model Agent Arena adversarial debate"* and *Scorer→Picker* — that's two eras out of date. Replace with the **V6 bracket tournament** (3 randomized brackets, batches ≤10, top-2 advance, consensus pick; no memory/rubric/weights). Agent Arena is DEAD; there is no "debate transcript."
+- **Gates copy:** the site still implies selection gates. V6 = **no selection gates**; only enrichment (`overnight_score≥1`, `spread≤30%`, `UOA>$500K`) + two safety rails (no-earnings-in-hold, `VIX≤VIX3M`). (We already fixed the V/OI-gate copy + moneyness numbers earlier this session; this is the deeper ranker-narrative pass.)
+- **Stale BLOG POSTS** in Firestore `blog_posts/*` — many describe old gates / V5.4 / Agent Arena. Audit them; regenerate via `blog-generator` or edit. Also check the FAQ's "deterministic, no judgment" claim (now an LLM tournament).
+- **Cohort label** already done: `cohort_stats/current` = `V6_TOURNAMENT`, cohort_start 2026-06-04 (webapp `EMPTY_STATS` default already committed-local in the webapp repo — push it).
+- Webapp is Next.js, **auto-deploys on push to `main`** — edit + commit locally, the OWNER pushes (don't push the webapp without confirming).
+- Canonical V6 facts to copy from: `docs/TRADING-STRATEGY.md` / `CHEAT-SHEET.md` (both reconciled today).
+
+**Also still open from today:** (a) the `has_contract` rate WATCH below (check after tonight's scan), (b) PIT-data fix for frozen OI/volume (#3/#4), (c) merge `gate-changes-2026-06-02` → master when ready (pushed, not merged).
+
+**LESSON (2026-06-04, owner-stated — bake into how we work):** the pipeline had **silent code/data bugs that "build and work" but corrupt the pick** (fake 0% spreads on ~43% of picks, suppressed divergence signals, lookahead). We'd been eval'ing the **LLM text output** and assuming the surrounding code was fine because it ran. It wasn't. The owner's gut ("it's off") was right. Going forward: **eval the DATA and the CODE paths, not just the model output** — sanity-check field values against reality (the spread 0.5%-vs-35% catch), not just whether it compiles. See `feedback_eval_the_data_not_just_llm_text` memory.
+
+---
+
 **2026-06-04 (late) — PIPELINE BUG-HUNT: 13 silent data bugs fixed + deployed; all living docs reconciled to V6. LIVE.**
 
 An adversarial multi-agent audit (every finding re-verified vs code+BQ) found **16 silent bugs corrupting picks since day one**. 13 fixed (confirm-pass = GO, 0 blockers), 3 deferred. Trigger: the OKTA $127 untradeable-ghost pick. Decision: `docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md`.
