@@ -276,6 +276,17 @@ def persist_tournament_run(
     weights_json = json.dumps(COMPOSITE_WEIGHTS)
     now_ts = datetime.now(timezone.utc).isoformat()
 
+    # Bug #14: in_top_5 must mean a GENUINE top-5, not "advanced past round 1"
+    # (which flagged 9-20 rows true and made any top-5 eval meaningless). Rank the
+    # kept tickers by advancement (rounds reached desc, then ticker) and flag only
+    # the first 5 — the winner sorts first via a synthetic high advancement.
+    top_5 = set(
+        sorted(
+            keep,
+            key=lambda t: (-(99 if t == winner else advancement.get(t, 0)), t),
+        )[:5]
+    )
+
     rows: list[dict[str, Any]] = []
     for t in keep:
         rnd = advancement.get(t, 0)
@@ -294,7 +305,7 @@ def persist_tournament_run(
                 "regime_alignment": sc,
                 "narrative_coherence": sc,
                 "scorer_reasoning": why if is_pick else None,
-                "in_top_5": rnd >= 2 or is_pick,
+                "in_top_5": t in top_5,
                 "picker_chose": is_pick,
                 "picker_runner_up": is_runner,
                 "picker_justification": why if (is_pick or is_runner) else None,

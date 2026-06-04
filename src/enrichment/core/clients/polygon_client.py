@@ -88,8 +88,16 @@ class PolygonClient:
         quote = r.get("last_quote") or {}
 
         last_price = trade.get("price") or day.get("close")
-        bid = quote.get("bid") or day.get("low")
-        ask = quote.get("ask") or day.get("high")
+        # ROOT-CAUSE FIX 2026-06-04 (bug #1): do NOT substitute the day's price
+        # RANGE (day.low/day.high) for a missing quote. That made spread measure
+        # intraday range instead of bid/ask — and when a contract traded once
+        # (low==high) it produced an EXACTLY 0.0% spread on ~43% of snapshots,
+        # defeating the spread<=8% gate and feeding the judge a fake "0.5%
+        # spread" (the OKTA $127 ghost). When there's no live quote, bid/ask are
+        # UNKNOWN -> None, and the spread is left NULL downstream rather than
+        # synthesized. See docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md.
+        bid = quote.get("bid")
+        ask = quote.get("ask")
         return last_price, bid, ask
 
     def _map_options_result(self, r: dict) -> dict:

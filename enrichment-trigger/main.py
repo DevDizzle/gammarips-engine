@@ -426,7 +426,17 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     FROM `{SIGNALS_TABLE}`
     WHERE scan_date = '{scan_date}'
       AND overnight_score >= {MIN_SCORE}
-      AND recommended_spread_pct <= 0.08
+      -- spread gate loosened 0.08 -> 0.30 on 2026-06-04 (bug #1 fix). The old
+      -- 0.08 was operating on FAKE spreads (bid/ask was silently day.low/high,
+      -- so ~43% read ~0.0%). Now recommended_spread_pct is the REAL quoted
+      -- spread, which is wider; 0.08 would empty the pool. The scanner already
+      -- picks the tightest liquid strike per name (OI-primary), and the judge
+      -- now SEES recommended_spread_pct and weighs it — so this is a permissive
+      -- sanity bound (drop the genuinely-untradeable) not a selection gate.
+      -- A NULL spread only occurs if the chosen contract had no quote, which
+      -- _best_contract already excludes; treat NULL as fail-closed.
+      AND recommended_spread_pct IS NOT NULL
+      AND recommended_spread_pct <= 0.30
       AND (
         (direction = 'BULLISH' AND call_uoa_depth > 500000)
         OR (direction = 'BEARISH' AND put_uoa_depth > 500000)
@@ -811,15 +821,25 @@ def fetch_and_analyze_news_batch(
 # STEP 3: Fetch technicals for each ticker (Polygon + pandas_ta)
 # =====================================================================
 
-def fetch_technicals_for_ticker(ticker: str, polygon_key: str) -> dict | None:
-    """Fetch price history and compute technical indicators."""
+def fetch_technicals_for_ticker(ticker: str, polygon_key: str, scan_date: str | None = None) -> dict | None:
+    """Fetch price history and compute technical indicators AS OF scan_date.
+
+    LOOKAHEAD FIX 2026-06-04 (#8): the window end was `date.today()` (the
+    enrichment RUN date). Enrichment runs the morning after the scan; if it runs
+    post-open, `date.today()` pulls the NEXT day's bar into `iloc[-1]`, leaking
+    post-scan price into the features the judge selects on. We bound the window
+    to scan_date and defensively drop any bar dated after it.
+    See docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md.
+    """
     import requests
 
     try:
-        # Get 300 days of daily bars (need 200+ for SMA_200)
+        # Get ~420 calendar days of daily bars (need 200+ sessions for SMA_200),
+        # ending at scan_date (NOT today) so no post-scan bar can leak in.
         from datetime import timedelta
-        end_date = date.today().isoformat()
-        start_date = (date.today() - timedelta(days=420)).isoformat()
+        _asof = scan_date or date.today().isoformat()
+        end_date = _asof
+        start_date = (datetime.strptime(_asof, "%Y-%m-%d").date() - timedelta(days=420)).isoformat()
 
         url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start_date}/{end_date}"
         params = {"adjusted": "true", "sort": "asc", "apiKey": polygon_key}
@@ -840,6 +860,15 @@ def fetch_technicals_for_ticker(ticker: str, polygon_key: str) -> dict | None:
         df = pd.DataFrame(bars)
         df["date"] = pd.to_datetime(df["t"], unit="ms").dt.strftime("%Y-%m-%d")
         df = df.rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"})
+
+        # Defense-in-depth (#8): never let a bar dated AFTER scan_date into the
+        # features. Rolling indicators look backward, so filtering here keeps the
+        # whole computation as-of scan_date.
+        if scan_date:
+            df = df[df["date"] <= scan_date].reset_index(drop=True)
+            if len(df) < 20:
+                logger.warning(f"  {ticker}: only {len(df)} bars on/before {scan_date}, skipping technicals")
+                return None
 
         # Core indicators
         try:
@@ -944,8 +973,8 @@ def fetch_technicals_for_ticker(ticker: str, polygon_key: str) -> dict | None:
         return None
 
 
-def fetch_technicals_batch(tickers: list[str], polygon_key: str, gcs_client: storage.Client) -> dict:
-    """Fetch technicals for all tickers and store in GCS."""
+def fetch_technicals_batch(tickers: list[str], polygon_key: str, gcs_client: storage.Client, scan_date: str | None = None) -> dict:
+    """Fetch technicals for all tickers and store in GCS, AS OF scan_date (#8)."""
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -954,7 +983,7 @@ def fetch_technicals_batch(tickers: list[str], polygon_key: str, gcs_client: sto
     today = date.today().isoformat()
 
     def _fetch_one(ticker):
-        tech = fetch_technicals_for_ticker(ticker, polygon_key)
+        tech = fetch_technicals_for_ticker(ticker, polygon_key, scan_date=scan_date)
         if tech:
             blob_path = f"{TECHNICALS_OUTPUT_PREFIX}{ticker}_{today}.json"
             blob = bucket.blob(blob_path)
@@ -988,12 +1017,18 @@ def compute_risk_fields(sig: dict, tech: dict, news: dict) -> dict:
 
     pct = float(sig.get("price_change_pct", 0) or 0)
     direction = sig.get("direction", "")
+    # NOTE (bug #15, partial fix 2026-06-04): rsi/atr/catalyst/reversal below
+    # still coerce MISSING inputs to mid-range neutral defaults — a latent
+    # fail-open that hides under-enriched candidates. Full fix (propagate NULL +
+    # an `under_enriched` flag column) is a follow-up (needs a schema add).
     rsi = float(tech.get("rsi_14", 50) or 50)
     atr = float(tech.get("atr_14", 0) or 0)
     price = float(sig.get("underlying_price", 0) or 0)
     catalyst_score = float(news.get("catalyst_score", 0.1) or 0.1)
     reversal_prob = float(news.get("reversal_probability", 0.3) or 0.3)
-    overnight_score = int(sig.get("overnight_score", 5) or 5)
+    # overnight_score is ALWAYS present from the scanner; default to 0 (fail-safe,
+    # below MIN_SCORE) rather than 5 (which would silently pass the gate).
+    overnight_score = int(sig.get("overnight_score") or 0)
 
     # --- ATR-normalized move ---
     # How many ATRs did the stock move? >2 = extreme, >1.5 = significant
@@ -1567,7 +1602,7 @@ def enrichment_trigger():
     # Step 3: Fetch technicals
     technicals = {}
     if POLYGON_API_KEY:
-        technicals = fetch_technicals_batch(tickers, POLYGON_API_KEY, gcs_client)
+        technicals = fetch_technicals_batch(tickers, POLYGON_API_KEY, gcs_client, scan_date=scan_date)
     else:
         logger.warning("No POLYGON_API_KEY — skipping technicals")
 

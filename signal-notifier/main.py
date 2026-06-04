@@ -1,22 +1,27 @@
-"""Signal Notifier — V5.4 Agent Ranker (canonical 2026-05-08).
+"""Signal Notifier — bracket tournament (canonical 2026-06-04, was V5.4 ranker).
 
-Reads `overnight_signals_enriched`, applies the hard gate stack to build the
-candidate pool, calls the V5.4 signal-judge to pick one ticker, and sends
-ONE email with that pick to operator + paid subscribers (same content). On
-any V5.4 error (timeout, 5xx, picker out-of-set), fails CLOSED — no email.
+Reads `overnight_signals_enriched`, builds the FULL candidate pool (selection
+gates removed 2026-06-04), calls the signal-judge bracket tournament to pick one
+ticker, and sends ONE email with that pick to operator + paid subscribers (same
+content). On any judge error (timeout, 5xx, out-of-set), fails CLOSED — no email.
 
-Gate stack (run UPSTREAM of the V5.4 picker):
-  - ``volume_oi_ratio > 2.0`` — REMOVED 2026-06-02. Realized option-PnL
-        backtest (N=1,375) showed it dropped ~55-63% of real winners for
-        precision lift <= 0; it was the main cause of picker-slate starvation
-        (~2 candidates/day). See DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md.
-  - ``moneyness_pct BETWEEN 0.05 AND 0.13``   5-13% OTM (cap widened 0.10->0.13
-        on 2026-06-02; the H12 deep-OTM-cliff lit is hold-to-expiry, not our
-        3-day bracket. See DECISIONS/2026-06-02-moneyness-cap-widen-to-13.md.
-        FALLBACK path keeps the 0.10 cap.).
-  - ``vix3m_at_enrich`` present AND ``VIX <= VIX3M`` (no backwardation)
+What the STRICT path filters (2026-06-04 bracket-tournament):
+  - SAFETY rails ONLY in the SELECT: a tradeable contract must exist
+        (recommended_strike / recommended_expiration NOT NULL) and regime data
+        must be present (vix3m_at_enrich NOT NULL).
+  - ``VIX <= VIX3M`` (no backwardation) — checked downstream before the judge.
         Fail-closed: a NULL vix3m_at_enrich or a missing current VIX means we
         skip the email for the day entirely.
+  - Earnings-overlap exclusion (see below) — the last hard filter.
+
+  INTENTIONALLY NOT GATED on the strict path: moneyness, OI, vol, DTE,
+  volume_oi_ratio, active-days. The tournament ranges across the full pool and
+  weighs these features itself (they are all in the SELECT). ``spread <= 8%``
+  still runs UPSTREAM in enrichment-trigger; the V/OI gate was removed 2026-06-02
+  and the rest were removed 2026-06-04. The FALLBACK path (bypasses the
+  tournament, takes df.iloc[0]) re-applies a moneyness band as its only bound.
+  See DECISIONS/2026-06-04-bracket-tournament.md.
+
   - **Earnings-overlap exclusion** (added 2026-05-06): exclude any ticker
     whose scheduled earnings date falls inside ``[scan_date, exit_day]``
     where ``exit_day = entry_day + 2 trading days``. Window includes
@@ -27,16 +32,17 @@ Gate stack (run UPSTREAM of the V5.4 picker):
     long single-leg through the print. Fail-closed on calendar fetch failure.
     See docs/DECISIONS/2026-05-06-earnings-overlap-exclusion.md.
 
-The picker (V5.4): Scorer fanout (`gemini-3.5-flash`, scorer_v3 with
-HEDGING flow_conviction ≤4 hard cap) + Picker (`gemini-3.1-pro-preview`,
-picker_v2, enum confidence). Composite weights 60/25/15 flow/regime/narrative
-(weighted sum). Hosted at signal-judge Cloud Run service. signal-judge
-uptime is the SLO — no V5.3 SQL fallback. See docs/DECISIONS/
-2026-05-08-v5-3-retired-v5-4-promoted.md.
+The picker (2026-06-04 tournament_v1): a randomized bracket tournament over the
+full enriched pool — 3 independent brackets, batches of ≤10, top-2 advance,
+3-run consensus selects the pick (3/3=high, 2/3=medium, 1/3=low). Dead-simple
+prompt + the daily report + per-contract JSON; no memory, no rubric, no weights.
+This replaced the V5.4 Scorer→Picker pair / judge_v6. Hosted at signal-judge
+Cloud Run service. signal-judge uptime is the SLO — no SQL fallback. See
+docs/DECISIONS/2026-06-04-bracket-tournament.md.
 
 Trader execution mechanics (forward-paper-trader, separate service): entry
 10:00 ET day-1, stop -60%, target +80%, 3-day hold, exit 15:50 ET day-3.
-Unchanged across V5.3 → V5.4 — the picker change is what V5.4 introduced.
+Unchanged across V5.3 → V5.4 → tournament — only the picker has changed.
 """
 
 import logging
@@ -135,18 +141,13 @@ MONEYNESS_MIN = 0.05
 # 0.10 (see below). Thin/single-regime evidence; reversible — revert to 0.10 if
 # the 10-13% pick cohort underperforms on the live ledger.
 MONEYNESS_MAX = 0.13
-# Liquidity floors relaxed 2026-05-12 (Scenario C, picker starvation fix; see
-# docs/DECISIONS/2026-05-12-v5-4-pipeline-alignment.md). Pre-relaxation values
-# (OI_MIN=20, VOL_MIN=100) were chosen as defensive defaults at the 2026-04-30
-# liquidity-floor launch; researcher funnel analysis on the 22 V5.4-era scan
-# dates showed they were the dominant cause of zero-candidate days. Halving
-# both floors keeps the "contract is actually fillable" intent while opening
-# the candidate pool. Underlying liquidity is already enforced upstream by
-# enrichment-trigger (directional UOA > $500K), so a 10/50 contract still
-# sits inside a real flow envelope. Revisit at N=15 closed V5.4 trades only
-# if win rate diverges materially by OI/volume decile.
-OI_MIN = 10      # contract must have real open interest to be fillable
-VOL_MIN = 50     # contract must have traded yesterday in size
+# Contract OI/vol selection floors (OI_MIN=10 / VOL_MIN=50) were REMOVED with
+# the 2026-06-04 bracket-tournament — scan-time OI/vol is a one-day-stale
+# snapshot and the sweep that earns the score only becomes OI the next morning,
+# after our 10:00 entry. The tournament now weighs liquidity rather than
+# pre-filtering on it. Underlying liquidity is still enforced upstream by
+# enrichment-trigger (directional UOA > $500K). See
+# docs/DECISIONS/2026-06-04-bracket-tournament.md.
 
 # DTE band added 2026-05-11 (7-30 originally). Anchored to scorer_v4.md:18 /
 # picker_v3.md:69: short-DTE is the structural sweet spot for the +80%/3-day
@@ -166,38 +167,27 @@ VOL_MIN = 50     # contract must have traded yesterday in size
 DTE_MIN = 7
 DTE_MAX = 45
 
-# Active-days liquidity gate (added 2026-05-19). Each finalist's
-# recommended_contract must have printed volume on at least ACTIVE_DAYS_MIN of
-# the 20 trading days preceding scan_date. Picked deliberately at 5: lifts
-# entry-day fillability 50% -> 71% (~95% of the gain from >=8) with zero V5.4
-# dry days in the 25-day backtest. Tuning requires a new DECISIONS doc — do
-# not loosen via env var or hot-path edit. See:
-#   docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md
-ACTIVE_DAYS_MIN = 5
+# Active-days liquidity gate (added 2026-05-19, ACTIVE_DAYS_MIN=5) was REMOVED
+# with the 2026-06-04 bracket-tournament — same rationale as the OI/vol floors
+# (scan-time liquidity is a stale snapshot; the tournament weighs it instead of
+# pre-filtering). compute_active_days_20d() is retained for reference/audit but
+# is no longer called. See docs/DECISIONS/2026-06-04-bracket-tournament.md.
 
 # Daily-cadence fallback (2026-06-01, see
-# docs/DECISIONS/2026-06-01-daily-cadence-fallback.md). When the strict
-# conviction gates (V/OI > 2, 5-10% OTM band) leave ZERO candidates, we no
-# longer skip the day — we surface the single best *fillable* candidate so the
-# cohort gets a trade on every tradeable day. The fallback RELAXES only the two
-# pure-conviction gates (unusual-volume V/OI, the tight OTM band) and KEEPS
-# every tradeability / literature-settled gate intact: OI/vol floors, the
-# regime (VIX<=VIX3M) gate, the earnings-overlap exclusion, and the active-days
-# liquidity gate all still run on the fallback pool. The 2026-05-26 skip day is
-# the motivating case: 24 score-7/8 names were thrown away; HUBS (OI 733, vol
-# 215) was perfectly fillable and only failed V/OI (0.3). Fallback picks are
+# docs/DECISIONS/2026-06-01-daily-cadence-fallback.md). The fallback fires when
+# the strict pool is empty (rare post-2026-06-04, since the strict path is now
+# ungated). It BYPASSES the tournament and takes df.iloc[0] directly, so it is
+# the one path that still applies a moneyness band — the band is the only thing
+# keeping the bypassed pick from being deep-ITM/deep-OTM. The fallback band is
+# interpolated into the SELECT (see _build_candidate_query, fallback=True):
+# floor relaxed to ATM, cap pinned at FALLBACK_MONEYNESS_MAX. Fallback picks are
 # tagged policy_gate="FALLBACK" end-to-end so their EV is measurable separately
 # from STRICT picks and the fallback can be killed with data if it loses.
 FALLBACK_MONEYNESS_MIN = 0.0   # ATM allowed (strict floor 0.05); ITM still excluded
-# DECOUPLED from MONEYNESS_MAX on 2026-06-02. Previously `= MONEYNESS_MAX`, which
-# would silently widen the fallback cap whenever the strict cap moved. Fallback
-# fires only on zero-strict-candidate (lowest-conviction) days — the worst place
-# for deeper-OTM names — so it stays pinned at 0.10 even though STRICT is now 0.13.
-FALLBACK_MONEYNESS_MAX = 0.10   # pinned; do NOT inherit MONEYNESS_MAX — no deep-OTM on fallback days
-# V/OI floor is dropped entirely for the fallback (unusual-flow conviction is
-# precisely what we relax). OI_MIN / VOL_MIN / DTE band are UNCHANGED — a
-# fallback pick must still be fillable, and the active-days gate downstream is
-# the resting-liquidity backstop that keeps thin OI=3 names (CDNS) out.
+# Pinned at 0.10 (NOT coupled to MONEYNESS_MAX). The fallback fires only on
+# zero-strict-candidate days — the worst place for deeper-OTM names — so it stays
+# tight even though the strict tournament ranges across the full moneyness pool.
+FALLBACK_MONEYNESS_MAX = 0.10   # pinned; no deep-OTM on bypassed fallback picks
 POLICY_GATE_STRICT = "STRICT"
 POLICY_GATE_FALLBACK = "FALLBACK"
 
@@ -1331,31 +1321,35 @@ def compute_and_write_ledger_trades() -> bool:
 
 
 def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
-    """Build the enriched-candidate SELECT for the strict or fallback gate.
+    """Build the enriched-candidate SELECT for the strict or fallback pool.
 
-    STRICT (default), as of 2026-06-02, is the 5-10% OTM band only (the
-    unusual-volume V/OI > 2 gate was REMOVED — see the conviction_where comment
-    and DECISIONS/2026-06-02). As of the same date STRICT and FALLBACK share the
-    SAME ranking — composite ``overnight_score`` DESC, then resting
-    ``recommended_oi`` DESC (fillability), then spread — so both pick the best
-    fillable high-signal candidate. FALLBACK (daily-cadence, 2026-06-01)
-    additionally lowers the moneyness floor to ATM. Both modes keep the OI/vol
-    floors and the DTE band; the downstream regime, earnings, and active-days
-    gates run identically on whichever pool this returns.
+    STRICT (default), as of the 2026-06-04 bracket-tournament, is INTENTIONALLY
+    UNGATED on selection: NO moneyness band, NO OI/vol floor, NO DTE band, NO
+    V/OI, NO active-days. The only WHERE predicates are SAFETY rails — a
+    tradeable contract must exist (strike/expiration NOT NULL) and regime data
+    must be present (vix3m_at_enrich NOT NULL). The tournament in signal-judge
+    picks across the full pool (downstream regime + earnings exclusions still
+    apply in run_notifier; spread<=8% still runs upstream in enrichment-trigger).
+    See docs/DECISIONS/2026-06-04-bracket-tournament.md.
+
+    FALLBACK (daily-cadence, 2026-06-01) is a SEPARATE path that BYPASSES the
+    tournament (run_notifier takes df.iloc[0]). Because nothing downstream bounds
+    it, FALLBACK re-applies a moneyness band here (ATM floor, 0.10 cap) so the
+    bypassed pick can't be deep-ITM/deep-OTM.
     See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
 
-    STRICT ORDER BY: re-ranked 2026-06-02 to ``overnight_score`` DESC primary,
-    SUPERSEDING the 2026-05-01 directional-V/OI-DESC primary. Rationale in the
-    order_by comment below: the 2026-05-01 EDA (N=435 V5.3) only established
-    V/OI-DESC over a dollar-volume primary, and the 2026-06-02 realized-PnL
-    analysis (N=1,375) shows V/OI carries no selection value — so it should not
-    rank the pool the picker draws from. The scorer re-scores survivors by
-    composite, making overnight_score the aligned pre-LIMIT sort.
+    ORDER BY (both modes): composite ``overnight_score`` DESC, then resting
+    ``recommended_oi`` DESC (fillability), then spread. For FALLBACK this is the
+    selection (iloc[0]); for STRICT it only orders the pool the tournament reads.
     """
     if fallback:
-        # Drop the V/OI floor; widen the moneyness floor to ATM. Rank by
-        # composite score, then resting open interest (fillability), then spread.
-        conviction_where = f"""
+        # FALLBACK still bounds moneyness. The fallback pick BYPASSES the
+        # tournament (run_notifier takes df.iloc[0]), so the band is the only
+        # thing keeping the bypassed pick from being deep-ITM/deep-OTM — it MUST
+        # be interpolated into the WHERE clause. Floor relaxed to ATM, cap pinned
+        # at FALLBACK_MONEYNESS_MAX (0.10). Rank by composite score, then resting
+        # open interest (fillability), then spread.
+        moneyness_where = f"""
       AND moneyness_pct IS NOT NULL
       AND moneyness_pct BETWEEN {FALLBACK_MONEYNESS_MIN} AND {FALLBACK_MONEYNESS_MAX}"""
         order_by = """
@@ -1364,40 +1358,30 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
         recommended_spread_pct ASC,
         ticker ASC"""
     else:
-        # V/OI > 2 conviction gate REMOVED 2026-06-02 (owner-directed; see
-        # docs/DECISIONS/2026-06-02-voi-gate-relaxation-proposal.md). Realized
-        # option-PnL backtest (N=1,375 fills) showed V/OI>2 drops ~55-63% of
-        # real +80%/+25% winners for precision lift statistically <= 0
-        # (90% CI [-0.061, -0.001]). It was strangling the picker's slate to a
-        # median of ~2 candidates/day. The moneyness band and ALL tradeability
-        # gates (OI/vol/DTE/regime/earnings/active-days) are unchanged.
-        conviction_where = f"""
-      AND moneyness_pct IS NOT NULL
-      AND moneyness_pct BETWEEN {MONEYNESS_MIN} AND {MONEYNESS_MAX}"""
-        # ORDER BY re-ranked 2026-06-02 to match FALLBACK: composite
-        # ``overnight_score`` first, then resting ``recommended_oi`` (fillability),
-        # then spread. This SUPERSEDES the 2026-05-01 directional-V/OI-DESC primary
-        # — that EDA (N=435 V5.3) only beat a dollar-volume primary, and the
-        # 2026-06-02 realized-PnL work (N=1,375) shows V/OI has no selection value,
-        # so ranking the picker's pre-LIMIT pool by it is backwards. The LIMIT 10
-        # only binds on high-inventory days; the scorer re-scores the survivors by
-        # composite anyway, so overnight_score is the aligned pre-filter.
+        # 2026-06-04 bracket-tournament: the STRICT path is INTENTIONALLY
+        # UNGATED on moneyness/OI/vol/DTE/V-OI/active-days — every enriched
+        # signal reaches the tournament in signal-judge, which weighs moneyness
+        # (it's in the SELECT below) rather than us pre-filtering it. So the
+        # strict moneyness band is empty here. See
+        # docs/DECISIONS/2026-06-04-bracket-tournament.md.
+        moneyness_where = ""
         order_by = """
         overnight_score DESC,
         recommended_oi DESC,
         recommended_spread_pct ASC,
         ticker ASC"""
 
-    # 2026-06-04 bracket-tournament: the SELECTION gates (moneyness, OI, vol, DTE,
-    # V/OI) are REMOVED — ALL enriched signals get a chance and the tournament in
-    # signal-judge does the picking. Only SAFETY rails remain: a tradeable contract
-    # must exist (strike/expiration NOT NULL), regime data present (vix3m), and the
-    # earnings-overlap exclusion still runs downstream in run_notifier. The rich
-    # feature columns (technicals, narrative, greeks) are added so the judge gets
-    # the full structured JSON. Leakage cols (next_day*/day2_*/day3_*/peak_return/
-    # is_win/outcome_tier) are DELIBERATELY NOT selected. {conviction_where} is now
-    # unused in strict mode. See docs/DECISIONS/2026-06-04-bracket-tournament.md.
-    _unused = conviction_where  # fallback path retains it; strict mode ungated
+    # 2026-06-04 bracket-tournament: STRICT filters ONLY strike/expiration/vix3m
+    # NOT NULL here, then regime + earnings downstream in run_notifier. The
+    # moneyness, OI, vol, DTE, V/OI, and active-days SELECTION gates are
+    # intentionally NOT applied on the strict path — the tournament in signal-judge
+    # picks across the full pool. (spread<=8% still runs upstream in
+    # enrichment-trigger.) The rich feature columns (technicals, narrative, greeks)
+    # plus moneyness_pct are selected so the judge gets the full structured JSON and
+    # can weigh moneyness itself. Leakage cols (next_day*/day2_*/day3_*/peak_return/
+    # is_win/outcome_tier) are DELIBERATELY NOT selected. ``moneyness_where`` is the
+    # FALLBACK-only band (empty on strict). See
+    # docs/DECISIONS/2026-06-04-bracket-tournament.md.
     return f"""
     SELECT
         ticker, scan_date, direction, underlying_price, price_change_pct,
@@ -1421,7 +1405,7 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
     WHERE DATE(scan_date) = "{target_date}"
       AND recommended_strike IS NOT NULL
       AND recommended_expiration IS NOT NULL
-      AND vix3m_at_enrich IS NOT NULL
+      AND vix3m_at_enrich IS NOT NULL{moneyness_where}
     ORDER BY{order_by}
     LIMIT 200
     """
@@ -1525,11 +1509,14 @@ def run_notifier(target_date: date | None = None):
         ))
         return True, "Earnings calendar unavailable (fail-closed)."
 
-    # Earnings-overlap exclusion: build the candidate pool V5.4 will rank.
-    # The hard gates (moneyness 5-13%, OI/vol floors, spread ≤8%, regime
-    # VIX≤VIX3M; V/OI removed 2026-06-02) ran upstream in the SELECT that produced
-    # df. Earnings overlap is the last hard filter — anything that touches an
-    # earnings print in [scan_date, exit_day] is removed before V5.4 sees it.
+    # Earnings-overlap exclusion: build the candidate pool the tournament will
+    # rank. As of 2026-06-04 the SELECT that produced df is INTENTIONALLY UNGATED
+    # on selection (no moneyness/OI/vol/DTE/V-OI) — it applied only the
+    # strike/expiration/vix3m NOT NULL safety rails (and the FALLBACK-only
+    # moneyness band). Regime (VIX≤VIX3M) is checked separately below; spread≤8%
+    # runs upstream in enrichment-trigger. Earnings overlap is the last hard
+    # filter — anything that touches an earnings print in [scan_date, exit_day]
+    # is removed before the tournament sees it.
     skipped_for_earnings: list[str] = [
         str(c["ticker"]).upper() for _, c in df.iterrows()
         if str(c["ticker"]).upper() in earnings_tickers
@@ -1553,24 +1540,15 @@ def run_notifier(target_date: date | None = None):
             f"({skipped_for_earnings}). {len(df)} candidates passed to V5.4."
         )
 
-    # Active-days liquidity gate (added 2026-05-19, per
-    # docs/DECISIONS/2026-05-19-active-days-liquidity-gate.md). Each surviving
-    # finalist's recommended_contract must have printed volume on at least
-    # ACTIVE_DAYS_MIN of the 20 trading days preceding scan_date. Two distinct
-    # rejection reasons:
-    #   * thin_contract_liquidity     — Polygon answered, count < threshold
-    #   * liquidity_check_unavailable — Polygon errored or returned empty;
-    #                                   fail-closed at the candidate level
-    # The KBR Jun-18 27.5P 2026-05-14 INVALID_LIQUIDITY incident is the
-    # motivating case (4 active days, scan-day vol=323 was a single block).
-    # 2026-06-04 bracket-tournament: the active-days liquidity gate is BYPASSED.
-    # All signals get a chance — the early/illiquid sweeps (OI builds AFTER our
-    # 10:00 entry, so scan-time OI is a stale snapshot) are exactly what we want the
-    # tournament to weigh, not filter out. This also drops the ~N per-candidate
-    # Polygon calls (latency). Column kept NULL for payload compat. compute_active_
-    # days_20d / ACTIVE_DAYS_MIN remain defined but unused on the strict path. See
+    # 2026-06-04 bracket-tournament: the active-days liquidity gate is REMOVED
+    # (was added 2026-05-19; KBR Jun-18 27.5P INVALID_LIQUIDITY was the motivating
+    # case). All signals get a chance — the early/illiquid sweeps (OI builds AFTER
+    # our 10:00 entry, so scan-time OI is a stale snapshot) are exactly what we
+    # want the tournament to weigh, not filter out. This also drops the ~N
+    # per-candidate Polygon calls (latency). The old `df.assign(active_days_20d=
+    # None)` no-op was removed: it never reached the /rank payload anyway
+    # (_candidate_for_ranker drops None-valued columns). See
     # docs/DECISIONS/2026-06-04-bracket-tournament.md.
-    df = df.assign(active_days_20d=None)
 
     if len(df) == 0:
         # The pool emptied here even though it was non-empty before this gate
@@ -1578,8 +1556,7 @@ def run_notifier(target_date: date | None = None):
         # existing day-level skip reason — thin_contract_liquidity is per
         # candidate, not per day, per the decision doc.
         logger.info(
-            "All remaining candidates failed the active-days liquidity gate. "
-            "No email sent."
+            "All remaining candidates were filtered out. No email sent."
         )
         write_todays_pick_doc(
             target_date, has_pick=False, skip_reason="no_candidates_passed_gates"
@@ -1588,25 +1565,25 @@ def run_notifier(target_date: date | None = None):
             None, target_date, None, has_pick=False,
             skip_reason="no_candidates_passed_gates",
         ))
-        return True, "No eligible signal after active-days liquidity gate."
+        return True, "No eligible signal after regime/earnings filters."
 
-    # Pick selection. On STRICT days the V5.4 Scorer/Picker LLM pair ranks the
-    # pool. On FALLBACK days we bypass the ranker entirely: the pool is already
-    # "best fillable candidate" by construction (ORDER BY score, OI), and ranking
-    # ~1 low-conviction name only re-introduces a mass-leakage skip that would
-    # defeat the daily-cadence guarantee. The regime, earnings, and active-days
-    # gates above have already run on the fallback pool, so what survives here is
-    # tradeable. See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
+    # Pick selection. On STRICT days the signal-judge bracket tournament ranks
+    # the FULL pool. On FALLBACK days we bypass the tournament entirely: the pool
+    # is already "best fillable candidate within the fallback moneyness band" by
+    # construction (ORDER BY score, OI), and ranking ~1 low-conviction name only
+    # re-introduces a mass-leakage skip that would defeat the daily-cadence
+    # guarantee. The regime and earnings filters above have already run on the
+    # fallback pool. See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
     if gate_mode == POLICY_GATE_FALLBACK:
         top = df.iloc[0]
         v5_4_meta = {
             "runner_up": str(df.iloc[1]["ticker"]) if len(df) > 1 else None,
             "justification": (
-                "Fallback pick — no signal cleared the strict conviction gates "
-                "(unusual-volume V/OI > 2 or the 5-10% OTM band). Selected the "
-                "best fillable candidate by composite score and resting open "
-                "interest; the regime, earnings, and liquidity gates all passed. "
-                "Low conviction by construction — tagged FALLBACK in the ledger."
+                "Fallback pick — the strict pool was empty. Selected the best "
+                "candidate by composite score and resting open interest, bounded "
+                "by the fallback moneyness band (ATM floor, 0.10 cap); the regime "
+                "and earnings filters passed. Low conviction by construction — "
+                "tagged FALLBACK in the ledger."
             ),
             "confidence": "LOW",
             "run_id": None,

@@ -61,6 +61,15 @@ TARGET_PCT = 0.80  # +80% on option premium (hard take-profit)
 # active: at peak = +30%, trail level = 1.30 × 0.75 = 0.975 (vs hard 0.40).
 TRAIL_TRIGGER_PCT = 0.30   # activate trail when peak gain >= +30%
 TRAIL_DRAWDOWN_PCT = 0.25  # 25% drawdown from peak triggers trail exit
+# Symmetric adverse slippage (2026-06-04). Entry pays UP this fraction; bracket
+# exits (TARGET/STOP/TRAIL) fill DOWN this same fraction. Previously entry was
+# slipped (+2%) but exits filled at the exact bracket threshold with no
+# slippage, biasing realized_return_pct upward. One constant, applied both
+# sides. See docs/DECISIONS/2026-06-04-pnl-sim-realism-fixes.md.
+SLIPPAGE_PCT = 0.02
+# Max minutes after 10:00 ET we still treat a fill as an on-time day-1 entry.
+# A first print beyond this is a late/illiquid fill, not a clean 10:00 entry.
+LATE_FILL_TOLERANCE_MIN = 30
 ENTRY_HHMM = "10:00"  # 10:00 ET on day-1
 EXIT_HHMM = "15:50"   # 15:50 ET on day-3
 POLICY_VERSION = "V6_TOURNAMENT"
@@ -492,6 +501,12 @@ def run_forward_paper_trading(target_date: date = None):
         "exit_timestamp": None,
         "exit_reason": None,
         "realized_return_pct": None,
+        # P&L-realism audit fields (added 2026-06-04 to remove upward bias in
+        # realized_return_pct). All nullable; populated inline during simulation.
+        # See docs/DECISIONS/2026-06-04-pnl-sim-realism-fixes.md.
+        "exit_slippage": None,       # adverse slippage applied on bracket exits (frac)
+        "illiquid_exit": None,       # True when TIMEOUT priced off a stale (earlier-day) print
+        "late_fill_minutes": None,   # minutes between 10:00 ET target and the actual entry print
         # Benchmarking & regime context — populated inline during simulation.
         # All remain None on fetch failure (non-blocking, see benchmark_context.py).
         "iv_rank_entry": None,
@@ -522,25 +537,45 @@ def run_forward_paper_trading(target_date: date = None):
     timeout_dt = datetime.combine(exit_day, datetime.strptime(EXIT_HHMM, "%H:%M").time())
     timeout_ts_ms = int(est.localize(timeout_dt).timestamp() * 1000)
 
-    # Find the entry bar. Prefer a bar at-or-after 10:00 ET, but fall
-    # back to the most recent bar before 10:00 as a price proxy rather
-    # than throwing the whole trade away. Only mark INVALID_LIQUIDITY
-    # when entry_day genuinely has zero printed bars.
+    # Find the entry bar (Bug #13 fix, 2026-06-04). The 10:00 ET fill must
+    # land on a print close to 10:00, not silently hours late or pre-market.
+    #   * Prefer the first print at-or-after 10:00 ET, but ONLY if it lands
+    #     within LATE_FILL_TOLERANCE_MIN minutes. A later first print is a
+    #     late/illiquid fill — keep it but set illiquid_exit=True and stamp
+    #     late_fill_minutes so it's excludable from EV (the bracket exit_reason
+    #     is preserved as the more informative tag).
+    #   * If there is NO at-or-after print at all on entry_day, fall back to
+    #     the most recent pre-10:00 print as a price proxy (rather than
+    #     discarding the trade), again flagged illiquid with its offset.
+    #   * INVALID_LIQUIDITY only when entry_day has zero printed bars.
+    # late_fill_minutes is signed: positive = filled after 10:00, negative =
+    # pre-10:00 proxy fill.
     entry_day_bars = [b for b in bars
                       if datetime.fromtimestamp(b["t"]/1000, tz=est).date() == entry_day]
     entry_bar = None
+    is_late_fill = False
+    late_fill_minutes = None
     if entry_day_bars:
         after_or_at = [b for b in entry_day_bars if b["t"] >= entry_ts_ms]
         if after_or_at:
             entry_bar = after_or_at[0]
+            late_fill_minutes = (entry_bar["t"] - entry_ts_ms) / 60000.0
+            if late_fill_minutes > LATE_FILL_TOLERANCE_MIN:
+                is_late_fill = True
         else:
             before = [b for b in entry_day_bars if b["t"] < entry_ts_ms]
             entry_bar = before[-1] if before else None
+            if entry_bar is not None:
+                late_fill_minutes = (entry_bar["t"] - entry_ts_ms) / 60000.0
+                is_late_fill = True  # pre-10:00 proxy fill is never "on time"
+
+    if late_fill_minutes is not None:
+        record["late_fill_minutes"] = float(late_fill_minutes)
 
     if not entry_bar or entry_bar.get("v", 0) == 0:
         record["exit_reason"] = "INVALID_LIQUIDITY"
     else:
-        base_entry = entry_bar["c"] * 1.02  # 2% Base Slippage
+        base_entry = entry_bar["c"] * (1.0 + SLIPPAGE_PCT)  # adverse entry slippage
         # V5.3 base: -60% option stop AND +80% option target.
         # V5.4 (post 2026-05-09): trailing stop conditional re-introduced.
         stop = base_entry * (1.0 - STOP_PCT)
@@ -587,7 +622,19 @@ def run_forward_paper_trading(target_date: date = None):
             logger.warning(f"underlying context fetch failed for {row['ticker']}: {e}")
         # ------------------------------------------------------------------
 
+        # Start the bracket walk at the first bar strictly AFTER 10:00 ET
+        # (Bug #13 fix). When entry_bar is a pre-10:00 proxy print, walking
+        # from bars.index(entry_bar)+1 would let pre-entry bars trigger
+        # bracket exits before the position even exists. Anchor the walk on
+        # entry_ts_ms instead so we never evaluate exits on pre-entry bars.
+        # When entry_bar is itself at/after 10:00, this matches the original
+        # entry_idx (the proxy and the real entry coincide).
         entry_idx = bars.index(entry_bar)
+        walk_start = entry_idx + 1
+        for k in range(len(bars)):
+            if bars[k]["t"] >= entry_ts_ms and bars[k]["t"] > entry_bar["t"]:
+                walk_start = k
+                break
         exit_reason = "TIMEOUT"
         exit_price = None
         exit_ts = None
@@ -611,14 +658,31 @@ def run_forward_paper_trading(target_date: date = None):
         # mirrors the conservative "high-then-low" intrabar assumption.
         # Track the most recent bar at-or-before timeout_ts_ms so on
         # TIMEOUT we price off the last in-window print.
+        # exit_slip records the adverse slippage actually applied to a bracket
+        # fill (TARGET/STOP/TRAIL). TIMEOUT marks-to-market at the last print
+        # with no slippage (we model an exit-at-market over a 1-min bar, not a
+        # liquidity-taking bracket order). illiquid_exit flags a stale TIMEOUT
+        # print (Bug #9).
+        exit_slip = 0.0
+        illiquid_exit = False
         last_in_window_bar = None
-        for j in range(entry_idx + 1, len(bars)):
+        for j in range(walk_start, len(bars)):
             b = bars[j]
             b_ts = b["t"]
 
             if b_ts >= timeout_ts_ms:
-                exit_reason = "TIMEOUT"
+                # TIMEOUT (Bug #9 fix): price off the last in-window print, but
+                # only treat it as a clean TIMEOUT if that print is ON exit_day.
+                # A last print from an EARLIER day is a stale mark for a 3-day
+                # hold — keep the mid but flag illiquid_exit so it's excludable
+                # from EV rather than masquerading as a clean timeout fill.
                 timeout_bar = last_in_window_bar if last_in_window_bar is not None else b
+                tb_day = datetime.fromtimestamp(timeout_bar["t"]/1000, tz=est).date()
+                if tb_day != exit_day:
+                    exit_reason = "STALE_NO_TIMEOUT_PRINT"
+                    illiquid_exit = True
+                else:
+                    exit_reason = "TIMEOUT"
                 exit_price = timeout_bar["c"]
                 exit_ts = timeout_bar["t"]
                 break
@@ -641,13 +705,22 @@ def run_forward_paper_trading(target_date: date = None):
             hit_target = b["h"] >= target
             if hit_stop:
                 # Stop (trail or hard) takes precedence over TARGET on ambiguous bars.
+                # Bug #12 fix: model gap-through — fill at the worse of the
+                # threshold and the bar's open/low (a bar that gaps below the
+                # stop fills at the gap, not the stop) — then apply adverse
+                # slippage symmetric to the entry.
                 exit_reason = effective_stop_reason
-                exit_price = effective_stop
+                fill_level = min(effective_stop, b["l"], b["o"])
+                exit_price = fill_level * (1.0 - SLIPPAGE_PCT)
+                exit_slip = SLIPPAGE_PCT
                 exit_ts = b_ts
                 break
             if hit_target:
+                # Bug #12 fix: TARGET fills at the threshold minus adverse
+                # slippage (we don't get a better-than-target fill).
                 exit_reason = "TARGET"
-                exit_price = target
+                exit_price = target * (1.0 - SLIPPAGE_PCT)
+                exit_slip = SLIPPAGE_PCT
                 exit_ts = b_ts
                 break
 
@@ -659,16 +732,35 @@ def run_forward_paper_trading(target_date: date = None):
             # the future-timeout guard above, this should only happen when the
             # contract simply stopped printing before the timeout boundary; use
             # the last available in-window bar as the timeout exit price.
+            # Bug #9: a last print from an earlier day is stale for a 3-day
+            # hold — flag illiquid_exit and use the distinct STALE reason so it
+            # is excludable from EV instead of looking like a clean TIMEOUT.
             last = last_in_window_bar if last_in_window_bar is not None else entry_bar
-            exit_reason = "TIMEOUT"
+            last_day = datetime.fromtimestamp(last["t"]/1000, tz=est).date()
+            if last_day != exit_day:
+                exit_reason = "STALE_NO_TIMEOUT_PRINT"
+                illiquid_exit = True
+            else:
+                exit_reason = "TIMEOUT"
             exit_price = last["c"]
             exit_ts = last["t"]
 
         ret = (exit_price - base_entry) / base_entry
 
+        # Bug #13: a late/illiquid entry fill is recorded but tagged so it's
+        # excludable from EV. INVALID_LIQUIDITY (zero-volume) already short-
+        # circuits above; LATE_FILL overlays the computed bracket exit_reason
+        # only when the realized exit was otherwise clean, preserving the more
+        # informative STALE/TIMEOUT/STOP/TARGET tag in exit_reason via the
+        # dedicated late_fill_minutes column (already stamped above).
+        if is_late_fill:
+            illiquid_exit = True
+
         record["exit_reason"] = exit_reason
         record["exit_timestamp"] = datetime.fromtimestamp(exit_ts/1000, tz=est).isoformat()
         record["realized_return_pct"] = float(ret)
+        record["exit_slippage"] = float(exit_slip)
+        record["illiquid_exit"] = bool(illiquid_exit)
         record["peak_premium"] = float(peak_premium)
         record["trail_activated"] = bool(trail_active)
         record["trail_stop_at_exit"] = float(trail_stop_level) if trail_stop_level is not None else None
@@ -756,6 +848,11 @@ def _write_ledger_records(
     load_job_config = bigquery.LoadJobConfig(
         write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        # Allow new nullable columns (exit_slippage, illiquid_exit,
+        # late_fill_minutes — added 2026-06-04 for P&L-realism auditing) to
+        # auto-create on the existing ledger table without a separate
+        # migration. Additive only; never drops or retypes columns.
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
     )
     load_job = client.load_table_from_file(
         io.BytesIO(jsonl.encode("utf-8")),

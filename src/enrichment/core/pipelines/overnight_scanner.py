@@ -480,11 +480,16 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
             "spread_pct": round(spread_pct, 4),
             "volume": vol,
             "open_interest": oi,
-            "implied_volatility": round(iv, 4) if iv else None,
-            "gamma": round(gamma, 6) if gamma else None,
-            "delta": round(c.get("delta") or 0, 4),
-            "theta": round(theta, 4) if theta else None,
-            "vega": round(c.get("vega") or 0, 4) if c.get("vega") else None,
+            # Store RAW greeks with None preserved (bug #16 fix 2026-06-04):
+            # delta used to coerce NULL->0.0 (a fake at-the-money-ish value),
+            # and `if x else None` on the others dropped a TRUE 0.0 to None. The
+            # `is not None` guard keeps a real 0.0 and only nulls genuine misses.
+            # (The scoring above uses the coerced locals — math wants 0, not None.)
+            "implied_volatility": round(c.get("implied_volatility"), 4) if c.get("implied_volatility") is not None else None,
+            "gamma": round(c.get("gamma"), 6) if c.get("gamma") is not None else None,
+            "delta": round(c.get("delta"), 4) if c.get("delta") is not None else None,
+            "theta": round(c.get("theta"), 4) if c.get("theta") is not None else None,
+            "vega": round(c.get("vega"), 4) if c.get("vega") is not None else None,
             "contract_score": round(score, 3),
         })
 
@@ -587,22 +592,41 @@ def _score_ticker(data: dict) -> dict:
     signals = []
 
     price_change_pct = data.get("todaysChangePerc") or 0
-    bullish = price_change_pct > 0
-    direction = "BULLISH" if bullish else "BEARISH"
+    bullish_tape = price_change_pct > 0
 
     call_dv = data.get("call_dollar_vol") or 0
     put_dv = data.get("put_dollar_vol") or 0
     total_dv = call_dv + put_dv
 
+    # --- Resolve DIRECTION FIRST (bug #2 fix 2026-06-04) ---
+    # The smart-money divergence flip (institutions FADING the tape — the
+    # highest-information setup) must be decided BEFORE the conviction sub-scores.
+    # Originally it ran as "Signal 6" AFTER Signals 1-4, so the conviction
+    # signals scored the option side the trade was NOT taking; ~87% of flipped
+    # names then fell below MIN_SCORE and never surfaced. Now: direction is final
+    # here, and Signals 1-4 read off `use_call`. See
+    # docs/DECISIONS/2026-06-04-pipeline-bug-fixes.md.
+    direction = "BULLISH" if bullish_tape else "BEARISH"
+    divergence = False
+    if bullish_tape and put_dv > call_dv * 2 and put_dv > 1_000_000:
+        direction = "BEARISH"; divergence = True
+        signals.append("DIVERGENCE: heavy puts despite rally")
+    elif (not bullish_tape) and call_dv > put_dv * 2 and call_dv > 1_000_000:
+        direction = "BULLISH"; divergence = True
+        signals.append("DIVERGENCE: heavy calls despite selloff")
+    use_call = direction == "BULLISH"
+    if divergence:
+        score += 1  # divergence conviction bonus (formerly Signal 6)
+
     # --- SIGNAL 1: Dollar Volume Skew (0-2 pts) ---
     if total_dv > MIN_DOLLAR_VOLUME:
-        if bullish and call_dv > 0:
+        if use_call and call_dv > 0:
             skew = call_dv / max(put_dv, 1)
             if skew > 3.0:
                 score += 2; signals.append(f"Call $ {skew:.1f}x puts")
             elif skew > 1.5:
                 score += 1; signals.append(f"Call $ {skew:.1f}x puts")
-        elif not bullish and put_dv > 0:
+        elif not use_call and put_dv > 0:
             skew = put_dv / max(call_dv, 1)
             if skew > 3.0:
                 score += 2; signals.append(f"Put $ {skew:.1f}x calls")
@@ -610,21 +634,21 @@ def _score_ticker(data: dict) -> dict:
                 score += 1; signals.append(f"Put $ {skew:.1f}x calls")
 
     # --- SIGNAL 2: Volume/OI Ratio (0-2 pts) ---
-    rel_vol_oi = data.get("call_vol_oi", 0) if bullish else data.get("put_vol_oi", 0)
+    rel_vol_oi = data.get("call_vol_oi", 0) if use_call else data.get("put_vol_oi", 0)
     if rel_vol_oi > 2.0:
         score += 2; signals.append(f"Vol/OI {rel_vol_oi:.1f}x (very unusual)")
     elif rel_vol_oi > 0.8:
         score += 1; signals.append(f"Vol/OI {rel_vol_oi:.1f}x (unusual)")
 
     # --- SIGNAL 3: Multi-Strike Accumulation (0-2 pts) ---
-    rel_strikes = data.get("call_active_strikes", 0) if bullish else data.get("put_active_strikes", 0)
+    rel_strikes = data.get("call_active_strikes", 0) if use_call else data.get("put_active_strikes", 0)
     if rel_strikes >= 5:
         score += 2; signals.append(f"{rel_strikes} strikes active (institutional)")
     elif rel_strikes >= 3:
         score += 1; signals.append(f"{rel_strikes} strikes active")
 
     # --- SIGNAL 4: UOA Depth (0-2 pts) ---
-    rel_uoa = data.get("call_uoa_depth", 0) if bullish else data.get("put_uoa_depth", 0)
+    rel_uoa = data.get("call_uoa_depth", 0) if use_call else data.get("put_uoa_depth", 0)
     if rel_uoa > 2_000_000:
         score += 2; signals.append(f"${rel_uoa / 1e6:.1f}M new positioning")
     elif rel_uoa > 500_000:
@@ -634,16 +658,8 @@ def _score_ticker(data: dict) -> dict:
     if abs(price_change_pct) > 1.5:
         score += 1; signals.append(f"Price moved {price_change_pct:+.1f}%")
 
-    # --- SIGNAL 6: Smart Money Divergence (0-1 pt) ---
-    if bullish and put_dv > call_dv * 2 and put_dv > 1_000_000:
-        direction = "BEARISH"
-        score += 1; signals.append("DIVERGENCE: heavy puts despite rally")
-    elif not bullish and call_dv > put_dv * 2 and call_dv > 1_000_000:
-        direction = "BULLISH"
-        score += 1; signals.append("DIVERGENCE: heavy calls despite selloff")
-
     # Pick best contract for the determined direction
-    best = data.get("best_call") if direction == "BULLISH" else data.get("best_put")
+    best = data.get("best_call") if use_call else data.get("best_put")
 
     return {
         "ticker": data["ticker"],
