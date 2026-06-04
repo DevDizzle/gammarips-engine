@@ -1240,8 +1240,10 @@ post in this exact format and nothing else:
 
 # What to write about
 Pick ONE specific, concrete angle from the engine's last-week activity:
-- A specific gate (overnight_score>=1, spread<=10%, UOA>$500K, V/OI>2)
-  and WHY that bracket was picked.
+- A specific gate (overnight_score>=1, spread<=8%, UOA>$500K, moneyness 5-13% OTM,
+  VIX<=VIX3M, no earnings during hold) and WHY that bracket was picked. (Note: the
+  V/OI>2 gate was REMOVED 2026-06-02 — realized-PnL analysis showed it had no
+  selection value; do NOT describe V/OI as a gate.)
 - The -60%/+80% bracket and how it lines up with realistic option premium
   decay over a 3-day hold.
 - The "conservative on ambiguous bars" rule (stop wins over target on the
