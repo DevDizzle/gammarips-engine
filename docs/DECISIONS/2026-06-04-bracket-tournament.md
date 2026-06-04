@@ -25,6 +25,13 @@ Replace the single `judge_v6` call with a **randomized bracket tournament** over
 ## Persistence / cohort
 `signal_ranker_runs` DDL unchanged. The tournament has no rubric scores, so the REQUIRED rubric columns carry an **advancement proxy** (round reached → 1-10). Only finalists + winner + runner_up get rows. Mirrored into both scorer/picker columns at **version 7** so the cohort is cleanly separable (5=two-stage, 6=judge_v6, 7=tournament).
 
+## V6 relabel + ledger truncate (2026-06-04, owner-directed)
+The tournament is a clean break from the gated V5.4 strategy, so it gets its own cohort:
+- **`policy_version` `V5_4_AGENT_RANKER` → `V6_TOURNAMENT`** across all write sites (forward-paper-trader `POLICY_VERSION` constant; signal-notifier todays_pick/ledger_trades writes) and all read-filters (signal-notifier cohort_stats + 14d summary, win-tracker, x-poster, blog-generator) so the app surfaces V6, not blank.
+- **`forward_paper_ledger` TRUNCATED** — the 13 V5.4 closes (2026-05-12→05-29, **avg 0.0%**, a flat dud) wiped. Owner did not want V5.4 in the app stats and saw no value in the comparison. (13 rows dumped to `.scratch/v5_4_ledger_final.json` as off-table insurance; not surfaced anywhere.)
+- `LIVE_COHORT_START_DATE` → `2026-06-04`; `cohort_stats/current` refreshed → `V6_TOURNAMENT`, 0 trades.
+- **Deploys:** forward-paper-trader, signal-notifier done. **win-tracker / x-poster / blog-generator code updated but NOT yet redeployed** — harmless (V5.4 truncated → they surface nothing; V6 has no closes yet) but they MUST be deployed before the first V6 closed trade surfaces (~3+ trading days out).
+
 ## Reversibility
 `git revert` the commit → restores the gated query + judge_v6 single call; redeploy signal-judge + signal-notifier.
 

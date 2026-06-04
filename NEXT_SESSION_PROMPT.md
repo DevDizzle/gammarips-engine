@@ -1,5 +1,27 @@
 # Next Session Prompt
 
+**2026-06-04 session — V6 "TOURNAMENT" LAUNCHED; V5.4 retired + ledger TRUNCATED. LIVE.**
+
+The gated single-judge (V5.4) was a dud — **13 live closes, avg 0.0%**. Replaced it with a **randomized bracket tournament over ALL enriched signals** (no selection gates) and relabeled the cohort V6.
+
+**What's live:**
+- `signal-judge` (`tournament_v1`, version 7): 3 brackets × (≤10/call, top-2 advance, 94→20→4→1) → consensus winner (3/3 high, 2/3 med, 1/3 low). Simple prompt + daily report + per-contract JSON. No memory/rubric/weights. Verified live (`/rank` on 94 → MSFT). See `docs/DECISIONS/2026-06-04-bracket-tournament.md`.
+- `signal-notifier` (rev `00038-7wx`): candidate query **ungated** (moneyness/OI/vol/DTE/V-OI removed, LIMIT 200, rich feature cols added, active-days gate bypassed). Kept ONLY: no-earnings-in-hold + regime fail-closed. `policy_version='V6_TOURNAMENT'`, `LIVE_COHORT_START_DATE='2026-06-04'`.
+- `forward-paper-trader` (rev `00038-fd5`): `POLICY_VERSION='V6_TOURNAMENT'`.
+- `forward_paper_ledger` TRUNCATED (13 rows; dumped to `.scratch/v5_4_ledger_final.json`). `cohort_stats/current` refreshed → V6, 0 trades. App is clean of V5.4.
+- `gammarips-review` (leakage): SHIP. Committed `deff6cd` (tournament) + this turn's V6 relabel.
+
+**OPEN / NEXT:**
+- (a) **Deploy win-tracker / x-poster / blog-generator** — their `policy_version` read-filters were switched to `V6_TOURNAMENT` in code but NOT redeployed. Harmless now (V5.4 truncated, no V6 closes yet) but MUST deploy before the first V6 closed trade surfaces (~3+ trading days out).
+- (b) **First live V6 cron** is tomorrow 07:30 ET (full chain untested end-to-end — fails closed if it errors). Watch it.
+- (c) **Webapp** `cohort-stats-row.tsx` default → V6 (committed LOCAL in /home/user/gammarips-webapp, NOT pushed). Push when ready.
+- (d) **Doc sweep follow-up:** TRADING-STRATEGY.md / GEMINI.MD / MODELS.md / GLOSSARY.md still say "V5.4 / judge_v6 / Scorer-Picker" in many places — CLAUDE.md is updated; the rest is a follow-up rename to V6/tournament.
+- (e) The real test: does the V6 cohort make money? Selection is a weak lever (bull EV ~flat); watch realized PnL forward.
+
+---
+
+# Next Session Prompt (prior)
+
 **2026-06-04 session — SCORER→PICKER COLLAPSED into one memory-aware judge (`judge_v6`) + renamed `signal-ranker`→`signal-judge`. SHIPPED: committed `0dd21c8`, `gammarips-review`=SHIP, DEPLOYED (`signal-judge-00001-4kn`, `signal-notifier-00035-bvh` repointed), live `/rank` validated (pick BBWI, version=6 row persisted), old `signal-ranker` service DELETED. Owner waived the G-Stack 30-day-OOS ceremony; leakage audit (the non-negotiable) passed.**
 
 **STATE:** judge_v6 is LIVE. Tomorrow's 07:30 ET cron is the first production judge_v6 pick. Today's live pick (scan 2026-06-03 = BBWI) was LEFT AS-IS — the deployed judge produces the identical pick, so re-triggering would only re-email subscribers a duplicate (no no-send mode). A version=6 validation row exists for scan_date 2026-06-03 (`run_id v5_4_2026-06-03_955a37a8`) alongside the version=5 cron row — harmless, cohort-separable, deletable. **ROLLBACK** (old service deleted): `git revert 0dd21c8` restores the `signal-ranker` dir + 2-stage code → redeploy → repoint `signal-notifier` `SIGNAL_JUDGE_URL`→old `SIGNAL_RANKER_URL`.

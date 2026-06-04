@@ -63,7 +63,7 @@ TRAIL_TRIGGER_PCT = 0.30   # activate trail when peak gain >= +30%
 TRAIL_DRAWDOWN_PCT = 0.25  # 25% drawdown from peak triggers trail exit
 ENTRY_HHMM = "10:00"  # 10:00 ET on day-1
 EXIT_HHMM = "15:50"   # 15:50 ET on day-3
-POLICY_VERSION = "V5_4_AGENT_RANKER"
+POLICY_VERSION = "V6_TOURNAMENT"
 POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
 LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_intraday"
@@ -319,13 +319,13 @@ def run_forward_paper_trading(target_date: date = None):
       - Trail:  -25% off peak, activated at +30% gain (peak ratchet)
       - Hold:   3 trading days; exit at 15:50 ET on day-3 if neither fires
       - Ambiguous bar: STOP wins over TARGET (conservative)
-      - Writes to forward_paper_ledger with policy_version=V5_4_AGENT_RANKER
+      - Writes to forward_paper_ledger with policy_version=V6_TOURNAMENT
 
     V5.4-only ledger contract (2026-05-12, see docs/DECISIONS/
     2026-05-12-v5-4-pipeline-alignment.md): the trader simulates ONLY the
     ticker named in Firestore todays_pick/{scan_date}. The previous behavior
     (simulate every enriched signal as a "research fanout dataset") wrote ~70
-    rows/day labeled policy_version=V5_4_AGENT_RANKER even though only one
+    rows/day labeled policy_version=V6_TOURNAMENT even though only one
     was actually the V5.4 pick. That mislabeling broke cohort_stats integrity.
     Now: one trade row per day (or one skip row), all genuinely V5.4.
 
@@ -359,7 +359,7 @@ def run_forward_paper_trading(target_date: date = None):
     # The trader is now V5.4-only: the ledger row count is at most 1 per
     # scan_date (one trade row OR one skip row, never both, never multiple).
     # The previous fanout path (simulate every enriched row) is gone — it
-    # mislabeled non-picks as V5_4_AGENT_RANKER. See docs/DECISIONS/
+    # mislabeled non-picks as V6_TOURNAMENT. See docs/DECISIONS/
     # 2026-05-12-v5-4-pipeline-alignment.md.
     pick_state, pick_doc, picked_ticker = _fetch_todays_pick(target_date)
 
