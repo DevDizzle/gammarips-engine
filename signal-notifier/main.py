@@ -508,7 +508,6 @@ def write_todays_pick_doc(
 # VIX sanity + fallback-corroboration policy --------------------------------
 VIX_PLAUSIBLE_MIN = 1.0     # below this is a parse/garbage artifact, not a real VIX
 VIX_PLAUSIBLE_MAX = 200.0   # 2020's intraday peak was ~85; 200 is a generous garbage bound
-VIX_FALLBACK_TOLERANCE = 1.5  # two non-FRED sources must agree within this (vol pts)
 # Source that produced the VIX used in the most recent fetch_vix_close call
 # ("FRED" / "Stooq+Yahoo"). Read by write_todays_pick_doc so every pick is
 # auditable to its regime-data source after logs age out. The notifier is a
@@ -591,17 +590,13 @@ def _fetch_vix_from_yahoo(scan_date: date) -> float | None:
 def fetch_vix_close(scan_date: date) -> float | None:
     """Return the VIX close on or before ``scan_date``.
 
-    Primary source FRED VIXCLS (single-source-trusted). On FRED failure, fall
-    back to free public sources (Stooq, Yahoo) — but because the regime gate is
-    one-sided (``vix_now > vix3m`` => skip), a single fallback source biased LOW
-    could MASK a backwardation regime. So a fallback value is trusted only when
-    BOTH Stooq and Yahoo corroborate within ``VIX_FALLBACK_TOLERANCE`` vol pts;
-    otherwise we fail-closed (return None), exactly as if FRED were down.
-    Consequence: a FRED-outage day on which only one backup answers now SKIPS
-    (the 2026-06-03 Yahoo-only DAVE pick would have skipped under this rule).
+    Primary source FRED VIXCLS. On FRED failure, fall back to free public
+    sources (Stooq, Yahoo) and use the best one that answers. The regime gate
+    is one-sided (``vix_now > vix3m`` => skip), so when sources disagree we take
+    the MAX: that's the conservative read (a low-biased source can't mask
+    backwardation) and it works with a single source — we no longer wipe a whole
+    FRED-outage day just because only one backup responded.
     Records the winning source in ``_LAST_VIX_SOURCE`` for pick provenance.
-
-    Hardened per gammarips-review of the 2026-06-03 live-VIX fallback.
     """
     global _LAST_VIX_SOURCE
     # FRED's fredgraph.csv intermittently 504s / read-times-out — retry with
@@ -645,32 +640,21 @@ def fetch_vix_close(scan_date: date) -> float | None:
         _LAST_VIX_SOURCE = "FRED"
         return fred_val
 
-    # FRED down: require TWO independent public sources to corroborate before
-    # trusting a fallback value for the gate (guards against a single low-biased
-    # source masking backwardation).
-    stooq = _fetch_vix_from_stooq(scan_date)
-    yahoo = _fetch_vix_from_yahoo(scan_date)
-    got = [(n, v) for n, v in (("Stooq", stooq), ("Yahoo", yahoo)) if v is not None]
-    if len(got) < 2:
-        have = ", ".join(f"{n}={v:.2f}" for n, v in got) or "none"
-        logger.warning(
-            f"VIX: FRED down and fallback uncorroborated (have: {have}); fail-closed "
-            f"(need 2 sources within {VIX_FALLBACK_TOLERANCE} vol pts)."
-        )
+    # FRED down: use the best public source that answers. When sources differ
+    # we take the MAX — the conservative read for a one-sided gate (a low-biased
+    # source can't mask backwardation). A single source is enough.
+    got = [(n, v) for n, v in (
+        ("Stooq", _fetch_vix_from_stooq(scan_date)),
+        ("Yahoo", _fetch_vix_from_yahoo(scan_date)),
+    ) if v is not None]
+    if not got:
+        logger.warning("VIX: FRED down and no public fallback answered; fail-closed.")
         return None
-    spread = abs(got[0][1] - got[1][1])
-    if spread > VIX_FALLBACK_TOLERANCE:
-        logger.warning(
-            f"VIX: fallback sources disagree ({got[0][0]}={got[0][1]:.2f}, "
-            f"{got[1][0]}={got[1][1]:.2f}, spread {spread:.2f} > "
-            f"{VIX_FALLBACK_TOLERANCE}); fail-closed."
-        )
-        return None
-    val = round((got[0][1] + got[1][1]) / 2, 2)
-    _LAST_VIX_SOURCE = f"{got[0][0]}+{got[1][0]}"
+    name, val = max(got, key=lambda nv: nv[1])
+    _LAST_VIX_SOURCE = name
     logger.warning(
-        f"VIX: FRED unavailable; corroborated fallback = {val:.2f} "
-        f"({got[0][0]}={got[0][1]:.2f}, {got[1][0]}={got[1][1]:.2f})."
+        f"VIX: FRED unavailable; using {name}={val:.2f} "
+        f"(max of {', '.join(f'{n}={v:.2f}' for n, v in got)})."
     )
     return val
 

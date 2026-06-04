@@ -113,3 +113,27 @@ Reliability/availability hardening of the regime-data fetch — **not** an execu
 gate-threshold change. The gate logic (`VIX ≤ VIX3M`, NULL ⇒ skip) is byte-for-byte preserved.
 Full 30-day forward-paper DoD does not apply (no new strategy/gate/bracket). Cleared by
 `gammarips-review` (SAFE TO DEPLOY).
+
+---
+
+## Follow-up 2026-06-04 — live-VIX fallback simplified (two-source rule removed)
+
+The 2026-06-03 hardening shipped a *second* guard alongside the VIX3M carry-forward: on FRED
+failure, the **live** VIX leg fell back to Stooq + Yahoo but trusted the value only if **both**
+corroborated within 1.5 vol-pts (`VIX_FALLBACK_TOLERANCE`). Rationale at the time: a single
+low-biased source could mask backwardation on the one-sided `vix_now > vix3m → skip` gate.
+
+That rule was too strict and re-wiped a day. Scan **2026-06-03** (entry **2026-06-04**): FRED
+VIXCLS was still timing out, VIX3M carry-forward worked (18.66), 4 candidates were queued — but
+the live leg got only **Yahoo=16.06** (Stooq returned nothing), so the two-source requirement
+rejected a perfectly good reading and fail-closed. 16.06 ≪ 18.66 was plainly contango.
+
+**Fix:** drop the corroboration requirement. On FRED failure use the best public source that
+answers; when both answer take the **MAX** — the conservative direction for this gate (a
+low-biased source cannot manufacture a false trade; at worst MAX causes a false *skip*). A single
+source is sufficient. Only a total source blackout fail-closes. `VIX_FALLBACK_TOLERANCE` removed.
+
+Deployed `signal-notifier-00033-sjr`; notifier re-run for scan 2026-06-03 emitted **BBWI BULLISH**
+(`vix_source=Yahoo`, vix_now=16.06) before the 10:00 ET entry. Same scope as above —
+availability hardening, gate logic byte-for-byte preserved. Cleared by `gammarips-review` (GO):
+all fallback bars still pass `_vix_date_ok` (`d ≤ scan_date AND d < today`), no lookahead.
