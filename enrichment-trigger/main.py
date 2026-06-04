@@ -13,7 +13,7 @@ import logging
 import math
 import os
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import requests
@@ -96,14 +96,34 @@ def _parse_fred_csv_for_date(text: str, scan_date: str) -> float | None:
     return best[1] if best else None
 
 
+# FRED's fredgraph.csv serializes a series' ENTIRE history when no start date is
+# given (VIXCLS/VXVCLS go back to 1990). That full dump grew slow enough to
+# exceed a 30s read-timeout every morning — the "FRED outage" of 2026-06-02..04
+# was really our own unbounded query. Always bound the request with cosd (start
+# date) to a short window; the parse helper still takes the latest close on/before
+# scan_date. 45 calendar days easily spans any holiday gap + FRED's publish lag
+# while keeping the payload to ~30 rows (sub-second response).
+FRED_CSV_LOOKBACK_DAYS = 45
+
+
+def _fred_csv_url(series_id: str, scan_date: str) -> str:
+    """fredgraph.csv URL for `series_id`, bounded to a short window before scan_date."""
+    try:
+        cosd = (datetime.strptime(scan_date, "%Y-%m-%d").date()
+                - timedelta(days=FRED_CSV_LOOKBACK_DAYS)).isoformat()
+        return f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}&cosd={cosd}"
+    except ValueError:
+        # Unparseable scan_date — fall back to the unbounded URL rather than crash.
+        return f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+
+
 def _fetch_fred_csv(url: str, retries: int = 3, timeout: int = 30) -> str:
     """GET a FRED CSV with bounded retries; raise on final failure.
 
-    FRED's fredgraph.csv endpoint intermittently 504s / read-times-out. A single
-    transient failure must not poison a whole scan_date — on 2026-06-02 one 15s
-    read-timeout stored a NULL VIX3M for all 101 rows, which wiped the entire
-    signal-notifier slate (both STRICT and FALLBACK require vix3m_at_enrich) and
-    cost a trading day. Retry with linear backoff before giving up.
+    FRED's fredgraph.csv endpoint can still transiently 504 / read-time-out even
+    on a bounded (cosd) request. A single transient failure must not poison a
+    whole scan_date, so retry with linear backoff before giving up. (The chronic
+    timeout was the unbounded-history payload — see `_fred_csv_url`.)
     """
     retries = max(1, retries)
     last_exc: Exception | None = None
@@ -165,7 +185,7 @@ def fetch_vix3m_for_scan_date(scan_date: str) -> float | None:
 
     val: float | None = None
     try:
-        text = _fetch_fred_csv("https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXVCLS")
+        text = _fetch_fred_csv(_fred_csv_url("VXVCLS", scan_date))
         val = _parse_fred_csv_for_date(text, scan_date)
         if val is None:
             logger.warning(f"VIX3M: FRED VXVCLS returned no usable rows on/before {scan_date}")
@@ -213,7 +233,7 @@ def fetch_vix_for_scan_date(scan_date: str) -> float | None:
         return _VIX_CACHE.get("value")
 
     try:
-        text = _fetch_fred_csv("https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS")
+        text = _fetch_fred_csv(_fred_csv_url("VIXCLS", scan_date))
         val = _parse_fred_csv_for_date(text, scan_date)
         _VIX_CACHE["value"] = val
         _VIX_CACHE["as_of"] = scan_date

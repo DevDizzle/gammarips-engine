@@ -110,18 +110,24 @@ def fetch_minute_bars(ticker: str, start_date: date, end_date: date) -> list:
 _VIX_CACHE: dict = {"df": None}
 
 
-def _fetch_vix_daily_fred() -> pd.DataFrame:
+def _fetch_vix_daily_fred(target_date: date) -> pd.DataFrame:
     """Return a DataFrame of VIX daily closes indexed by date.
 
     Source: FRED VIXCLS series (free CSV endpoint, no auth). Cached in-process
-    so we hit FRED at most once per trader invocation. The full history is
-    ~160 KB and downloads in under a second.
+    so we hit FRED at most once per trader invocation.
+
+    Bounded with cosd (start date) = target_date − 60d. Without it FRED
+    serializes VIXCLS back to 1990, and that full dump now exceeds the read
+    timeout every morning (the "FRED outage" of 2026-06-02..04 was this, not a
+    real outage). A 60-day window still yields ~40 trading days — ample for the
+    on-or-before lookup and the 6-day delta in get_regime_context.
     """
     if _VIX_CACHE["df"] is not None:
         return _VIX_CACHE["df"]
     import io
-    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
-    resp = requests.get(url, timeout=15)
+    cosd = (target_date - timedelta(days=60)).isoformat()
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS&cosd={cosd}"
+    resp = requests.get(url, timeout=30)
     resp.raise_for_status()
     df = pd.read_csv(io.StringIO(resp.text))
     df["observation_date"] = pd.to_datetime(df["observation_date"])
@@ -178,7 +184,7 @@ def get_regime_context(target_date: date):
     vix_5d_delta is (current_vix - vix_5_trading_days_ago), positive = rising.
     """
     try:
-        vix_df = _fetch_vix_daily_fred()
+        vix_df = _fetch_vix_daily_fred(target_date)
         spy_df = _fetch_spy_daily_polygon(target_date)
 
         if vix_df is None or vix_df.empty:

@@ -599,9 +599,13 @@ def fetch_vix_close(scan_date: date) -> float | None:
     Records the winning source in ``_LAST_VIX_SOURCE`` for pick provenance.
     """
     global _LAST_VIX_SOURCE
-    # FRED's fredgraph.csv intermittently 504s / read-times-out — retry with
-    # linear backoff before giving up.
-    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"
+    # Bound the request with cosd (start date). Without it FRED serializes VIXCLS
+    # back to 1990, and that full dump exceeds the 30s timeout every morning —
+    # the chronic "FRED outage" of 2026-06-02..04 was this, not a real outage. A
+    # 45-day window spans any holiday gap + FRED's publish lag at ~30 rows. We
+    # still retry with linear backoff for genuine transient 504s.
+    cosd = (scan_date - timedelta(days=45)).isoformat()
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS&cosd={cosd}"
     fred_val: float | None = None
     try:
         resp = None

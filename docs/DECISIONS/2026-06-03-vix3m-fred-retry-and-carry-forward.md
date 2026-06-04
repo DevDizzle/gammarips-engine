@@ -137,3 +137,37 @@ Deployed `signal-notifier-00033-sjr`; notifier re-run for scan 2026-06-03 emitte
 (`vix_source=Yahoo`, vix_now=16.06) before the 10:00 ET entry. Same scope as above —
 availability hardening, gate logic byte-for-byte preserved. Cleared by `gammarips-review` (GO):
 all fallback bars still pass `_vix_date_ok` (`d ≤ scan_date AND d < today`), no lookahead.
+
+---
+
+## ROOT CAUSE 2026-06-04 — it was never a FRED outage (unbounded query)
+
+The 2026-06-02..04 "FRED outage" was self-inflicted. Our `fredgraph.csv?id=VIXCLS`
+(and `?id=VXVCLS`) requests carried **no start date**, so FRED serialized each series'
+**entire history back to 1990** on every call. That full dump grew slow enough to exceed
+the read timeout *every morning* — the retries couldn't help (each attempt re-requests the
+same giant payload) and the carry-forward / two-source fallbacks only ever fired because the
+primary always timed out. Proven by live probe:
+
+| URL | Result |
+|---|---|
+| `?id=VIXCLS` (ours) | timeout 30s, deterministic (x2) |
+| `?id=VIXCLS&cosd=2026-04-19` | HTTP 200 in ~0.1-2s, 568 B (x3) |
+| `?id=VXVCLS` | timeout 30s |
+| `?id=VXVCLS&cosd=2026-04-19` | HTTP 200 in ~2s, 563 B |
+
+**Fix:** bound every FRED CSV request with `cosd` (start date) = scan_date/target_date - N days
+(45d for the gate fetches, 60d for the trader's 6-day-delta telemetry). The parse helpers are
+unchanged - they still take the latest close **on/before** scan_date - so `cosd` only moves the
+window START earlier and cannot admit a future bar (lookahead-safe; `gammarips-review` GO on all
+three services). Payload drops from ~36 years to ~30-40 rows (sub-second).
+
+Applied to all three FRED call sites:
+- `enrichment-trigger/main.py` - `_fred_csv_url()` helper + `FRED_CSV_LOOKBACK_DAYS=45` (VXVCLS gate + VIXCLS context). Rev `enrichment-trigger-00041-trm`.
+- `signal-notifier/main.py` - `cosd` inlined in `fetch_vix_close` (live VIX leg). Rev `signal-notifier-00034-ds9`.
+- `forward-paper-trader/main.py` - `_fetch_vix_daily_fred(target_date)` bounded, 15s->30s timeout (telemetry-only). Rev `forward-paper-trader-00037-t65`.
+
+The retry, carry-forward, and single-source fallback all REMAIN as defense-in-depth for genuine
+transient 504s - but with `cosd` the primary FRED fetch now succeeds in ~2s, so they should rarely
+fire again. The earlier "FRED outage" decision sections above describe symptom-treatment that
+preceded this diagnosis; keep them for the audit trail, but THIS is the actual cure.
