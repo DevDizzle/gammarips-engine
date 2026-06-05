@@ -75,7 +75,7 @@ class VoiceRules:
         "Never use individualized recommendation language (buy this, act now, for you).",
         "Never include URLs in post bodies — X downranks link-bearing posts. Link lives in pinned tweet + bio.",
         "Never use hashtags — near-dead on X in 2026 and slightly suppressive.",
-        "Never claim real-money P&L before the V5.4 cohort has >= 30 closed trades. Paper-trade framing only.",
+        "Never claim real-money P&L before the V6 cohort has >= 30 closed trades. Paper-trade framing only.",
         "Never cherry-pick wins. Loss callbacks ship. Ledger-backed credibility beats hype.",
     )
 

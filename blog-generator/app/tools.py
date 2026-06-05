@@ -203,7 +203,7 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         }
 
     date_iso = scan_date or _today_et_iso()
-    # V5.4 only — V3/V4 are historical noise that would falsely trip the
+    # V6 only — prior cohorts are historical noise that would falsely trip the
     # 30-trade unlock gate. Drop INVALID_LIQUIDITY/SKIPPED non-trades.
     query = f"""
         SELECT
@@ -657,8 +657,8 @@ def get_closed_trade_count(table: str | None = None) -> int:
     Filters: policy_version='V6_TOURNAMENT' AND exit_reason valid (not
     INVALID_LIQUIDITY / SKIPPED). Other policy versions (V3, V4) are
     historical and not part of the public track record. Without this
-    filter the count includes V3+V4 noise (ledger truncated 2026-05-08; V5.4 cohort starts fresh
-    closes), which falsely trips the 30-trade unlock gate.
+    filter the count includes prior-cohort noise (ledger truncated 2026-06-04; V6 cohort
+    starts fresh), which falsely trips the 30-trade unlock gate.
 
     Args:
         table: Fully-qualified table id; defaults to LEDGER_TABLE.
@@ -721,7 +721,7 @@ def get_recent_v53_closes(days: int = 7) -> list[dict]:
     """Past N days of GammaRips closes from forward_paper_ledger.
 
     Pre-shaped for newsletter / blog summary: ticker, direction,
-    entry_date, exit_date, return_pct (rounded), exit_reason. V5.4 only,
+    entry_date, exit_date, return_pct (rounded), exit_reason. V6 only,
     valid exits only. Empty list on failure.
     """
     from datetime import datetime, timedelta as _td

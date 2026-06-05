@@ -227,8 +227,10 @@ Forbidden (retired aliases — hard-fail if present):
 - Daily Playbook
 - The Overnight Edge (as a product name)
 - "@mention" (the literal string — we use "tag the agent" instead)
-- "score >= 6"  (old policy — current is V5.4)
-- "8:30 AM"    (old time — current is 9:00 AM)
+- "score >= 6"  (old policy — current enrichment floor is score >= 4)
+- "8:30 AM" / "9:00 AM"  (old alert times — current alert is 7:30 AM ET)
+- "Agent Arena" / "Scorer" / "Picker" / "gate stack" / "5-13% OTM moneyness"
+  (all retired — V6 is a randomized bracket tournament with NO selection gates)
 - "$49 / $149" (old pricing)
 - "premium signal"
 - "interactive dashboard"

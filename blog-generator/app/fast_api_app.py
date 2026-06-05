@@ -439,10 +439,12 @@ no external CSS). Width 600px. Dark text on white background.
 
 # Hard prohibitions (auto-fail)
 - Retired aliases: Ripper, Rippers, Daily Playbook, Overnight Edge (as
-  product name), "@mention", "score >= 6", "8:30 AM", "$49/$149",
+  product name), "@mention", "score >= 6", "8:30 AM", "9:00 AM", "$49/$149",
   "premium signal", "interactive dashboard".
-- Retired strategy version labels: "V5.3", "V5.3 Signals", "Upgrade to V5.3"
-  — V5.3 was retired 2026-05-08. Use "GammaRips Signals" or just "Signals".
+- Retired strategy concepts: "V5.3", "V5.4", "Agent Arena", "Scorer", "Picker",
+  "gate stack", "5-13% OTM moneyness" — all retired. The current strategy is V6,
+  a randomized bracket tournament with no selection gates. Use "GammaRips
+  Signals", "the V6 tournament", or just "Signals".
 - Pricing / coupon language anywhere in the body: do NOT mention dollar
   amounts ($29, $39), coupon codes (FOUNDER29), or "/pricing" URLs. The
   green CTA above is the ONLY commercial surface in the newsletter.
@@ -1140,7 +1142,7 @@ def weekly_intel(req: WeeklyIntelRequest) -> WeeklyIntelResponse:
 # is target window. `mod_traps` describes common failure modes per sub.
 _DEFAULT_SUBREDDIT_VOICE: dict[str, dict[str, Any]] = {
     "options": {
-        "lead_style": "lead with a specific bracket or number from the engine (e.g. '76 setups overnight, 1 cleared the gate stack')",
+        "lead_style": "lead with a specific bracket or number from the engine (e.g. '94 enriched setups overnight, 1 won the bracket tournament')",
         "taboo_phrases": ["YOLO", "to the moon", "tendies", "boomer puts", "free money"],
         "length_words": (180, 320),
         "mod_traps": "r/options auto-removes posts that look like spam-marketing. Avoid promotional language; describe the methodology instead.",
@@ -1157,7 +1159,7 @@ _DEFAULT_SUBREDDIT_VOICE: dict[str, dict[str, Any]] = {
         "lead_style": "lead with a falsifiable claim or a backtest-vs-live divergence, NOT a result",
         "taboo_phrases": ["AI predictions", "ML magic", "sharpe > 5", "backtested gold"],
         "length_words": (220, 400),
-        "mod_traps": "r/algotrading auto-rejects posts without methodology. Lead with the gate stack or the bracket logic, not the P&L.",
+        "mod_traps": "r/algotrading auto-rejects posts without methodology. Lead with the tournament logic or the bracket math, not the P&L.",
         "tone": "Engineering-first. Describe the system, not the returns.",
     },
 }
@@ -1240,15 +1242,16 @@ post in this exact format and nothing else:
 
 # What to write about
 Pick ONE specific, concrete angle from the engine's last-week activity:
-- A specific gate (overnight_score>=1, spread<=8%, UOA>$500K, moneyness 5-13% OTM,
-  VIX<=VIX3M, no earnings during hold) and WHY that bracket was picked. (Note: the
-  V/OI>2 gate was REMOVED 2026-06-02 — realized-PnL analysis showed it had no
-  selection value; do NOT describe V/OI as a gate.)
+- The enrichment bar (overnight_score>=4, directional UOA>$500K, both directions) or
+  a safety rail (VIX<=VIX3M, no earnings during the 3-day hold), and how the bracket
+  tournament ranges over the full enriched pool. (Note: V6 has NO per-contract selection
+  gates — the old moneyness / OI / volume / V/OI / DTE gates were removed 2026-06-04.
+  Do NOT describe any of them as a current gate.)
 - The -60%/+80% bracket and how it lines up with realistic option premium
   decay over a 3-day hold.
 - The "conservative on ambiguous bars" rule (stop wins over target on the
   same bar) and why that rule reduces variance.
-- A common misread of unusual options activity that the gate stack rules out.
+- A common misread of unusual options activity (e.g. hedging flow read as directional) and how the engine handles it.
 - The difference between contract count and dollar volume as popularity
   signals (high-contract small-caps vs. high-dollar big names).
 
