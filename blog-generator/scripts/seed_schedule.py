@@ -142,10 +142,10 @@ BLOG_SCHEDULE_ROWS: list[dict] = [
         "slug": "whats-pushed-to-my-phone-at-9am",
         "week_num": 7,
         "title_candidate": (
-            "What Gets Pushed to My Phone at 9:00 AM (Weekly Engine Recap)"
+            "What Gets Pushed to My Phone at 7:30 AM ET (Weekly Engine Recap)"
         ),
         "persona": ["A"],
-        "keywords": ["options morning alerts", "9 AM options trade"],
+        "keywords": ["options morning alerts", "7:30 AM options trade"],
         "cta": "pro_trial",
         "type": "weekly_engine_recap",
         "cross_channel": ["x_thread", "linkedin"],
