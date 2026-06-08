@@ -422,14 +422,23 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
         vol = c.get("volume") or 0
         bid = c.get("bid") or 0
         ask = c.get("ask") or 0
-        if bid <= 0 or ask <= 0:
-            continue
-        mid = (bid + ask) / 2
+        last_price = c.get("last_price") or 0
+
+        # 2026-06-05 fix: this Polygon plan serves no options NBBO quotes (no
+        # last_quote on the chain snapshot), so bid/ask are ~always None. Do NOT
+        # drop the contract for that — price off the last trade / day close and
+        # leave spread UNKNOWN (NULL) rather than synthesizing it from the day
+        # range (the OKTA-ghost bug #1 cause). OI-primary scoring still ranks
+        # tradeability. See docs/DECISIONS/2026-06-05-*.
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+            spread_pct = (ask - bid) / mid
+        else:
+            mid = last_price
+            spread_pct = None
         if mid <= 0:
             continue
-
-        spread_pct = (ask - bid) / mid
-        if spread_pct > 0.40:
+        if spread_pct is not None and spread_pct > 0.40:
             continue
         if vol < 10:
             continue
@@ -466,7 +475,7 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
         score = (
             min(oi / 200.0, 1.0) * 5.0                 # open interest — PRIMARY liquidity
             + min(vol / 200.0, 1.0) * 2.0              # volume — secondary liquidity
-            + (1.0 - min(spread_pct, 1.0)) * 1.5       # tight spread — tertiary (snapshot-noisy)
+            + ((1.0 - min(spread_pct, 1.0)) * 1.5 if spread_pct is not None else 0.0)  # tight spread — tertiary (NULL when unquoted)
             + (2.0 if 0.25 <= delta <= 0.50 else 0)    # sweet-spot delta bonus
             + gamma * 8.0                              # convexity (de-emphasized from 20x)
             - (abs(theta) / max(mid, 0.01)) * 1.0      # theta drag penalty
@@ -477,7 +486,7 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
             "expiration_date": str(exp_date),
             "dte": dte,
             "mid_price": round(mid, 2),
-            "spread_pct": round(spread_pct, 4),
+            "spread_pct": round(spread_pct, 4) if spread_pct is not None else None,
             "volume": vol,
             "open_interest": oi,
             # Store RAW greeks with None preserved (bug #16 fix 2026-06-04):

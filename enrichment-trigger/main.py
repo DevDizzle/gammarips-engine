@@ -39,7 +39,9 @@ PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
 DATASET = os.getenv("DATASET", "profit_scout")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "profit-scout-data")
 SIGNALS_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals"
-MIN_SCORE = int(os.getenv("MIN_ENRICHMENT_SCORE", "1"))
+# Floor only (drops proven-bad score<=3 dregs); NOT a ceiling — score EV
+# inverts at >=7. Env override preserved.
+MIN_SCORE = int(os.getenv("MIN_ENRICHMENT_SCORE", "4"))
 
 # Polygon
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip()
@@ -426,17 +428,12 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     FROM `{SIGNALS_TABLE}`
     WHERE scan_date = '{scan_date}'
       AND overnight_score >= {MIN_SCORE}
-      -- spread gate loosened 0.08 -> 0.30 on 2026-06-04 (bug #1 fix). The old
-      -- 0.08 was operating on FAKE spreads (bid/ask was silently day.low/high,
-      -- so ~43% read ~0.0%). Now recommended_spread_pct is the REAL quoted
-      -- spread, which is wider; 0.08 would empty the pool. The scanner already
-      -- picks the tightest liquid strike per name (OI-primary), and the judge
-      -- now SEES recommended_spread_pct and weighs it — so this is a permissive
-      -- sanity bound (drop the genuinely-untradeable) not a selection gate.
-      -- A NULL spread only occurs if the chosen contract had no quote, which
-      -- _best_contract already excludes; treat NULL as fail-closed.
-      AND recommended_spread_pct IS NOT NULL
-      AND recommended_spread_pct <= 0.30
+      -- 2026-06-05: this Polygon plan serves no options quotes, so
+      -- recommended_spread_pct is ~always NULL. The old `IS NOT NULL` fail-closed
+      -- emptied the pool (engine produced 0 picks). Allow NULL through; only drop
+      -- a genuinely-wide spread IF a real quote ever appears. Spread is no longer a
+      -- selection gate. See docs/DECISIONS/2026-06-05-*.
+      AND (recommended_spread_pct IS NULL OR recommended_spread_pct <= 0.30)
       AND (
         (direction = 'BULLISH' AND call_uoa_depth > 500000)
         OR (direction = 'BEARISH' AND put_uoa_depth > 500000)
@@ -451,7 +448,7 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     # marker). 8% is the literature-supported retail-execution defensible band
     # for 5-15% OTM 9-DTE single-name contracts.
     rows = list(bq_client.query(query).result())
-    logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, spread<=8%%, UOA>$500K) for {scan_date}")
+    logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, UOA>$500K, all directions; spread gate retired) for {scan_date}")
     return [dict(r) for r in rows], scan_date
 
 

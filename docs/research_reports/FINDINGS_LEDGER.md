@@ -240,6 +240,22 @@ Source: `_archive/research_reports_2026-04/WINNING_FILTER_DISCOVERY_V1.md`.
 
 ---
 
+## Dead-ends — option-PnL gate discovery (2026-06-05, workflow `wf_16b5c00d-347`)
+
+Multi-agent fan-out over 8 feature families + walk-forward / day-block-bootstrap validation on the REAL option-PnL bracket-replay label (`analysis_option_pnl.parquet`, **N=1375 FILLED**, entry_day 2026-04-13…05-29, 33 days). Full-pool baseline mean `realized_ret = -0.0044` (win 0.413). **The only robust, leakage-clean, breadth-viable lever was DIRECTION** (bullish-only EV +0.0411 / win 0.470 / ~26 per day; bearish -0.0771) — and the owner declined to bake in bullish-only (the bearish penalty is almost certainly regime-conditional, untestable here: `vix3m_at_enrich` had near-zero variance 19.45–21.51, single 2026-Q1/Q2 war-chop window). Decision: keep all directions, shelve "exclude bearish" to an N≥15 live-cohort revisit; deploy the `overnight_score >= 4` floor only. Everything below was tested as an EV gate and FAILED:
+
+| # | Candidate gate | Verdict |
+|---|---|---|
+| 1 | Trend overlays (`above_sma_50/200`, `MACD>0`, `ema_21`) standalone | **DEAD.** Redundant with direction; ~+0.02 increment is day-block-bootstrap noise; goes negative in the recent third. |
+| 2 | `vix3m_at_enrich <= 21.12` regime conditioner | **DEAD.** No variance in this data — it's a period selector, not a regime gate; the edge is 100% from kept null-vix rows in the first 5 days. |
+| 3 | `moneyness_pct > 5%` OTM keep-null | **DEAD.** Null/recency artifact — strip the null trick and it falls below bullish-only; walk-forward inverts. |
+| 4 | Catalyst-type exclusion | **DEAD.** Selection artifact; CI overlaps baseline; picked from 18-category dispersion (multiple comparisons). |
+| 5 | `call+put_active_strikes >= 10` | **Not a gate.** Clean and NOT a recency artifact, but the increment over bullish-only is within day-block noise — best used as a tournament TIE-BREAKER, not a gate. |
+
+**Method caveats:** thin (33 days, single regime); 76% of exits are TIMEOUT (3-day option drift dominates, the bracket rarely fires); mild liquidity-survivorship bias (INVALID_LIQUIDITY / CACHE_EMPTY dropped). PROPOSAL pending `gammarips-review` + N≥15 lock; only the `score >= 4` floor shipped. Full context: `docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md`.
+
+---
+
 ## Bootstrap Validation — the `filt_rrr` autopsy
 
 Bootstrap CIs (5000 samples, RNG seed 42) on the `risk_reward_ratio >= 0.42` strategy under bracket `15:55 / no target / -20% stop / 3-day hold`.

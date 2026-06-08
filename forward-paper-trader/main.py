@@ -76,6 +76,13 @@ POLICY_VERSION = "V6_TOURNAMENT"
 POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
 LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_intraday"
+# Isolated RESEARCH-ONLY shadow table — deterministic top-score baseline vs the
+# live Tournament, under identical mechanics. COMPLETELY walled off from the
+# live Scorecard (forward_paper_ledger / current_ledger_stats) and the website
+# (Firestore todays_pick / signal_performance / webapp / blog). Internal only.
+# Written ONLY by _write_topscore_shadow, best-effort, never blocks the live
+# return. See docs/DECISIONS/2026-06-08-topscore-shadow-tracker.md.
+SHADOW_TABLE = f"{PROJECT_ID}.profit_scout.paper_shadow_topscore"
 
 def get_next_trading_day(base_date: date) -> date:
     end_date = base_date + timedelta(days=7)
@@ -467,6 +474,66 @@ def run_forward_paper_trading(target_date: date = None):
     row = df.iloc[0]
     records_to_insert: list[dict] = []
 
+    # exit_day = entry_day + (HOLD_DAYS-1) trading days. Needed here to pass into
+    # both the sim and the shadow writer; _simulate_contract recomputes the same
+    # value internally (identical by construction).
+    exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+
+    record = _simulate_contract(
+        client, row, entry_day, exit_day, vix_level, spy_trend, vix_5d_delta, pick_doc
+    )
+
+    records_to_insert.append(record)
+
+    # Live ledger write FIRST — capture its result and return it UNCHANGED.
+    ledger_result = _write_ledger_records(client, target_date, records_to_insert)
+
+    # Best-effort isolated research shadow (deterministic top-score vs Tournament).
+    # Walled off from the live Scorecard + website; writes ONLY to SHADOW_TABLE.
+    # The inner function already swallows all exceptions; this outer try is
+    # belt-and-suspenders so the shadow can NEVER alter the live return.
+    # See docs/DECISIONS/2026-06-08-topscore-shadow-tracker.md.
+    try:
+        _write_topscore_shadow(
+            client, target_date, entry_day, exit_day,
+            vix_level, spy_trend, vix_5d_delta,
+            tournament_record=record, pick_doc=pick_doc,
+        )
+    except Exception as e:
+        logger.error(f"topscore shadow failed (non-fatal): {e}")
+
+    return ledger_result
+
+
+def _simulate_contract(
+    client: bigquery.Client,
+    row,
+    entry_day: date,
+    exit_day: date,
+    vix_level: float | None,
+    spy_trend: str | None,
+    vix_5d_delta: float | None,
+    pick_doc: dict | None,
+) -> dict:
+    """Simulate one option contract over the full 3-day bracket window.
+
+    Pure mechanical extraction of the per-ticker simulation body that used to
+    live inline in run_forward_paper_trading's HAS_PICK happy path. Builds and
+    returns a completed ledger ``record`` dict from a single enriched ``row``
+    plus entry/exit timing and regime context.
+
+    Inputs (the ``row`` must carry these columns): ticker, scan_date, direction,
+    recommended_contract, recommended_strike, recommended_expiration,
+    recommended_dte, recommended_volume, recommended_oi, recommended_spread_pct,
+    is_premium_signal, premium_score.
+
+    ``pick_doc`` is only read for the policy_gate tag (STRICT vs FALLBACK); pass
+    ``None`` for research/shadow callers that have no Firestore pick doc — the
+    record then falls back to the service POLICY_GATE constant.
+
+    Mechanics (slippage, bracket precedence STOP/TRAIL > TARGET, illiquid/stale
+    tags, benchmarking) are byte-identical to the pre-extraction inline path.
+    """
     record = {
         "scan_date": row["scan_date"].date() if isinstance(row["scan_date"], datetime) else row["scan_date"],
         "ticker": row["ticker"],
@@ -488,7 +555,7 @@ def run_forward_paper_trading(target_date: date = None):
         "recommended_dte": int(row["recommended_dte"]),
         "recommended_volume": int(row["recommended_volume"]),
         "recommended_oi": int(row["recommended_oi"]),
-        "recommended_spread_pct": float(row["recommended_spread_pct"]),
+        "recommended_spread_pct": float(row["recommended_spread_pct"]) if pd.notna(row["recommended_spread_pct"]) else None,
         # Execution defaults (overwritten during simulation below).
         "entry_timestamp": None,
         "entry_price": None,
@@ -802,9 +869,7 @@ def run_forward_paper_trading(target_date: date = None):
             logger.warning(f"spy_exit fetch failed: {e}")
         # --------------------------------------------------------
 
-    records_to_insert.append(record)
-
-    return _write_ledger_records(client, target_date, records_to_insert)
+    return record
 
 
 def _write_ledger_records(
@@ -862,6 +927,207 @@ def _write_ledger_records(
     load_job.result()
     logger.info(f"Loaded {len(records_to_insert)} records into {LEDGER_TABLE}")
     return True, f"Successfully inserted {len(records_to_insert)} records."
+
+
+# ---------------------------------------------------------------------------
+# Deterministic top-score vs Tournament SHADOW tracker (RESEARCH-ONLY).
+#
+# Completely isolated from the live Scorecard and the website. Every HAS_PICK
+# day, in the SAME exit-cron invocation that writes the live ledger row, we also
+# simulate "just trade the highest overnight_score signal in the pool" under
+# IDENTICAL mechanics (_simulate_contract) and record BOTH arms (TOURNAMENT +
+# TOP_SCORE) in profit_scout.paper_shadow_topscore.
+#
+# Hard isolation guarantees:
+#   * Writes ONLY to SHADOW_TABLE. Never forward_paper_ledger, todays_pick,
+#     signal_performance, or any webapp/blog surface.
+#   * Best-effort: the whole body is wrapped in try/except and returns on any
+#     error. It must NEVER raise into, block, or alter the live ledger return.
+#   * v1 is PAIRED-ONLY: runs only on HAS_PICK days (called from the happy path
+#     after the live write), not on skip/regime/no-candidate days.
+# See docs/DECISIONS/2026-06-08-topscore-shadow-tracker.md.
+# ---------------------------------------------------------------------------
+
+def _write_topscore_shadow(
+    client: bigquery.Client,
+    target_date: date,
+    entry_day: date,
+    exit_day: date,
+    vix_level: float | None,
+    spy_trend: str | None,
+    vix_5d_delta: float | None,
+    tournament_record: dict,
+    pick_doc: dict | None,
+) -> None:
+    """Simulate the deterministic top-score arm and write both shadow rows.
+
+    Best-effort only — the entire body is wrapped in try/except and returns on
+    any failure so it can NEVER raise into the live trade path. Writes ONLY to
+    SHADOW_TABLE.
+    """
+    try:
+        # Pull the FULL enriched pool for this scan_date with a tradeable
+        # contract. Selects every column _simulate_contract reads PLUS the
+        # ranking fields (overnight_score + UOA dollar volumes for tie-break).
+        pool_sql = f"""
+        SELECT
+            ticker, scan_date, direction, recommended_contract, recommended_strike,
+            recommended_expiration, recommended_dte, recommended_volume, recommended_oi,
+            recommended_spread_pct, is_premium_signal, premium_score,
+            overnight_score, call_dollar_volume, put_dollar_volume
+        FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+        WHERE DATE(scan_date) = "{target_date}"
+          AND recommended_strike IS NOT NULL
+          AND recommended_expiration IS NOT NULL
+          AND recommended_dte IS NOT NULL
+          AND recommended_volume IS NOT NULL
+          AND recommended_oi IS NOT NULL
+        """
+        pool_df = client.query(pool_sql).to_dataframe()
+        pool_size = int(len(pool_df))
+        if pool_size == 0:
+            logger.info(f"topscore shadow: empty enriched pool for {target_date}; skip")
+            return
+
+        # Deterministic top-score pick: maximize overnight_score, tie-break by
+        # GREATEST(call_dollar_volume, put_dollar_volume) desc. Done explicitly
+        # in pandas with stable, fully-specified ordering.
+        pool_df["_score"] = pd.to_numeric(pool_df["overnight_score"], errors="coerce").fillna(-1.0)
+        pool_df["_uoa"] = pool_df[["call_dollar_volume", "put_dollar_volume"]].apply(
+            lambda c: max(
+                float(c["call_dollar_volume"]) if pd.notna(c["call_dollar_volume"]) else 0.0,
+                float(c["put_dollar_volume"]) if pd.notna(c["put_dollar_volume"]) else 0.0,
+            ),
+            axis=1,
+        )
+        ranked = pool_df.sort_values(
+            by=["_score", "_uoa"], ascending=[False, False], kind="mergesort"
+        ).reset_index(drop=True)
+        topscore_row = ranked.iloc[0]
+
+        # Simulate the top-score arm under identical mechanics (pick_doc=None →
+        # policy_gate falls back to the service constant; confidence is NULL).
+        record_s = _simulate_contract(
+            client, topscore_row, entry_day, exit_day,
+            vix_level, spy_trend, vix_5d_delta, pick_doc=None,
+        )
+
+        # Look up the tournament ticker's overnight_score from the same pool.
+        tour_ticker = str(tournament_record.get("ticker") or "").upper()
+        tour_score = None
+        tour_match = pool_df[pool_df["ticker"].astype(str).str.upper() == tour_ticker]
+        if len(tour_match) > 0:
+            v = tour_match.iloc[0]["overnight_score"]
+            tour_score = int(v) if pd.notna(v) else None
+
+        ts_score_v = topscore_row["overnight_score"]
+        ts_score = int(ts_score_v) if pd.notna(ts_score_v) else None
+
+        topscore_ticker = str(topscore_row["ticker"]).upper()
+        same_pick = (topscore_ticker == tour_ticker)
+        confidence = (pick_doc.get("v5_4_confidence") if pick_doc else None)
+
+        # regime_ok = VIX <= VIX3M. vix3m isn't in the trader's cheap scope; only
+        # populate from the fields the todays_pick doc already carries
+        # (vix_now_at_decision / vix3m_at_enrich — see signal-notifier
+        # write_todays_pick_doc), else leave NULL. No new fetch.
+        regime_ok = None
+        if pick_doc:
+            v_lvl = pick_doc.get("vix_now_at_decision")
+            v_3m = pick_doc.get("vix3m_at_enrich")
+            if v_lvl is not None and v_3m is not None:
+                try:
+                    regime_ok = bool(float(v_lvl) <= float(v_3m))
+                except (TypeError, ValueError):
+                    regime_ok = None
+
+        created_at = datetime.now(est).isoformat()
+
+        def _shadow_row(arm: str, src: dict, score, conf) -> dict:
+            return {
+                "scan_date": target_date.isoformat(),
+                "entry_day": entry_day.isoformat(),
+                "exit_day": exit_day.isoformat(),
+                "arm": arm,
+                "ticker": src.get("ticker"),
+                "direction": src.get("direction"),
+                "recommended_contract": src.get("recommended_contract"),
+                "overnight_score": score,
+                "confidence": conf,
+                "regime_ok": regime_ok,
+                "pool_size": pool_size,
+                "same_pick": bool(same_pick),
+                "entry_price": src.get("entry_price"),
+                "exit_price": None,  # not persisted on the ledger record; see below
+                "exit_reason": src.get("exit_reason"),
+                "realized_return_pct": src.get("realized_return_pct"),
+                "illiquid_exit": src.get("illiquid_exit"),
+                "late_fill_minutes": src.get("late_fill_minutes"),
+                "exit_slippage": src.get("exit_slippage"),
+                "policy_version": POLICY_VERSION,
+                "created_at": created_at,
+            }
+
+        # The ledger record dict does not carry a raw exit_price field (only
+        # entry_price + realized_return_pct + exit_reason). Derive exit_price
+        # from entry_price * (1 + realized_return_pct) when both are present so
+        # the shadow table is self-describing; NULL otherwise.
+        def _with_exit_price(d: dict) -> dict:
+            ep = d.get("entry_price")
+            ret = d.get("realized_return_pct")
+            if ep is not None and ret is not None:
+                d["exit_price"] = float(ep) * (1.0 + float(ret))
+            return d
+
+        rows = [
+            _with_exit_price(_shadow_row("TOURNAMENT", tournament_record, tour_score, confidence)),
+            _with_exit_price(_shadow_row("TOP_SCORE", record_s, ts_score, None)),
+        ]
+
+        _write_shadow_records(client, target_date, rows)
+        logger.info(
+            f"topscore shadow: wrote 2 rows for {target_date} "
+            f"(tournament={tour_ticker} score={tour_score}, "
+            f"top_score={topscore_ticker} score={ts_score}, "
+            f"same_pick={same_pick}, pool_size={pool_size})"
+        )
+    except Exception as e:
+        logger.error(f"topscore shadow write failed for {target_date} (non-fatal): {e}")
+        return
+
+
+def _write_shadow_records(
+    client: bigquery.Client, target_date: date, rows: list[dict]
+) -> None:
+    """Idempotent delete-then-load append into SHADOW_TABLE only.
+
+    Mirrors _write_ledger_records' streaming-avoiding load-job pattern but is
+    HARDCODED to SHADOW_TABLE — deliberately NOT reusing _write_ledger_records
+    (which targets LEDGER_TABLE) so the live ledger can never be touched here.
+    """
+    if not rows:
+        return
+    delete_query = (
+        f'DELETE FROM `{SHADOW_TABLE}` WHERE scan_date = "{target_date.isoformat()}"'
+    )
+    client.query(delete_query).result()
+    logger.info(f"topscore shadow: deleted prior rows for scan_date={target_date} in {SHADOW_TABLE}")
+
+    import io
+    jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
+    load_job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+    )
+    load_job = client.load_table_from_file(
+        io.BytesIO(jsonl.encode("utf-8")),
+        SHADOW_TABLE,
+        job_config=load_job_config,
+    )
+    load_job.result()
+    logger.info(f"topscore shadow: loaded {len(rows)} rows into {SHADOW_TABLE}")
+
 
 def get_previous_trading_day(base_date: date) -> date:
     start_date = base_date - timedelta(days=10)
