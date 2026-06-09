@@ -82,8 +82,10 @@ STALE_FIELDS_BLOCKLIST: frozenset[str] = frozenset({
 })
 
 
-def _build_prompt(report_md: str, batch: list[Candidate]) -> str:
-    """Dead-simple prompt: goal + report + candidate JSON. No rubric, no memory."""
+def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = "") -> str:
+    """Goal + report + candidate JSON. `quant_priors` is injected ONLY on the final
+    (championship) round — the deep ~10-finalist decision weighs the quant.md
+    rulebook; the cheap early cull rounds stay lean (no rulebook)."""
     blobs = "\n".join(
         json.dumps(
             {k: v for k, v in c.model_dump(exclude_none=True).items()
@@ -92,22 +94,39 @@ def _build_prompt(report_md: str, batch: list[Candidate]) -> str:
         )
         for c in batch
     )
+    rulebook_block = ""
+    rulebook_directive = ""
+    if quant_priors:
+        rulebook_block = (
+            "Trading rulebook (quant.md — durable PRIORS, not laws; weigh them, "
+            "they never override the goal):\n<rulebook>\n"
+            f"{quant_priors}\n</rulebook>\n\n"
+        )
+        rulebook_directive = (
+            "This is the final round. Weigh each finalist against the rulebook above "
+            "and the market report (regime, macro backdrop, sector tape) before you rank. "
+        )
     return (
         "Your goal: make money buying a single option and selling it for a profit within 3 trading days.\n\n"
         f"{_DATA_ONLY_PREAMBLE}\n\n"
+        f"{rulebook_block}"
         "Today's market report:\n<report>\n"
         f"{report_md}\n</report>\n\n"
         "Candidate contracts (one JSON each — flow, contract, greeks, technicals, news):\n"
         f"{blobs}\n\n"
+        f"{rulebook_directive}"
         'Rank the contracts you would buy, best first. Return ONLY JSON: '
         '{"picks":["<ticker>","<ticker>",...],"why":"<one sentence on your #1 pick>"}'
     )
 
 
-async def _judge_batch(client: genai.Client, report_md: str, batch: list[Candidate]) -> dict:
-    """One bracket call over <=10 candidates -> ranked picks. Bounded retry."""
+async def _judge_batch(
+    client: genai.Client, report_md: str, batch: list[Candidate], quant_priors: str = ""
+) -> dict:
+    """One bracket call over <=10 candidates -> ranked picks. Bounded retry.
+    `quant_priors` is non-empty only on the final round (see _run_bracket)."""
     cfg = genai_types.GenerateContentConfig(response_mime_type="application/json")
-    prompt = _build_prompt(report_md, batch)
+    prompt = _build_prompt(report_md, batch, quant_priors)
     valid = {c.ticker for c in batch}
     for attempt in range(1, tools.JUDGE_MAX_ATTEMPTS + 1):
         try:
@@ -135,9 +154,11 @@ async def _run_bracket(
     by_ticker: dict[str, Candidate],
     report_md: str,
     seed: int,
+    quant_priors: str = "",
 ) -> tuple[Candidate | None, dict[str, str], dict[str, int]]:
     """One full bracket: <=10/call, top-2 advance until 1 remains.
-    Returns (winner, why_by_ticker, max_round_reached_by_ticker)."""
+    Returns (winner, why_by_ticker, max_round_reached_by_ticker).
+    `quant_priors` (quant.md) is injected ONLY on the final round (k==1)."""
     rng = random.Random(seed)
     pool = list(candidates)
     reached: dict[str, int] = {c.ticker: 0 for c in candidates}
@@ -148,8 +169,10 @@ async def _run_bracket(
         rng.shuffle(pool)  # fair seeding — spread strong names across batches
         batches = [pool[i : i + BATCH] for i in range(0, len(pool), BATCH)]
         k = 2 if len(pool) > BATCH else 1  # advance top-2 until the single final batch
+        # Final round = the single championship batch (k==1): hand it the rulebook.
+        final_priors = quant_priors if k == 1 else ""
         results = await asyncio.gather(
-            *[_judge_batch(client, report_md, b) for b in batches]
+            *[_judge_batch(client, report_md, b, final_priors) for b in batches]
         )
         # Bug #11: a batch whose LLM call totally fails returns no picks. Don't
         # silently eliminate its members — re-queue them into the next round so a
@@ -201,8 +224,9 @@ async def run_tournament(req: RankRequest) -> tuple[Candidate | None, str, str, 
         return c, "Only eligible candidate after gates.", "low", {c.ticker: 1}
 
     client = genai.Client(vertexai=True, location="global")
+    quant_priors = tools.load_quant_md()  # injected at each bracket's final round only
     brackets = await asyncio.gather(
-        *[_run_bracket(client, req.candidates, by_ticker, req.report_md, s) for s in SEEDS]
+        *[_run_bracket(client, req.candidates, by_ticker, req.report_md, s, quant_priors) for s in SEEDS]
     )
     winners = [(w.ticker, why_by.get(w.ticker, "")) for w, why_by, _ in brackets if w]
     if not winners:
@@ -282,5 +306,5 @@ async def run_pipeline(req: RankRequest) -> RankResponse:
         scorer_latency_ms=latency_ms,
         picker_latency_ms=None,
         dry_run=tools.DRY_RUN,
-        case_memory_bytes=0,
+        case_memory_bytes=len(tools.load_quant_md()),
     )

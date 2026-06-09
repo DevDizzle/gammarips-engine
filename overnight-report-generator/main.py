@@ -9,6 +9,8 @@ from google.cloud import bigquery, firestore
 from google import genai
 from google.genai import types
 
+import market_context  # deterministic, non-blocking macro + sector context
+
 # Prompt version stamped on every report doc + trace log so downstream eval /
 # cohort attribution can pivot on it. Bump when prompt or payload contract
 # changes materially. v1 = original GammaMolt prose. v2 = literature-grounded:
@@ -61,21 +63,60 @@ def _validate_iso_date(s: str) -> str:
     return parsed.strftime("%Y-%m-%d")
 
 
+def _latest_scan_date_with_rows(before_date: str, lookback_days: int = 10):
+    """Most recent scan_date in overnight_signals_enriched strictly before
+    `before_date` that actually HAS rows. Returns an ISO string or None.
+
+    Why this exists: naive calendar subtraction (today − 1, or − 3 on Mondays)
+    is weekend-aware but HOLIDAY-blind. After a mid-week market holiday the
+    subtraction lands on a no-scan day → fetch_signals returns empty → the
+    report 404s and is never written → signal-notifier silently fail-opens to
+    an empty report_md and that day's tournament runs with NO report context.
+    Anchoring to the latest scan_date that genuinely has data closes that gap.
+    """
+    query = f"""
+        SELECT CAST(MAX(scan_date) AS STRING) AS d
+        FROM `{PROJECT_ID}.{DATASET}.overnight_signals_enriched`
+        WHERE scan_date < '{before_date}'
+          AND scan_date >= DATE_SUB(DATE '{before_date}', INTERVAL {lookback_days} DAY)
+    """
+    try:
+        rows = list(bq_client.query(query).result())
+        return rows[0]["d"] if rows and rows[0]["d"] else None
+    except Exception as e:
+        logger.warning(f"latest-scan-date lookup failed: {e}")
+        return None
+
+
+def _resolve_underlying_scan_date(report_date: str) -> str:
+    """Resolve the scan that backs `report_date`: the most recent scan_date with
+    rows strictly before it. Falls back to weekend-aware calendar subtraction
+    only when the data lookup returns nothing (e.g. a transient BQ blip), so a
+    lookup failure degrades to the old behavior rather than breaking the run."""
+    latest = _latest_scan_date_with_rows(report_date)
+    if latest:
+        return latest
+    rd = datetime.strptime(report_date, "%Y-%m-%d")
+    days_to_subtract = 3 if rd.weekday() == 0 else 1
+    logger.warning(
+        f"No scan rows found before {report_date}; falling back to naive "
+        f"calendar subtraction (−{days_to_subtract}d)."
+    )
+    return (rd - timedelta(days=days_to_subtract)).strftime("%Y-%m-%d")
+
+
 def get_report_dates(req_data):
     if "report_date" in req_data:
         report_date = _validate_iso_date(req_data["report_date"])
         underlying_scan_date = req_data.get("underlying_scan_date")
         if underlying_scan_date:
+            # Explicit override (backfills / manual runs) always wins.
             underlying_scan_date = _validate_iso_date(underlying_scan_date)
         else:
-            rd = datetime.strptime(report_date, "%Y-%m-%d")
-            days_to_subtract = 3 if rd.weekday() == 0 else 1
-            underlying_scan_date = (rd - timedelta(days=days_to_subtract)).strftime("%Y-%m-%d")
+            underlying_scan_date = _resolve_underlying_scan_date(report_date)
     else:
-        now = datetime.now()
-        report_date = now.strftime("%Y-%m-%d")
-        days_to_subtract = 3 if now.weekday() == 0 else 1
-        underlying_scan_date = (now - timedelta(days=days_to_subtract)).strftime("%Y-%m-%d")
+        report_date = datetime.now().strftime("%Y-%m-%d")
+        underlying_scan_date = _resolve_underlying_scan_date(report_date)
     return report_date, underlying_scan_date
 
 def fetch_signals(underlying_scan_date):
@@ -538,6 +579,22 @@ OUTPUT — produce a single JSON object with these keys:
     ## Sentiment Shift vs 14-Day Baseline
        One paragraph framing today's bullish share against trailing mean +
        std. Tetlock-shift framing: is today an outlier (|z| > 1) or in band?
+    ## Macro & Regime Backdrop
+       From `macro_regime` (authoritative, deterministic, point-in-time): the VIX
+       level + 1d/5d trend (vix, vix_level_state, vix_trend), term structure
+       (term_state), rates (ust10y, rate_state, rate_trend), and the composite
+       risk_state with its risk_state_reasons. State plainly whether this is a
+       risk-on or risk-off tape and what it implies for buying 3-day premium. If a
+       field is UNKNOWN, say "macro data unavailable for this scan" for that field —
+       do NOT fabricate or infer it. Cite the numbers; no vibes.
+    ## Sector Tape
+       From `sector_panel` (authoritative; may be null): rank the sectors by ret_ytd
+       with ret_5d and drawdown_5d_sigma beside each, and call out any sector tagged
+       in rotation_flags (crowded_rotating = a YTD leader now in a sharp multi-sigma
+       5-day drawdown; oversold_lagging = a laggard turning up). One line on which
+       sectors are tailwinds vs which are falling knives for a 3-day long. If
+       sector_panel is null, write a single line: "Sector tape unavailable for this
+       scan." Do NOT fabricate sector moves.
     ## Key Themes
        Top 3-5 catalysts from `themes`. Tie to the candidates that carry them.
     ## Top Bullish Signals
@@ -698,6 +755,15 @@ def generate_report():
     signals = fetch_signals(underlying_scan_date)
     
     if not signals:
+        # Loud marker: a missing report means signal-notifier fail-opens to an
+        # empty report_md and that day's tournament loses its market context.
+        # The data-anchored _resolve_underlying_scan_date should make this rare;
+        # if it still fires, the whole enriched pipeline produced nothing.
+        logger.error(
+            f"REPORT_NO_SIGNALS: no enriched rows for underlying_scan_date="
+            f"{underlying_scan_date} (report_date={report_date}). Report NOT "
+            f"written; downstream report_md will be empty."
+        )
         return jsonify({"status": "error", "message": f"No signals found for underlying_scan_date: {underlying_scan_date}"}), 404
 
     total_signals = len(signals)
@@ -763,6 +829,11 @@ def generate_report():
 
     previous_titles = fetch_recent_titles(report_date, n=3)
 
+    # Deterministic, point-in-time macro + sector backdrop (as-of the scan night).
+    # Non-blocking: each returns UNKNOWN/None on any failure — never blocks the report.
+    macro_backdrop = market_context.macro_regime(underlying_scan_date)
+    sector_tape = market_context.sector_panel(underlying_scan_date)
+
     payload = {
         "report_date": report_date,
         "underlying_scan_date": underlying_scan_date,
@@ -779,6 +850,8 @@ def generate_report():
         "divergences": divergences,
         "change_vs_yesterday": change_vs_yesterday,
         "previous_titles": previous_titles,
+        "macro_regime": macro_backdrop,
+        "sector_panel": sector_tape,
     }
 
     # Stage 2: Editorial composition

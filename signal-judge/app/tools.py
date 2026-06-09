@@ -403,3 +403,31 @@ def render_case_memory_for_picker() -> str:
             logger.warning(f"case_memory: could not read {name}: {e}")
     _CASE_MEMORY_CACHE = "\n\n".join(parts)
     return _CASE_MEMORY_CACHE
+
+
+_QUANT_MD_CACHE: str | None = None
+
+
+def load_quant_md() -> str:
+    """quant.md ONLY — the hand-authored, ledger-independent priors. Deliberately
+    excludes exemplars.md (those are generated from a single-regime backfill).
+
+    Injected into the tournament's FINAL round only (the championship batch that
+    crowns each bracket winner), so the ~10-finalist deep decision weighs the
+    rulebook while the cheap early cull rounds stay lean. Cached per deploy.
+
+    NON-GATING and FAIL-OPEN: any read error returns "" so the picker still runs.
+    NOT leakage: quant.md contains no point-in-time data — only durable priors.
+    """
+    global _QUANT_MD_CACHE
+    if _QUANT_MD_CACHE is not None:
+        return _QUANT_MD_CACHE
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(here, "case_memory", "quant.md")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            _QUANT_MD_CACHE = f.read().strip()
+    except OSError as e:
+        logger.warning(f"load_quant_md: could not read quant.md: {e}")
+        _QUANT_MD_CACHE = ""
+    return _QUANT_MD_CACHE

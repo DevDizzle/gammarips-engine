@@ -120,3 +120,68 @@ Each rule: **claim** · source · `direction` of edge · **mechanism** · `ledge
 - **mechanism:** High theta is survivable only if the favorable move arrives before decay compounds; front-loaded moves convert to target, late moves do not.
 - **ledger_status:** ANECDOTAL_ON_OURS.
 - **guardrail:** For high-theta candidates, require a catalyst capable of a *fast* move; otherwise prefer the low-theta convex structure (Q5).
+
+---
+
+> **Q13–Q18 — Macro & sector regime (added 2026-06-09).** These read the new
+> `macro_regime` and `sector_panel` blocks in the daily report and condition the
+> directional/theta priors above. They are grounded in settled market behavior
+> (leverage effect, term structure, equity duration, sector momentum/rotation),
+> not yet measured on our own ledger (the corpus is a single calm 2026-Q2 regime
+> that never left the NORMAL VIX band — it cannot test cross-regime macro rules).
+> Treat as PRIORS the picker may weigh, never gates. Each cites the report field
+> it acts on.
+
+### RULE Q13 — VIX direction is the regime sign on Q7
+- **domain:** regime / direction
+- **claim:** Read `macro_regime.vix_trend` BEFORE leaning on the Q7 direction tilt. A RISING/SPIKING tape is a down-tape — do not lean bullish into it; downside convexity (Q5) and fast puts (Q12) have the wind. On FALLING/QUIET, Q7's mild bullish tilt stands.
+- **source:** leverage-effect literature (VIX co-moves negatively with equities).
+- **direction:** conditional
+- **mechanism:** Rising implied vol accompanies falling/​stressed equities and richer entry IV (more theta drag, worsens Q3); a falling/quiet tape is the up-grind that produced Q7's asymmetry.
+- **ledger_status:** LITERATURE-ONLY (our corpus never leaves the NORMAL VIX band, so SPIKING/QUIET states and level buckets are unobserved on ours).
+- **guardrail:** On SPIKING/STRESS relax any anti-bearish lean and re-weight toward downside convexity / fast puts; on QUIET/FALLING Q7's bullish tilt stands. Raise theta-skepticism when `vix_level_state` is ELEVATED/STRESS. Q7's regime field — never a gate.
+
+### RULE Q14 — Term-structure slack grades Q11's cushion
+- **domain:** regime / IV
+- **claim:** Among contracts that already passed the Q11 contango gate, THIN_CONTANGO (`macro_regime.term_state`) means little vol cushion before a stress spike crushes the long.
+- **source:** vol-term-structure literature (same basis as Q11). NOT a competing regime rule — a graded child of Q11.
+- **direction:** context
+- **mechanism:** Q11 gates out backwardation; thin contango is the friendlier-window's edge case with the least margin before near-term IV inverts.
+- **ledger_status:** LITERATURE-ONLY (not reconstructable on corpus; contango is pre-gated so there is no backwardation contrast).
+- **guardrail:** Do NOT re-litigate Q11. When `term_state`=THIN_CONTANGO, raise theta-skepticism (lean Q3/Q8). Never disqualify on this alone.
+
+### RULE Q15 — Rising long-end yields are a headwind for high-multiple longs
+- **domain:** regime / direction
+- **claim:** A RESTRICTIVE-and-RISING rate backdrop (`macro_regime.rate_state`/`rate_trend`) is a structural headwind for high-multiple/growth/tech BULLISH longs and modestly favors well-structured shorts on the same names.
+- **source:** equity-duration / discount-rate literature.
+- **direction:** conditional (decreases_edge for high-multiple bullish longs when rates RISING+RESTRICTIVE)
+- **mechanism:** Higher discount rates compress the present value of distant cash flows hardest, pressuring long-duration equities.
+- **ledger_status:** LITERATURE-ONLY (corpus has no rate columns and one narrow rate regime).
+- **guardrail:** When `rate_state`=RESTRICTIVE and `rate_trend`=RISING, apply mild extra skepticism to high-multiple BULLISH longs (esp. tech/growth). Ignore for low-duration / non-rate-sensitive names. A tiny thumb on the scale, never a disqualifier.
+
+### RULE Q16 — Risk-on/off is the first regime read
+- **domain:** regime
+- **claim:** `macro_regime.risk_state` is the day's regime summary and conditions the directional/theta priors. RISK_OFF rewards defense / convexity / fast-bearish theses and punishes euphoric long-premium chasing; RISK_ON is where the bullish grind (Q7/Q13) and low-theta convex longs (Q5) earn.
+- **source:** composite of Q13/Q14/Q15 + risk-regime literature.
+- **direction:** conditional (re-weights, does not pick)
+- **mechanism:** Bundles vol level, vol direction, term slack and rate trend into the variable that conditions Q7/Q13's direction sign and Q3/Q8's theta-urgency.
+- **ledger_status:** LITERATURE-ONLY / ANECDOTAL (corpus near-constant on one regime; label has no in-sample variance).
+- **guardrail:** ALWAYS read `risk_state_reasons` (the components), never the bare label. Use it as the FIRST regime read, then apply Q5/Q7/Q12/Q13 conditioned on it. Re-weights priors; never a disqualifier; never overrides the upstream earnings/contango safety gates. If risk_state=UNKNOWN, ignore (do not assume RISK_ON).
+
+### RULE Q17 — Discount long premium into a sector drawdown
+- **domain:** sector / regime
+- **claim:** A long-premium 3-day bracket whose sector ETF just printed a multi-sigma 5-day drawdown (`sector_panel.etfs[*].drawdown_5d_sigma` worse than −2) faces a falling-knife tape and elevated near-term sector IV; the +80% target is unlikely within 3 days while the sector reprices.
+- **source:** momentum / mean-reversion + vol-clustering literature (the SMH 06-05/06 air-pocket is the live illustration).
+- **direction:** decreases_edge (conditional on the drawdown)
+- **mechanism:** A fresh multi-sigma air-pocket raises realized vol and dealer hedging across the basket; a same-direction long pays elevated IV into a tape that may keep gapping against it.
+- **ledger_status:** LITERATURE-ONLY (no sector column in our backfill — cannot be measured retroactively).
+- **guardrail:** When a candidate's sector shows `drawdown_5d_sigma` worse than −2, lean against long premium that direction unless the NAME has a clear name-specific decoupling catalyst; prefer comparable candidates outside the air-pocket. Never a hard disqualifier.
+
+### RULE Q18 — Crowded-rotating sector: flow read is less reliable
+- **domain:** sector / flow
+- **claim:** When a candidate sits in a YTD-leading sector now flagged `crowded_rotating` (`sector_panel.rotation_flags`), unusual options flow in that name is as likely de-risking / unwind / protective rotation as fresh directional conviction.
+- **source:** rotation / crowding literature; composes with Q9 (hedging flow ≠ conviction) and Q2 (spent catalyst).
+- **direction:** decreases_edge (lowers confidence that bullish UOA = bullish intent)
+- **mechanism:** Leaders that crack draw protective and profit-taking flow; the same dollar UOA that reads bullish at the top of a run can be exit hedging on the way down.
+- **ledger_status:** LITERATURE-ONLY (boolean never computable on the corpus; composes with the ANECDOTAL Q9/Q2).
+- **guardrail:** For a `crowded_rotating`-sector candidate, cross-check the Q9 flow-intent/hedge divergence and the Q2 spent-vs-forward catalyst test before trusting the direction; prefer names whose sector is NOT crowded_rotating when otherwise comparable. A confidence haircut on the flow read, not a prediction the underlying falls — never a law.
