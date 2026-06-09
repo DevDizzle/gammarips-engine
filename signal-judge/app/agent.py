@@ -107,7 +107,9 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
             "and the market report (regime, macro backdrop, sector tape) before you rank. "
         )
     return (
-        "Your goal: make money buying a single option and selling it for a profit within 3 trading days.\n\n"
+        "Your goal: make money buying a single option and selling it for a profit within 3 trading days.\n"
+        "Buying the right stock is not enough — the option must capture the move within 3 days, "
+        "net of decay and spread. A great catalyst in a poorly-structured contract still loses.\n\n"
         f"{_DATA_ONLY_PREAMBLE}\n\n"
         f"{rulebook_block}"
         "Today's market report:\n<report>\n"
