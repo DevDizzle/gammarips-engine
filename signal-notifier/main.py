@@ -752,9 +752,6 @@ def format_whatsapp_message(
     On happy path: single pick + routine. On skip: one-line rationale so the
     group sees the engine is standing down (and doesn't wonder if it's broken).
     """
-    stop_pct_str = f"{int(STOP_PCT_DISPLAY * 100)}%"
-    target_pct_str = f"{int(TARGET_PCT_DISPLAY * 100)}%"
-
     if not has_pick:
         reason_lines = {
             "no_candidates_passed_gates": "Nothing cleared the gates. Do nothing today.",
@@ -811,10 +808,6 @@ def format_whatsapp_message(
         f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}\n\n"
         f"{why_line}"
         f"Full rationale: {signal_url}\n\n"
-        f"*Routine*\n"
-        f"10:00 ET — buy 1 contract at market\n"
-        f"Arm GTC −{stop_pct_str} stop AND +{target_pct_str} target\n"
-        f"15:50 ET day-3 — close if neither has filled\n\n"
         f"_Paper-trading, educational only. Not investment advice._"
     )
 
@@ -1067,9 +1060,6 @@ def format_email_html(
     except (TypeError, ValueError):
         mid_str = "—"
 
-    stop_pct_str = f"{int(STOP_PCT_DISPLAY * 100)}%"
-    target_pct_str = f"{int(TARGET_PCT_DISPLAY * 100)}%"
-
     signal_url = f"{PUBLIC_WEBAPP_BASE}/signals/{ticker}"
 
     # V5.4 justification block. Shows the Picker's reasoning + confidence
@@ -1122,28 +1112,6 @@ def format_email_html(
         </div>
       </a>
 {v5_4_block}
-      <h3 style="margin-bottom: 4px;">Today's Routine</h3>
-      <table style="border-collapse: collapse; width: 100%;">
-        <tr><td style="padding: 4px 8px;">10:00 AM ET <em>day 1</em></td>
-            <td>Buy 1 contract at market. Arm
-                <strong>-{stop_pct_str}</strong> GTC stop-limit
-                <strong>AND</strong>
-                <strong>+{target_pct_str}</strong> GTC limit sell on Robinhood.</td></tr>
-        <tr><td style="padding: 4px 8px;">Through day 3</td>
-            <td>Phone in pocket. Both exit orders armed. No monitoring.</td></tr>
-        <tr><td style="padding: 4px 8px;">If either fills</td>
-            <td>Cancel the other order — Robinhood doesn't auto-OCO options.</td></tr>
-        <tr><td style="padding: 4px 8px;">3:50 PM ET <em>day 3</em></td>
-            <td>If still open, cancel both pending orders, market sell. Done.</td></tr>
-      </table>
-
-      <p style="color: #888; font-size: 12px; margin-top: 16px;">
-        Entry: 10:00 ET day-1 &middot; Stop: -{stop_pct_str} option premium &middot;
-        Target: +{target_pct_str} option premium &middot; Hold: 3 trading days &middot;
-        Exit: 15:50 ET day-3.
-        Missed entry → skip. Missed exit → GTC stop and target still armed;
-        close next morning open.
-      </p>
     </div>
     """
     return html
