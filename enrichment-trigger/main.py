@@ -59,6 +59,26 @@ SEED = int(os.getenv("SEED", "42"))
 CANDIDATE_COUNT = int(os.getenv("CANDIDATE_COUNT", "1"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
 
+# Cost discipline (2026-06-12): ground ONLY the top-N edge-ranked names, and cap
+# thinking. The old funnel grounded ALL ~344 UOA names (513 calls/day, ~2M hidden
+# thinking tokens — the trace logger dropped thoughts_token_count so it looked
+# ~10x cheaper than it billed) then discarded all but ~12 downstream. The token
+# budget was spent on the wide end of the funnel. Now:
+#   scan(~5000) -> edge-rank top ENRICH_TOP_N BULLISH -> ground those -> tournament.
+# See docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md.
+ENRICH_TOP_N = int(os.getenv("ENRICH_TOP_N", "50"))
+# 0 fully disables model "thinking" (confirmed working on gemini-3.5-flash WITH
+# grounding: thoughts_token_count -> 0, news still returned). Raise via env if
+# catalyst quality degrades.
+ENRICH_THINKING_BUDGET = int(os.getenv("ENRICH_THINKING_BUDGET", "0"))
+# BULLISH-only enrichment mirrors the downstream tournament gate (edge levers are
+# call-delta-defined). Env-toggleable, default true — same flag name as the
+# notifier so one env var governs both. See 2026-06-11-edge-rank-pool-cap.md.
+ENRICH_BULLISH_ONLY = os.getenv("BULLISH_ONLY", "true").strip().lower() in ("1", "true", "yes")
+# Tradeable delta band (confirmed Q19 trap-escape lever): |delta| 0.20-0.46.
+EDGE_DELTA_LO = float(os.getenv("EDGE_DELTA_LO", "0.20"))
+EDGE_DELTA_HI = float(os.getenv("EDGE_DELTA_HI", "0.46"))
+
 # Output prefixes in GCS
 NEWS_OUTPUT_PREFIX = "overnight-enrichment/news/"
 TECHNICALS_OUTPUT_PREFIX = "overnight-enrichment/technicals/"
@@ -452,6 +472,46 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     return [dict(r) for r in rows], scan_date
 
 
+def _edge_select_top_n(signals: list[dict], k: int) -> list[dict]:
+    """Concentrate the grounded-LLM token budget on the names that can actually win.
+
+    Pre-enrichment edge rank using ONLY point-in-time scan fields (leakage-safe):
+    apply the BULLISH gate (mirrors the downstream tournament), then rank by the
+    confirmed delta-band lever (|delta| 0.20-0.46, Q19 trap-escape), tie-broken by
+    overnight_score. Keep the top ``k``. The RR / ATR levers used by the notifier's
+    edge-rank are intentionally omitted here — they're computed DURING enrichment
+    (not yet available), and delta is the only CONFIRMED separator anyway. Returns
+    all qualifying signals unchanged when there are <= k of them. See
+    docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md."""
+    pool = signals
+    if ENRICH_BULLISH_ONLY:
+        pool = [s for s in pool if str(s.get("direction", "")).upper() == "BULLISH"]
+
+    def _key(s: dict) -> tuple:
+        edge = 0.0
+        if str(s.get("direction", "")).upper() == "BULLISH":
+            edge += 2.0
+        d = s.get("recommended_delta")
+        try:
+            if d is not None and EDGE_DELTA_LO <= abs(float(d)) <= EDGE_DELTA_HI:
+                edge += 1.5
+        except (TypeError, ValueError):
+            pass
+        try:
+            score = float(s.get("overnight_score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        return (edge, score)
+
+    capped = sorted(pool, key=_key, reverse=True)[:k]
+    logger.info(
+        f"Edge-rank enrichment cap: {len(signals)} scanned -> {len(pool)} "
+        f"{'BULLISH ' if ENRICH_BULLISH_ONLY else ''}qualifying -> grounding top "
+        f"{len(capped)} (ENRICH_TOP_N={k}); tickers={[s.get('ticker') for s in capped]}"
+    )
+    return capped
+
+
 # =====================================================================
 # STEP 2: Fetch & Analyze news (Gemini Grounded Search)
 # =====================================================================
@@ -564,10 +624,17 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
             candidate_count=CANDIDATE_COUNT,
             max_output_tokens=MAX_OUTPUT_TOKENS,
             tools=[search_tool],
+            # Cost cap (2026-06-12): thinking was left at server default and was
+            # generating ~3,600 hidden thinking tokens/call (~2M/day, billed as
+            # output, invisible in the trace logger) — the root of the cost
+            # surprise. thinking_budget=0 disables it; verified live on
+            # gemini-3.5-flash WITH grounding (thoughts_token_count -> 0, news
+            # still returned). Env-tunable via ENRICH_THINKING_BUDGET.
+            thinking_config=types.ThinkingConfig(thinking_budget=ENRICH_THINKING_BUDGET),
             # Gemini 3.x migration (2026-05-27): dropped temperature/top_p/top_k/seed —
             # 3.x degrades/loops under pinned low temp and effectively ignores top_k;
-            # rely on the strict-JSON prompt contract below. Thinking left at SDK/server
-            # default. (TEMPERATURE/TOP_P/TOP_K/SEED consts now unused.)
+            # rely on the strict-JSON prompt contract below.
+            # (TEMPERATURE/TOP_P/TOP_K/SEED consts now unused.)
             # REMOVED: response_mime_type="application/json" (causes issues with grounding)
         )
 
@@ -639,7 +706,16 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
             try:
                 _um = getattr(response, "usage_metadata", None)
                 _in = getattr(_um, "prompt_token_count", None) if _um else None
-                _out = getattr(_um, "candidates_token_count", None) if _um else None
+                # Bill-truthful output: thinking tokens ARE billed as output but
+                # were dropped here (only candidates_token_count was logged),
+                # making enrichment look ~10x cheaper than it billed — the
+                # 2026-06-12 cost surprise. Fold thoughts_token_count in so
+                # cost_usd reflects reality (now ~0 with thinking_budget=0).
+                _out_c = getattr(_um, "candidates_token_count", None) if _um else None
+                _thoughts = getattr(_um, "thoughts_token_count", None) if _um else None
+                _out = None
+                if _out_c is not None or _thoughts is not None:
+                    _out = (_out_c or 0) + (_thoughts or 0)
                 _trace_logger.log(TraceRecord(
                     service="enrichment",
                     call_site="fetch_and_analyze_news",
@@ -1578,9 +1654,10 @@ def enrichment_trigger():
             logger.info(f"Already {existing} enriched rows for {scan_date} enriched today. Skipping.")
             return jsonify({"status": "already_enriched", "scan_date": scan_date, "existing_rows": existing}), 200
 
-    tickers = list(set(s["ticker"] for s in signals))
-    logger.info(f"Enriching {len(tickers)} tickers for {scan_date}")
-
+    # Market-wide flow context is computed on the FULL scan (cheap, no LLM) BEFORE
+    # the edge-rank cap, so regime / sector / bull-bear breadth reflect the whole
+    # market — not just the enriched top-N.
+    #
     # V5.4 Phase 1: cross-cutting flow context. Cached FRED reads — primes
     # _VIX_CACHE / _VIX3M_CACHE so the existing call in write_enriched_signals
     # is a cache hit (no extra FRED traffic).
@@ -1591,6 +1668,15 @@ def enrichment_trigger():
         f"dom={flow_context['dominant_direction']}), "
         f"top_sectors={flow_context['top_sectors']}, regime={flow_context['regime']}"
     )
+
+    # Cost discipline (2026-06-12): ground ONLY the top-N edge-ranked BULLISH names.
+    # The funnel discards all but ~ENRICH_TOP_N downstream anyway, so spending
+    # grounded-LLM tokens on the full ~344-name pool was pure waste.
+    signals = _edge_select_top_n(signals, ENRICH_TOP_N)
+    if not signals:
+        return jsonify({"status": "no_candidates_after_edge_rank", "scan_date": scan_date}), 200
+    tickers = list(set(s["ticker"] for s in signals))
+    logger.info(f"Enriching top {len(tickers)} edge-ranked tickers for {scan_date}")
 
     # Step 2: Fetch & Analyze News (Gemini Grounded Search)
     # Replaces the old two-step Polygon + Gemini process
