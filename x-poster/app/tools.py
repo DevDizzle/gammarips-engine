@@ -142,7 +142,7 @@ def fetch_todays_report_summary(scan_date: str) -> dict:
 
 
 def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
-    """Query `forward_paper_ledger` for V5.4 trades that closed today.
+    """Query `forward_paper_ledger` for V7 trades that closed today.
 
     Returns each row pre-shaped for the WIN/LOSS writer template: derived
     `exit_price` (entry_price * (1 + realized_return_pct)), `pct_signed`
@@ -170,7 +170,7 @@ def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
         WHERE DATE(exit_timestamp) = @scan_date
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V6_TOURNAMENT'
+          AND policy_version = 'V7_INTRADAY'
           AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
     """
     try:
@@ -191,7 +191,7 @@ def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
     _exit_reason_display = {
         "TARGET": "target hit",
         "STOP": "stop hit",
-        "TIMEOUT": "3-day exit",
+        "TIMEOUT": "same-day close",  # V7: flat at 15:45 ET, no target/stop hit
     }
     enriched: list[dict] = []
     for r in rows:
@@ -284,8 +284,10 @@ def fetch_recently_posted_tickers(scan_date: str, lookback_days: int = 5) -> dic
 
     Args:
         scan_date: Today's date (YYYY-MM-DD); look back from here.
-        lookback_days: Calendar days to walk back. 5 covers Mon-Fri callbacks
-            paired with prev-week posts under the V5.4 3-day hold.
+        lookback_days: Calendar days to walk back. Under V7 (same-day exit) the
+            close and its originating signal post are the SAME day, so today is
+            always in range; 5 is kept as a harmless safety margin (the QRT
+            lookup sorts newest-first, so it still pairs to today's signal).
 
     Returns:
         dict: {"status": "success", "tickers": ["BE", "STX", ...]} unique upper-case.
@@ -430,13 +432,13 @@ def fetch_original_tweet_id(original_scan_date: str) -> dict:
 
 
 def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
-    """Query the past 5 trading days' V5.4 closes for the Friday scorecard.
+    """Query the past 5 trading days. V7 closes for the Friday scorecard.
 
     The scorecard reflects the PUBLIC track record — only trades on tickers
     the X audience has seen us name should appear. Pass `restrict_tickers`
     populated from `fetch_recently_posted_tickers(scan_date, lookback=10)`.
 
-    Filters: V6_TOURNAMENT only, drops INVALID_LIQUIDITY/SKIPPED. Each
+    Filters: V7_INTRADAY only, drops INVALID_LIQUIDITY/SKIPPED. Each
     row pre-shaped for the writer template (pct_signed, outcome_emoji,
     direction_short).
 
@@ -463,7 +465,7 @@ def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V6_TOURNAMENT'
+          AND policy_version = 'V7_INTRADAY'
           AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
         ORDER BY exit_timestamp
     """

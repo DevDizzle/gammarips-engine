@@ -91,7 +91,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 # the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
 #   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
-LIVE_COHORT_START_DATE = "2026-06-04"  # V6 tournament launch — ledger truncated, V5.4 retired (a dud, avg 0.0% over 13 closes)
+LIVE_COHORT_START_DATE = "2026-06-08"  # V7 GIGO cohort: first trade ENTRY (TER, scan 06-05 -> entry 06-08). V6 picks re-simulated under V7; entries span 06-08..06-15, so this floor keeps all 6.
 
 # Fixed-dollar position sizing for the public cohort_stats panel.
 # The ledger records actual per-contract premium + percent return; the public
@@ -450,7 +450,7 @@ def write_todays_pick_doc(
             "effective_at": None,
             "has_pick": False,
             "skip_reason": skip_reason,
-            "policy_version": "V6_TOURNAMENT",
+            "policy_version": "V7_INTRADAY",
         }
     else:
         assert top is not None, "write_todays_pick_doc(has_pick=True) requires `top`"
@@ -491,7 +491,7 @@ def write_todays_pick_doc(
             "vix3m_at_enrich": _num("vix3m_at_enrich"),
             "vix_now_at_decision": float(vix_now) if vix_now is not None else None,
             "vix_source": _LAST_VIX_SOURCE,
-            "policy_version": "V6_TOURNAMENT",
+            "policy_version": "V7_INTRADAY",
             # STRICT (ranker pick) or FALLBACK (daily-cadence deterministic
             # pick). Propagated to forward_paper_ledger.policy_gate so fallback
             # EV is separable. See DECISIONS/2026-06-01-daily-cadence-fallback.md.
@@ -926,7 +926,7 @@ def post_to_openclaw(message: str) -> None:
 # The V5.4 ticker lands in Firestore todays_pick/{scan_date} (canonical doc
 # for webapp banner, MCP get_todays_pick, x-poster signal, gamma-bot, blog
 # newsletter). forward-paper-trader simulates every enriched signal and
-# tags rows policy_version='V6_TOURNAMENT'; the "official pick" is
+# tags rows policy_version='V7_INTRADAY'; the "official pick" is
 # identified by ticker JOIN to todays_pick.
 
 
@@ -1240,7 +1240,7 @@ def compute_and_write_cohort_stats() -> bool:
     """Refresh ``cohort_stats/current`` from forward_paper_ledger.
 
     Cohort definition: ``DATE(entry_timestamp) >= LIVE_COHORT_START_DATE``
-    AND ``policy_version = 'V6_TOURNAMENT'`` AND closed
+    AND ``policy_version = 'V7_INTRADAY'`` AND closed
     (realized_return_pct not null). Pre-cohort rows were TRUNCATED 2026-05-08
     when V5.3 was retired; the ledger restarts fresh under V5.4.
 
@@ -1262,7 +1262,7 @@ def compute_and_write_cohort_stats() -> bool:
             GREATEST(1, CAST(ROUND({POSITION_SIZE_USD} / (entry_price * 100)) AS INT64)) AS n_contracts
           FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
           WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
-            AND policy_version = "V6_TOURNAMENT"
+            AND policy_version = "V7_INTRADAY"
             AND realized_return_pct IS NOT NULL
             AND entry_price IS NOT NULL
             AND entry_price > 0
@@ -1284,7 +1284,7 @@ def compute_and_write_cohort_stats() -> bool:
 
         stats = {
             "cohort_start": LIVE_COHORT_START_DATE,
-            "policy_version": "V6_TOURNAMENT",
+            "policy_version": "V7_INTRADAY",
             "position_size_usd": POSITION_SIZE_USD,
             "as_of": firestore.SERVER_TIMESTAMP,
             "trades_closed": int(r["trades_closed"]) if r else 0,
@@ -1336,7 +1336,7 @@ def compute_and_write_ledger_trades() -> bool:
     Powers the public scorecard per-trade ledger table. Uses the SAME cohort
     definition and fixed-dollar sizing as ``compute_and_write_cohort_stats``
     (``DATE(entry_timestamp) >= LIVE_COHORT_START_DATE`` AND
-    ``policy_version = 'V6_TOURNAMENT'`` AND closed), so the table rows and
+    ``policy_version = 'V7_INTRADAY'`` AND closed), so the table rows and
     the aggregate tiles can never disagree. Idempotent (merge by doc id).
     Non-fatal: never raises into the email path. Returns True on success.
     """
@@ -1355,7 +1355,7 @@ def compute_and_write_ledger_trades() -> bool:
             GREATEST(1, CAST(ROUND({POSITION_SIZE_USD} / (entry_price * 100)) AS INT64)) AS n_contracts
           FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
           WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
-            AND policy_version = "V6_TOURNAMENT"
+            AND policy_version = "V7_INTRADAY"
             AND realized_return_pct IS NOT NULL
             AND entry_price IS NOT NULL
             AND entry_price > 0
@@ -1394,7 +1394,7 @@ def compute_and_write_ledger_trades() -> bool:
                 "exit_value_usd": float(r["exit_value_usd"]),  # "Exit Value" column
                 "pl_usd": float(r["pl_usd"]),                  # "Profit" column
                 "policy_gate": r["policy_gate"],
-                "policy_version": "V6_TOURNAMENT",
+                "policy_version": "V7_INTRADAY",
                 "as_of": firestore.SERVER_TIMESTAMP,
             }
             batch.set(db.collection("ledger_trades").document(f"{r['scan_date']}_{r['ticker']}"), doc, merge=True)

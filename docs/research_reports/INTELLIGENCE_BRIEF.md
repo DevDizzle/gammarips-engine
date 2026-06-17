@@ -2,6 +2,14 @@
 
 > **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`. Operator cheat: `../../CHEAT-SHEET.md`.
 
+## 2026-06-17 update — ONGOING option-PnL substrate built (`enriched_option_outcomes`); edge-test workflow PRE-COMMITTED
+
+**The arbiter problem, fixed.** Every prior finding in this brief leaned on `realized_label.pkl` / `analysis_option_pnl.parquet` — a **one-shot, frozen at 2026-05-29, pre-V6** bracket-replay over the enriched pool. It does not grow, and the live ledger only labels the **1 tournament pick/day** (`win-tracker`/`signal_performance` tracks the full pool but only **underlying** returns — misleading: underlying-up 54% vs option-up 41%). So edge research had no ongoing, leakage-safe, **option-level** counterfactual. Built one: **`enriched_option_outcomes`** (BQ, research-only, DEPLOYED + BACKFILLED 2026-06-17) replays the live +80/-60/trail bracket over the FULL enriched BULLISH pool daily (reuses production `_simulate_contract`; lagged 17:00 ET cron), ~50 rows/day forward + **~2,690 rows / 43 dated pools backfilled (~2026-04-10→06-12, ~67% with realized PnL)**. This regenerates the frozen study on CURRENT V6 data and keeps growing. Decision: `docs/DECISIONS/2026-06-17-enriched-option-outcomes.md`; substrate audit: memory `project_agent_data_readiness`.
+
+**First-look raw signal (NOT yet a finding — the workflow must test it properly).** Across the backfilled pool, ~655 wins / ~895 losses among rows with realized PnL ≈ **42% win rate**, right at the +80/-60 break-even (42.9%). I.e. the *undifferentiated* BULLISH pool looks **break-even-to-negative** — consistent with this brief's standing prior (only DIRECTION was ever a robust lever, and that's regime-suspect; `project_narrative_vs_physics_roi` found only delta/trap-escape weakly separating winners). Hold "**there may be no tradeable edge**" openly.
+
+**PRE-COMMITTED NEXT (owner): the edge-test workflow.** Does ANY point-in-time lever (delta band, RR, ATR-normalized move, regime, moneyness, catalyst) separate option winners from losers **out-of-sample / walk-forward, with real CIs**, on this substrate? **Pre-commit to the answer:** no surviving lever → STOP optimizing the picker (rethink the signal source / repurpose the system); a real (even small) lever → that's what scales to the $10k-capped income engine. Note the live ROI at N=5–8 is NOISE (per-trade SD ~50% → SE ≈18% at N=8; −4.5% observed is indistinguishable from +5%/0/−5% true edge) — the substrate, not the live tile, is how this gets decided.
+
 ## 2026-06-05 update — Scanner→enrichment gate question RESOLVED on real option PnL (direction is the sole robust lever); engine quote-outage fixed
 
 Two things this session, both in `docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md`.

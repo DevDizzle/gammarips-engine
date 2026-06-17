@@ -24,18 +24,23 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 nyse = mcal.get_calendar("NYSE")
 est = pytz.timezone("America/New_York")
 
-# Trader execution config — same mechanics under V5.3 → V5.4 (V5.4 is a
-# picker change, not a trader change). Constants here MUST mirror what
-# signal-notifier displays in operator email + WhatsApp.
-# See docs/DECISIONS/2026-04-17-v5-3-target-80.md and CHEAT-SHEET.md
+# Trader execution config — V7 "INTRADAY" get-in-get-out bracket (2026-06-17).
+# V7 keeps the V6 tournament SELECTION unchanged and changes ONLY the exit:
+# a same-day OCO bracket. Constants here MUST mirror what signal-notifier
+# displays in operator email + WhatsApp.
+# See docs/DECISIONS/2026-06-17-v7-intraday-bracket.md (+ the velocity backtest
+# backtesting_and_research/exit_velocity_sweep.py). Prior 3-day bracket:
+# docs/DECISIONS/2026-04-17-v5-3-target-80.md (RETIRED — V6 3-day hold is dead).
 #
-# V5.3 philosophy: one rule set, one position, pre-defined exits.
-#   Entry   : 10:00 ET on day-1 (first trading day after scan_date)
-#   Stop    : -60% on option premium (wide stop absorbs IV crush)
-#   Target  : +80% on option premium (Deep Research 2026-04-17 recommended
-#             asymmetric profit-taking to beat theta/IV crush on stagnant trades)
-#   Hold    : 3 trading days
-#   Exit    : 15:50 ET on day-3 at market (or earlier if stop/target fires)
+# V7 philosophy: get in, grab the gain or cut, OUT the same day — velocity of
+# capital + a halved disaster tail (-34% vs -61%) beat the 3-day hold on
+# return-per-capital-day (~3x) at ~tied per-trade EV.
+#   Entry   : 10:00 ET on entry_day (first trading day after scan_date)
+#   Target  : +40% on option premium (take-profit limit)
+#   Stop    : -30% on option premium (hard stop)
+#   Time    : 15:45 ET SAME day — flat no matter what, NO overnight hold
+#   Trail   : OFF (USE_TRAIL=False) — a clean 3-leg OCO, no peak-ratchet
+#   Hold    : 1 trading day (entry_day == exit_day)
 #
 # Exit precedence when stop and target hit in the same bar: STOP wins
 # (conservative — we can't know intrabar sequencing, so assume worst case).
@@ -43,36 +48,30 @@ est = pytz.timezone("America/New_York")
 # The trader has NO filters beyond what enrichment + signal-notifier
 # applied upstream. Signal quality gates (V/OI, moneyness, VIX <= VIX3M,
 # earnings, DTE, OI/vol floors) live in signal-notifier and enrichment-
-# trigger, not here. V5.4-only ledger contract (post 2026-05-12): this
-# service simulates ONLY the ticker named in todays_pick/{scan_date} and
-# writes at most one ledger row per scan_date. See docs/DECISIONS/
-# 2026-05-12-v5-4-pipeline-alignment.md.
+# trigger, not here. One-pick ledger contract: this service simulates ONLY
+# the ticker named in todays_pick/{scan_date} and writes at most one ledger
+# row per scan_date.
 MAX_SPREAD_PCT = 0.10
-HOLD_DAYS = 3
-STOP_PCT = 0.60    # -60% on option premium (initial hard stop)
-TARGET_PCT = 0.80  # +80% on option premium (hard take-profit)
-# Trailing-stop conditional, completing the original Deep Research V5.3 spec
-# (see docs/DECISIONS/2026-04-17-v5-3-target-80.md — was Phase-2-deferred for
-# Robinhood-mobile-OCO reasons; re-introduced 2026-05-09 because the paper
-# trader and the future Alpaca-agent path are programmatic, not mobile).
-# Once peak premium >= entry × (1 + TRAIL_TRIGGER_PCT), the active stop
-# tightens to peak × (1 - TRAIL_DRAWDOWN_PCT) and ratchets up with every
-# new peak. The original -60% hard stop is dominated by the trail once
-# active: at peak = +30%, trail level = 1.30 × 0.75 = 0.975 (vs hard 0.40).
-TRAIL_TRIGGER_PCT = 0.30   # activate trail when peak gain >= +30%
-TRAIL_DRAWDOWN_PCT = 0.25  # 25% drawdown from peak triggers trail exit
+HOLD_DAYS = 1      # V7: same-day — entry_day == exit_day
+STOP_PCT = 0.30    # -30% on option premium (hard stop)
+TARGET_PCT = 0.40  # +40% on option premium (take-profit)
+# Trail is RETIRED in V7 (USE_TRAIL=False): a same-day get-in-get-out bracket
+# is a flat 3-leg OCO (target / stop / 15:45 time-exit), not a multi-day
+# peak-ratchet. TRAIL_* constants are kept (referenced by the bar walk) but
+# are INERT while USE_TRAIL is False. To re-enable a trail, flip USE_TRAIL.
+USE_TRAIL = False
+TRAIL_TRIGGER_PCT = 0.30   # (inert under V7) activate trail when peak gain >= +30%
+TRAIL_DRAWDOWN_PCT = 0.25  # (inert under V7) 25% drawdown from peak triggers trail exit
 # Symmetric adverse slippage (2026-06-04). Entry pays UP this fraction; bracket
-# exits (TARGET/STOP/TRAIL) fill DOWN this same fraction. Previously entry was
-# slipped (+2%) but exits filled at the exact bracket threshold with no
-# slippage, biasing realized_return_pct upward. One constant, applied both
-# sides. See docs/DECISIONS/2026-06-04-pnl-sim-realism-fixes.md.
+# exits (TARGET/STOP) fill DOWN this same fraction. One constant, both sides.
+# See docs/DECISIONS/2026-06-04-pnl-sim-realism-fixes.md.
 SLIPPAGE_PCT = 0.02
 # Max minutes after 10:00 ET we still treat a fill as an on-time day-1 entry.
 # A first print beyond this is a late/illiquid fill, not a clean 10:00 entry.
 LATE_FILL_TOLERANCE_MIN = 30
-ENTRY_HHMM = "10:00"  # 10:00 ET on day-1
-EXIT_HHMM = "15:50"   # 15:50 ET on day-3
-POLICY_VERSION = "V6_TOURNAMENT"
+ENTRY_HHMM = "10:00"  # 10:00 ET on entry_day
+EXIT_HHMM = "15:45"   # 15:45 ET SAME day (V7 time-exit)
+POLICY_VERSION = "V7_INTRADAY"
 POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
 LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_intraday"
@@ -353,16 +352,17 @@ def _fetch_todays_pick(scan_date: date) -> tuple[str | None, dict | None, str | 
 
 
 def run_forward_paper_trading(target_date: date = None):
-    """Forward paper trading — V5.4-only ledger (post 2026-05-12).
+    """Forward paper trading — V7 INTRADAY, one row per scan_date.
 
-    Execution policy (frozen; change only with a new decision doc):
-      - Entry:  10:00 ET on D+1 (first trading day after scan_date)
-      - Stop:   -60% on option premium
-      - Target: +80% on option premium
-      - Trail:  -25% off peak, activated at +30% gain (peak ratchet)
-      - Hold:   3 trading days; exit at 15:50 ET on day-3 if neither fires
+    Execution policy (V7, 2026-06-17; change only with a new decision doc —
+    docs/DECISIONS/2026-06-17-v7-intraday-bracket.md):
+      - Entry:  10:00 ET on entry_day (first trading day after scan_date)
+      - Stop:   -30% on option premium (hard)
+      - Target: +40% on option premium
+      - Trail:  OFF (USE_TRAIL=False)
+      - Hold:   SAME day; flat at 15:45 ET on entry_day if neither fires
       - Ambiguous bar: STOP wins over TARGET (conservative)
-      - Writes to forward_paper_ledger with policy_version=V6_TOURNAMENT
+      - Writes to forward_paper_ledger with policy_version=V7_INTRADAY
 
     V5.4-only ledger contract (2026-05-12, see docs/DECISIONS/
     2026-05-12-v5-4-pipeline-alignment.md): the trader simulates ONLY the
@@ -391,10 +391,10 @@ def run_forward_paper_trading(target_date: date = None):
         # Default to today if not provided
         target_date = datetime.now(est).date()
 
-    logger.info(f"Running V5.4 Forward Paper Trading for signals generated on {target_date} "
-                f"(entry={ENTRY_HHMM} ET day-1, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "
-                f"trail=-{TRAIL_DRAWDOWN_PCT*100:.0f}% off peak, activated at +{TRAIL_TRIGGER_PCT*100:.0f}% gain, "
-                f"hold_days={HOLD_DAYS}, exit={EXIT_HHMM} ET day-{HOLD_DAYS}, ledger={LEDGER_TABLE})")
+    logger.info(f"Running V7 INTRADAY Forward Paper Trading for signals generated on {target_date} "
+                f"(entry={ENTRY_HHMM} ET, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "
+                f"trail={'ON' if USE_TRAIL else 'OFF'}, "
+                f"hold_days={HOLD_DAYS} (same-day), flat={EXIT_HHMM} ET, ledger={LEDGER_TABLE})")
 
     client = bigquery.Client(project=PROJECT_ID)
 
@@ -418,9 +418,9 @@ def run_forward_paper_trading(target_date: date = None):
     # Without this guard, the exit-fallback path at the bottom of the simulation
     # loop will use a partial intraday bar from "today" as a phantom TIMEOUT exit,
     # producing data that looks like a closed trade but represents an open position.
-    # V5.4: exit_day = entry_day + (HOLD_DAYS - 1) trading days. The cron fires
-    # at 16:30 ET after market close, so the 15:50 ET TIMEOUT bar on exit_day=today
-    # is already final and safe to simulate — hence `>` (strict future), not `>=`.
+    # V7: exit_day = entry_day + (HOLD_DAYS - 1) trading days = entry_day (same-day).
+    # The cron fires at 16:30 ET after market close, so the 15:45 ET TIMEOUT bar on
+    # exit_day=today is already final and safe to simulate — hence `>` (strict future), not `>=`.
     timeout_day_check = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
     today_et = datetime.now(est).date()
     if timeout_day_check > today_et:
@@ -559,7 +559,7 @@ def _simulate_contract(
     vix_5d_delta: float | None,
     pick_doc: dict | None,
 ) -> dict:
-    """Simulate one option contract over the full 3-day bracket window.
+    """Simulate one option contract over the V7 same-day intraday bracket.
 
     Pure mechanical extraction of the per-ticker simulation body that used to
     live inline in run_forward_paper_trading's HAS_PICK happy path. Builds and
@@ -635,9 +635,9 @@ def _simulate_contract(
     exp_date = row["recommended_expiration"].date() if isinstance(row["recommended_expiration"], pd.Timestamp) or isinstance(row["recommended_expiration"], datetime) else row["recommended_expiration"]
     opt_ticker = build_polygon_ticker(row["ticker"], exp_date, row["direction"], float(row["recommended_strike"]))
 
-    # V5.4 mechanics: entry 10:00 ET day-1, hold 3 trading days, exit 15:50 ET day-3.
+    # V7 mechanics: entry 10:00 ET, same-day hold, flat 15:45 ET on entry_day.
     # HOLD_DAYS is the number of trading days held inclusive of entry_day.
-    # day-1 == entry_day, day-3 == get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+    # V7 HOLD_DAYS=1: exit_day = get_nth_next_trading_day(entry_day, 0) == entry_day.
     exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
 
     bars = fetch_minute_bars(opt_ticker, entry_day, exit_day)
@@ -687,8 +687,7 @@ def _simulate_contract(
         record["exit_reason"] = "INVALID_LIQUIDITY"
     else:
         base_entry = entry_bar["c"] * (1.0 + SLIPPAGE_PCT)  # adverse entry slippage
-        # V5.3 base: -60% option stop AND +80% option target.
-        # V5.4 (post 2026-05-09): trailing stop conditional re-introduced.
+        # V7 base: -30% option stop AND +40% option target (trail inert, USE_TRAIL=False).
         stop = base_entry * (1.0 - STOP_PCT)
         target = base_entry * (1.0 + TARGET_PCT)
         trail_trigger = base_entry * (1.0 + TRAIL_TRIGGER_PCT)
@@ -757,13 +756,12 @@ def _simulate_contract(
         trail_active = False
         trail_stop_level = None
 
-        # V5.4 bar walk: four exits in precedence order.
-        #   TIMEOUT — first bar at-or-after 15:50 ET on exit_day
-        #   STOP    — option low pierces -60% threshold (only when trail not active)
-        #   TRAIL   — option low pierces (peak × 0.75) once peak >= entry × 1.30
-        #   TARGET  — option high pierces +80% threshold
-        # If trail/stop and target hit on the same bar, trail/stop wins
-        # (intrabar conservative — assume drawdown happened first).
+        # V7 bar walk (same-day): three exits in precedence order.
+        #   TIMEOUT — first bar at-or-after 15:45 ET on entry_day (== exit_day), flat
+        #   STOP    — option low pierces -30% threshold
+        #   TARGET  — option high pierces +40% threshold
+        # If stop and target hit on the same bar, STOP wins (intrabar conservative —
+        # assume drawdown happened first). TRAIL is inert under V7 (USE_TRAIL=False).
         # Trail can both activate AND trigger on the same bar: peak update
         # uses bar high, then trail level is checked against bar low. This
         # mirrors the conservative "high-then-low" intrabar assumption.
@@ -803,12 +801,14 @@ def _simulate_contract(
             # activate the trail and stop out on it within the same bar.
             if b["h"] > peak_premium:
                 peak_premium = b["h"]
-                if peak_premium >= trail_trigger:
+                # V7: USE_TRAIL=False -> trail never activates; effective_stop
+                # stays the -30% hard stop and the bracket is a flat 3-leg OCO.
+                if USE_TRAIL and peak_premium >= trail_trigger:
                     trail_active = True
                 if trail_active:
                     trail_stop_level = peak_premium * (1.0 - TRAIL_DRAWDOWN_PCT)
 
-            # Effective stop: trail (tighter) when active, else original -60% hard stop.
+            # Effective stop: the -30% hard stop (trail inert under V7, USE_TRAIL=False).
             effective_stop = trail_stop_level if trail_active else stop
             effective_stop_reason = "TRAIL" if trail_active else "STOP"
 
@@ -1321,14 +1321,15 @@ def get_nth_previous_trading_day(base_date: date, n: int) -> date:
     return d
 
 def get_canonical_scan_date(today: date = None) -> date:
-    """Return the scan_date whose 3-day hold window EXITS on `today`.
+    """Return the scan_date whose hold window EXITS on `today`.
 
-    A signal scanned on date X enters at next_trading_day(X) (= day-1) and
-    times out at nth_next_trading_day(entry, HOLD_DAYS - 1) (= day-N, exit at
-    15:50 ET). The cron fires at 16:30 ET after market close, so today's bars
-    — including the 15:50 ET TIMEOUT bar — are already final and safe to
-    simulate. We walk back HOLD_DAYS trading days from today: 1 for the
-    entry-day lag (scan → entry) plus HOLD_DAYS-1 for the entry → exit span.
+    A signal scanned on date X enters at next_trading_day(X) and, under V7
+    (HOLD_DAYS=1, same-day), times out at nth_next_trading_day(entry, 0) = entry
+    itself, flat at 15:45 ET. The cron fires at 16:30 ET after market close, so
+    today's bars — including the 15:45 ET TIMEOUT bar — are already final and
+    safe to simulate. We walk back HOLD_DAYS trading days from today: the
+    entry-day lag (scan → entry) plus HOLD_DAYS-1 for the entry → exit span
+    (which is 0 under V7, so scan_date = the prior trading day).
 
     This is the function the daily cron uses when no explicit target_date is
     provided.
@@ -1336,7 +1337,7 @@ def get_canonical_scan_date(today: date = None) -> date:
     if today is None:
         today = datetime.now(est).date()
     d = today
-    # HOLD_DAYS=3: walk back 3 trading days (entry-day lag + 2 hold-day span)
+    # V7 HOLD_DAYS=1: walk back 1 trading day (entry-day lag; same-day exit).
     for _ in range(HOLD_DAYS):
         d = get_previous_trading_day(d)
     return d
@@ -1535,7 +1536,7 @@ def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]
     """Driver for the daily counterfactual labeling of the enriched pool.
 
     Same date/timing contract as run_forward_paper_trading: simulate ONLY when
-    the 3-day hold window has fully closed (refuse future windows so no partial
+    the same-day hold window has fully closed (refuse future windows so no partial
     intraday bar masquerades as a TIMEOUT exit). Writes ONLY to
     ENRICHED_OUTCOMES_TABLE; never touches forward_paper_ledger or any live
     surface. Backfill-safe (idempotent per scan_date).
@@ -1884,7 +1885,7 @@ def trigger_paper_trading():
         if target_date_str:
             target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
         else:
-            # Default: process the most recent scan_date whose 3-day hold window
+            # Default: process the most recent scan_date whose same-day hold window
             # has fully closed before today.
             target_date = get_canonical_scan_date()
 
@@ -1902,10 +1903,11 @@ def trigger_paper_trading():
 def trigger_label_enriched_pool():
     """RESEARCH-ONLY counterfactual labeling endpoint.
 
-    Replays the +80/-60/trail bracket over the FULL enriched BULLISH pool for one
-    scan_date and writes one outcome row per candidate to
-    enriched_option_outcomes. Hit by a dedicated daily Cloud Scheduler cron AFTER
-    the trade-exit cron (the cohort whose hold window just closed). Writes ONLY to
+    Replays the live V7 bracket (+40/-30, same-day flat 15:45) over the FULL
+    enriched BULLISH pool for one scan_date and writes one outcome row per
+    candidate to enriched_option_outcomes. Hit by a dedicated daily Cloud
+    Scheduler cron AFTER the trade-exit cron (the cohort whose hold window just
+    closed). Writes ONLY to
     the research table — never forward_paper_ledger or any live surface. Accepts
     an optional {"target_date": "YYYY-MM-DD"} for backfill; defaults to the
     canonical just-closed scan_date.

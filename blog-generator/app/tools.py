@@ -214,7 +214,7 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         FROM `{LEDGER_TABLE}`
         WHERE exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V6_TOURNAMENT'
+          AND policy_version = 'V7_INTRADAY'
           AND DATE(exit_timestamp) <= @scan_date
     """
     try:
@@ -654,7 +654,7 @@ def send_email_via_mailgun(
 def get_closed_trade_count(table: str | None = None) -> int:
     """Count trades that actually closed in the live ledger.
 
-    Filters: policy_version='V6_TOURNAMENT' AND exit_reason valid (not
+    Filters: policy_version='V7_INTRADAY' AND exit_reason valid (not
     INVALID_LIQUIDITY / SKIPPED). Other policy versions (V3, V4) are
     historical and not part of the public track record. Without this
     filter the count includes prior-cohort noise (ledger truncated 2026-06-04; V6 cohort
@@ -671,7 +671,7 @@ def get_closed_trade_count(table: str | None = None) -> int:
         SELECT COUNT(*) AS n FROM `{table_id}`
         WHERE exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V6_TOURNAMENT'
+          AND policy_version = 'V7_INTRADAY'
     """
     try:
         job = _bq().query(sql)
@@ -738,7 +738,7 @@ def get_recent_v53_closes(days: int = 7) -> list[dict]:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V6_TOURNAMENT'
+          AND policy_version = 'V7_INTRADAY'
         ORDER BY exit_timestamp DESC
     """
     try:
@@ -1186,7 +1186,7 @@ def fetch_ledger_intel_summary(days: int = 30) -> dict:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V6_TOURNAMENT'
+          AND policy_version = 'V7_INTRADAY'
     """
     try:
         job = _bq().query(
