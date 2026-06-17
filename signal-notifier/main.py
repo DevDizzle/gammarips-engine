@@ -191,6 +191,39 @@ FALLBACK_MONEYNESS_MAX = 0.10   # pinned; no deep-OTM on bypassed fallback picks
 POLICY_GATE_STRICT = "STRICT"
 POLICY_GATE_FALLBACK = "FALLBACK"
 
+# Edge-rank pool cap (2026-06-11, see docs/DECISIONS/2026-06-11-edge-rank-pool-cap.md).
+# The 2026-06-04 tournament runs over the FULL enriched pool (~94 signals/day),
+# costing ~39 model calls/pick (3 brackets x ~13). That is not affordable. We now
+# DETERMINISTICALLY pre-rank the strict pool by the 4 levers the 1,375-trade
+# realized-option-PnL study proved separate winners from losers, and feed only the
+# top TOURNEY_POOL_CAP into the tournament. At cap=12 the bracket collapses to
+# ~3 calls/bracket -> ~9 calls/pick (~77% fewer); set cap=10 for a single-batch
+# ~92% cut. This is a SOFT cap, NOT a gate: a strong bearish/high-RR name can still
+# rank into the top-K and reach the LLM — we are not categorically banning any
+# direction (bearish -7.7% is regime-conditional; see the decision note). Every
+# input (direction, recommended_delta, risk_reward_ratio, atr_normalized_move) is
+# point-in-time at scan_date — leakage-safe, unlike the stale-OI gates retired
+# 2026-06-04. FALLBACK is unaffected (it bypasses the tournament via df.iloc[0]).
+TOURNEY_POOL_CAP = int(os.environ.get("TOURNEY_POOL_CAP", "12"))
+# BULLISH-only hard gate (2026-06-11, owner-directed). The edge levers below are
+# defined on CALL deltas (|delta| 0.35-0.46 band, advertised RR) — bearish puts
+# carry the opposite delta sign and a different contract structure, so the lever
+# does NOT transfer. We are NOT chasing a regime call here; we are restricting to
+# the trade family the edge actually describes. This OVERRIDES the soft-cap regime
+# caveat (bearish -7.7% is regime-conditional) by explicit owner decision. Env
+# toggle so re-enabling bearish later is a config flip, not a code change.
+BULLISH_ONLY = os.environ.get("BULLISH_ONLY", "true").strip().lower() in ("1", "true", "yes")
+# Tradeable delta band from the funnel study: |delta| 0.20-0.46. The real lever is
+# the UPPER bound (exclude deep-ITM 0.46+, which collapses to +0.1%); the far-OTM
+# lottery floor is already handled by RR<1.4, so the lower bound is a loose 0.20
+# (a 0.35 floor was too tight — it gave zero delta-credit to good 0.20-0.35 names).
+# Confirmed Q19 delta-as-trap-escape lever.
+EDGE_DELTA_LO = 0.20
+EDGE_DELTA_HI = 0.46
+# Advertised risk/reward: RR < 1.4 -> +2-3%; the high-RR (far-OTM lottery) bucket
+# is the single worst thing in the data (-7.7%). Penalize, don't ban.
+EDGE_RR_MAX = 1.4
+
 # V5.3 execution knobs — must mirror forward-paper-trader/main.py.
 # Displayed in the operator email so the routine matches what the simulator
 # actually models. If these diverge from the trader, update both.
@@ -653,6 +686,43 @@ def fetch_vix_close(scan_date: date) -> float | None:
     return val
 
 
+def claim_email_send(scan_date: date) -> bool:
+    """Atomically claim the right to send the daily pick for ``scan_date``.
+
+    Cloud Scheduler retries the notifier on attempt-deadline overrun, and
+    ``run_notifier`` routinely takes 3+ minutes (signal-judge cold start + the
+    bracket tournament). Without a guard, a retry re-runs the whole pipeline and
+    double-sends the email + WhatsApp + subscriber fan-out (observed 2026-06-11;
+    see docs/DECISIONS/2026-06-11-notifier-duplicate-send-guard.md). This
+    transactional claim makes the outbound send fire at most once per scan_date
+    no matter how many times the endpoint is triggered.
+
+    Returns True if THIS caller acquired the claim (proceed to send), False if a
+    prior/concurrent run already claimed it (skip all outbound). Fail-OPEN: if
+    Firestore raises we return True so a real outage never silences the signal —
+    a rare duplicate is the lesser harm than a missed pick.
+    """
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        claim_ref = db.collection("email_sends").document(scan_date.isoformat())
+
+        @firestore.transactional
+        def _claim(txn) -> bool:
+            snap = claim_ref.get(transaction=txn)
+            if snap.exists:
+                return False
+            txn.set(claim_ref, {
+                "scan_date": scan_date.isoformat(),
+                "claimed_at": firestore.SERVER_TIMESTAMP,
+            })
+            return True
+
+        return _claim(db.transaction())
+    except Exception as e:
+        logger.error(f"claim_email_send failed (fail-open, will send): {e}")
+        return True
+
+
 def send_email(subject: str, html_content: str, to: str | None = None) -> bool:
     """Send a single Mailgun email. Defaults to operator (RECIPIENT_EMAIL).
 
@@ -951,6 +1021,55 @@ def _candidate_for_ranker(row: pd.Series, static_rank: int) -> dict:
     return c
 
 
+def _edge_score(row: pd.Series) -> float:
+    """Deterministic edge score from the 1,375-trade realized-option-PnL study.
+    Higher = more aligned with what actually separated winners from losers. Used
+    ONLY to order the strict pool for the top-K cap — it never selects the pick
+    (the tournament does) and it never drops a candidate categorically. All inputs
+    are point-in-time at scan_date (leakage-safe). See
+    docs/DECISIONS/2026-06-11-edge-rank-pool-cap.md.
+
+      direction  BULLISH +4.1% vs BEARISH -7.7%  -> biggest single separator
+      |delta|    0.35-0.46 +6.6% vs deep ITM +0.1% (confirmed Q19 trap-escape)
+      RR         < 1.4 +2-3% vs > 1.4 far-OTM lottery -7.7%
+      ATR move   already-moved-hard +4.1% vs quiet -3.3% (monotonic, capped)
+    """
+    score = 0.0
+    if str(row.get("direction", "")).upper() == "BULLISH":
+        score += 2.0
+    delta = row.get("recommended_delta")
+    if delta is not None and not pd.isna(delta):
+        if EDGE_DELTA_LO <= abs(float(delta)) <= EDGE_DELTA_HI:
+            score += 1.5
+    rr = row.get("risk_reward_ratio")
+    if rr is not None and not pd.isna(rr) and float(rr) < EDGE_RR_MAX:
+        score += 1.0
+    atr_move = row.get("atr_normalized_move")
+    if atr_move is not None and not pd.isna(atr_move):
+        score += 0.5 * min(float(atr_move), 2.5)  # reward magnitude, cap runaway
+    return score
+
+
+def _edge_rank_and_cap(df: pd.DataFrame, k: int) -> pd.DataFrame:
+    """Order the strict pool by deterministic edge score (desc), tie-broken by
+    overnight_score (desc), and keep the top ``k``. SOFT cap — a strong bearish or
+    high-RR name can still survive into the top-K and reach the tournament. Returns
+    the full df unchanged when it already fits within k. The tournament still makes
+    the actual pick across whatever survives. See
+    docs/DECISIONS/2026-06-11-edge-rank-pool-cap.md."""
+    if df is None or len(df) <= k:
+        return df
+    scored = df.assign(_edge_score=df.apply(_edge_score, axis=1))
+    scored = scored.sort_values(
+        ["_edge_score", "overnight_score"], ascending=[False, False]
+    ).head(k).drop(columns=["_edge_score"]).reset_index(drop=True)
+    logger.info(
+        f"Edge-rank cap: {len(df)} -> {len(scored)} candidates into tournament "
+        f"(cap={k}); survivors: {list(scored['ticker'])}"
+    )
+    return scored
+
+
 def call_signal_ranker(
     top_10_df: pd.DataFrame,
     scan_date: date,
@@ -958,7 +1077,7 @@ def call_signal_ranker(
     report_md: str,
     ledger_summary: dict,
 ) -> dict | None:
-    """POST top-10 candidates to signal-judge /rank.
+    """POST the edge-capped candidate pool to signal-judge /rank.
 
     Returns the parsed RankResponse dict on success, None on any failure
     (timeout, 5xx, malformed JSON, missing required fields). Caller MUST
@@ -1243,7 +1362,8 @@ def compute_and_write_ledger_trades() -> bool:
         )
         SELECT *,
           ROUND(n_contracts * entry_price * 100, 2) AS capital_usd,
-          ROUND(n_contracts * entry_price * 100 * realized_return_pct, 2) AS pl_usd
+          ROUND(n_contracts * entry_price * 100 * realized_return_pct, 2) AS pl_usd,
+          ROUND(n_contracts * entry_price * 100 * (1 + realized_return_pct), 2) AS exit_value_usd
         FROM sized
         ORDER BY entry_date
         """
@@ -1265,12 +1385,14 @@ def compute_and_write_ledger_trades() -> bool:
                 "dte": int(r["recommended_dte"]) if r["recommended_dte"] is not None else None,
                 "entry_date": r["entry_date"],
                 "entry_price": float(r["entry_price"]),
+                "n_contracts": int(r["n_contracts"]),
                 "exit_date": r["exit_date"],
                 "hold_days": int(r["hold_days"]) if r["hold_days"] is not None else None,
                 "exit_reason": r["exit_reason"],
                 "return_pct": float(r["realized_return_pct"]),
-                "capital_usd": float(r["capital_usd"]),
-                "pl_usd": float(r["pl_usd"]),
+                "capital_usd": float(r["capital_usd"]),       # "Invested" column
+                "exit_value_usd": float(r["exit_value_usd"]),  # "Exit Value" column
+                "pl_usd": float(r["pl_usd"]),                  # "Profit" column
                 "policy_gate": r["policy_gate"],
                 "policy_version": "V6_TOURNAMENT",
                 "as_of": firestore.SERVER_TIMESTAMP,
@@ -1339,6 +1461,12 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
         recommended_spread_pct ASC,
         ticker ASC"""
 
+    # BULLISH-only hard gate (2026-06-11, owner-directed). Applies to BOTH paths
+    # so no bearish name can reach email via strict OR fallback. The edge levers
+    # are call-delta-defined and don't transfer to puts; env-toggleable. See
+    # docs/DECISIONS/2026-06-11-edge-rank-pool-cap.md.
+    direction_where = "\n      AND direction = 'BULLISH'" if BULLISH_ONLY else ""
+
     # 2026-06-04 bracket-tournament: STRICT filters ONLY strike/expiration/vix3m
     # NOT NULL here, then regime + earnings downstream in run_notifier. The
     # moneyness, OI, vol, DTE, V/OI, and active-days SELECTION gates are
@@ -1373,7 +1501,7 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
     WHERE DATE(scan_date) = "{target_date}"
       AND recommended_strike IS NOT NULL
       AND recommended_expiration IS NOT NULL
-      AND vix3m_at_enrich IS NOT NULL{moneyness_where}
+      AND vix3m_at_enrich IS NOT NULL{direction_where}{moneyness_where}
     ORDER BY{order_by}
     LIMIT 200
     """
@@ -1572,6 +1700,11 @@ def run_notifier(target_date: date | None = None):
         try:
             report_md = fetch_report_md(target_date)
             ledger_summary = compute_14d_ledger_summary(target_date)
+            # Edge-rank cap: deterministically narrow the strict pool to the top
+            # TOURNEY_POOL_CAP edge-aligned candidates BEFORE the tournament. Cuts
+            # ~39 model calls/pick to ~9 (cap=12). Soft cap — bearish/high-RR names
+            # can still survive. See docs/DECISIONS/2026-06-11-edge-rank-pool-cap.md.
+            df = _edge_rank_and_cap(df, TOURNEY_POOL_CAP)
             v5_4_response = call_signal_ranker(
                 df, target_date, entry_day, report_md, ledger_summary
             )
@@ -1651,6 +1784,18 @@ def run_notifier(target_date: date | None = None):
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
     if gate_mode == POLICY_GATE_FALLBACK:
         subject += " [FALLBACK]"
+
+    # Idempotency guard: a Scheduler retry (or any double-trigger) must not
+    # re-send. Claim the send transactionally; if a prior run already claimed
+    # this scan_date, suppress all outbound (email + WhatsApp + sub fan-out) and
+    # report success so Scheduler stops retrying. todays_pick was already
+    # (idempotently) written above, so the webapp stays correct either way.
+    if not claim_email_send(target_date):
+        logger.warning(
+            f"Duplicate trigger for {target_date} — pick already sent. "
+            f"Suppressing email/WhatsApp/fan-out (Scheduler retry guard)."
+        )
+        return True, f"Duplicate trigger suppressed for {target_date} (already sent)."
 
     success = send_email(subject, html_content)
 

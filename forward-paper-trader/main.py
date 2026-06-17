@@ -84,6 +84,33 @@ INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_intraday"
 # return. See docs/DECISIONS/2026-06-08-topscore-shadow-tracker.md.
 SHADOW_TABLE = f"{PROJECT_ID}.profit_scout.paper_shadow_topscore"
 
+# Hold-period research shadow: the SAME live Tournament pick, but day-traded —
+# entered 10:00 ET on entry_day and exited FLAT at 15:45 ET the SAME day (no
+# stop/target, no 3-day hold). Tests whether the edge is front-loaded intraday
+# vs the 3-day bracket. Reuses the live trade's entry_price (identical 10:00
+# fill) so it never re-touches _simulate_contract. COMPLETELY walled off from
+# the live Scorecard and the website — written ONLY by _write_intraday_shadow,
+# best-effort. NOTE: distinct from INTRADAY_TABLE (the live MTM table) above.
+# See docs/DECISIONS/2026-06-08-intraday-hold-shadow.md.
+SHADOW_INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.paper_shadow_intraday"
+INTRADAY_EXIT_HHMM = "15:45"  # same-day flat exit for the intraday shadow
+
+# Isolated RESEARCH-ONLY counterfactual-label table. Records the realized
+# +80/-60/trail option outcome for EVERY enriched BULLISH candidate in the daily
+# pool (the full ~50 we *could* have traded), not just the single tournament
+# pick the live ledger records. This is the leakage-safe option-PnL substrate the
+# autonomous edge-finder needs — it grows ~50x faster than forward_paper_ledger
+# and supplies the counterfactual ("what would the names we skipped have done?").
+# Written ONLY by _write_enriched_outcomes via the /label_enriched_pool endpoint,
+# reusing _simulate_contract so labels match production mechanics exactly.
+# COMPLETELY walled off from the live Scorecard and the website. Never read or
+# written by any production surface. See
+# docs/DECISIONS/2026-06-17-enriched-option-outcomes.md.
+ENRICHED_OUTCOMES_TABLE = f"{PROJECT_ID}.profit_scout.enriched_option_outcomes"
+# Honor the locked scope decision (2026-06-17): label the enriched BULLISH pool
+# only (the live strategy's universe), not the raw all-direction scan pool.
+ENRICHED_OUTCOMES_BULLISH_ONLY = True
+
 def get_next_trading_day(base_date: date) -> date:
     end_date = base_date + timedelta(days=7)
     schedule = nyse.schedule(start_date=base_date, end_date=end_date)
@@ -493,14 +520,31 @@ def run_forward_paper_trading(target_date: date = None):
     # The inner function already swallows all exceptions; this outer try is
     # belt-and-suspenders so the shadow can NEVER alter the live return.
     # See docs/DECISIONS/2026-06-08-topscore-shadow-tracker.md.
+    # Capture the simulated top-score record so the intraday shadow can day-trade
+    # the SAME top-score pick (the 4th experiment). None if the top-score shadow
+    # skipped/failed → the intraday shadow then runs the TOURNAMENT arm only.
+    topscore_record = None
     try:
-        _write_topscore_shadow(
+        topscore_record = _write_topscore_shadow(
             client, target_date, entry_day, exit_day,
             vix_level, spy_trend, vix_5d_delta,
             tournament_record=record, pick_doc=pick_doc,
         )
     except Exception as e:
         logger.error(f"topscore shadow failed (non-fatal): {e}")
+
+    # Best-effort isolated hold-period shadow — day-trade BOTH picks (Tournament
+    # + top-score): 10:00 ET entry, flat 15:45 ET same-day exit. Writes ONLY to
+    # SHADOW_INTRADAY_TABLE; can NEVER alter the live return.
+    # See docs/DECISIONS/2026-06-08-intraday-hold-shadow.md.
+    try:
+        _write_intraday_shadow(
+            client, target_date, entry_day,
+            tournament_record=record, topscore_record=topscore_record,
+            pick_doc=pick_doc,
+        )
+    except Exception as e:
+        logger.error(f"intraday shadow failed (non-fatal): {e}")
 
     return ledger_result
 
@@ -958,12 +1002,14 @@ def _write_topscore_shadow(
     vix_5d_delta: float | None,
     tournament_record: dict,
     pick_doc: dict | None,
-) -> None:
+) -> dict | None:
     """Simulate the deterministic top-score arm and write both shadow rows.
 
     Best-effort only — the entire body is wrapped in try/except and returns on
     any failure so it can NEVER raise into the live trade path. Writes ONLY to
-    SHADOW_TABLE.
+    SHADOW_TABLE. Returns the simulated top-score record (record_s) on success
+    so the caller can reuse the SAME top-score pick for the intraday shadow;
+    returns None on any skip/failure.
     """
     try:
         # Pull the FULL enriched pool for this scan_date with a tradeable
@@ -1084,34 +1130,165 @@ def _write_topscore_shadow(
             _with_exit_price(_shadow_row("TOP_SCORE", record_s, ts_score, None)),
         ]
 
-        _write_shadow_records(client, target_date, rows)
+        _write_shadow_records(client, SHADOW_TABLE, target_date, rows)
         logger.info(
             f"topscore shadow: wrote 2 rows for {target_date} "
             f"(tournament={tour_ticker} score={tour_score}, "
             f"top_score={topscore_ticker} score={ts_score}, "
             f"same_pick={same_pick}, pool_size={pool_size})"
         )
+        # Return the simulated top-score record so the intraday shadow can
+        # day-trade the SAME top-score pick (its 10:00 entry, reused). None on
+        # any skip/failure → the intraday shadow then runs the tournament arm only.
+        return record_s
     except Exception as e:
         logger.error(f"topscore shadow write failed for {target_date} (non-fatal): {e}")
+        return None
+
+
+def _write_intraday_shadow(
+    client: bigquery.Client,
+    target_date: date,
+    entry_day: date,
+    tournament_record: dict,
+    topscore_record: dict | None,
+    pick_doc: dict | None,
+) -> None:
+    """Day-trade BOTH the live Tournament pick AND the deterministic top-score
+    pick: enter 10:00 ET, exit FLAT at 15:45 ET the SAME day (no stop/target,
+    no 3-day hold). Two arms per day (TOURNAMENT + TOP_SCORE) so the intraday
+    "get-in-get-out" theory is measured on both selection methods.
+
+    Reuses each pick's already-simulated 10:00 entry_price (``tournament_record``
+    from the live trade; ``topscore_record`` returned by _write_topscore_shadow),
+    so it NEVER re-simulates entry and never touches the live path. Best-effort —
+    the whole body is wrapped and returns on any failure. Writes ONLY to
+    SHADOW_INTRADAY_TABLE.
+    """
+    try:
+        regime_ok = None
+        if pick_doc:
+            v_lvl = pick_doc.get("vix_now_at_decision")
+            v_3m = pick_doc.get("vix3m_at_enrich")
+            if v_lvl is not None and v_3m is not None:
+                try:
+                    regime_ok = bool(float(v_lvl) <= float(v_3m))
+                except (TypeError, ValueError):
+                    regime_ok = None
+        created_at = datetime.now(est).isoformat()
+
+        exit_dt = datetime.combine(
+            entry_day, datetime.strptime(INTRADAY_EXIT_HHMM, "%H:%M").time()
+        )
+        exit_ts_ms = int(est.localize(exit_dt).timestamp() * 1000)
+
+        same_pick = None
+        if topscore_record:
+            same_pick = (
+                str(tournament_record.get("ticker") or "").upper()
+                == str(topscore_record.get("ticker") or "").upper()
+            )
+
+        def _intraday_row(arm: str, src: dict | None, conf) -> dict | None:
+            """Day-trade one pick's contract (10:00 entry reused, 15:45 flat
+            exit). Returns the row, or None if this arm isn't simulable."""
+            if not src:
+                return None
+            base_entry = src.get("entry_price")
+            opt_contract = src.get("recommended_contract")
+            if base_entry is None or not opt_contract:
+                logger.info(
+                    f"intraday shadow [{arm}]: no entry_price/contract for "
+                    f"{target_date} (exit_reason={src.get('exit_reason')}); skip arm"
+                )
+                return None
+            # Same-day minute bars for THIS pick's contract.
+            bars = fetch_minute_bars(opt_contract, entry_day, entry_day)
+            time.sleep(0.1)
+            day_bars = [
+                b for b in bars
+                if datetime.fromtimestamp(b["t"] / 1000, tz=est).date() == entry_day
+            ]
+            if not day_bars:
+                logger.info(f"intraday shadow [{arm}]: no entry_day bars for {opt_contract} on {entry_day}; skip arm")
+                return None
+            # Exit = first print at-or-after 15:45 ET; else last earlier same-day
+            # print flagged illiquid. Mark at the bar close, no slippage (mirrors
+            # the live TIMEOUT convention).
+            at_or_after = [b for b in day_bars if b["t"] >= exit_ts_ms]
+            illiquid = False
+            if at_or_after:
+                exit_bar = at_or_after[0]
+            else:
+                exit_bar = day_bars[-1]
+                illiquid = True
+            exit_price = exit_bar.get("c")
+            if exit_price is None or exit_price <= 0:
+                logger.info(f"intraday shadow [{arm}]: non-positive exit price for {opt_contract} on {entry_day}; skip arm")
+                return None
+            intraday_ret = (exit_price - base_entry) / base_entry
+            return {
+                "scan_date": target_date.isoformat(),
+                "entry_day": entry_day.isoformat(),
+                "arm": arm,
+                "ticker": src.get("ticker"),
+                "direction": src.get("direction"),
+                "recommended_contract": opt_contract,
+                "confidence": conf,
+                "regime_ok": regime_ok,
+                "same_pick": same_pick,
+                "entry_price": float(base_entry),
+                "intraday_exit_price": float(exit_price),
+                "intraday_exit_timestamp": datetime.fromtimestamp(exit_bar["t"] / 1000, tz=est).isoformat(),
+                "intraday_return_pct": float(intraday_ret),
+                "intraday_illiquid": bool(illiquid),
+                # Reference: the SAME pick's live 3-day bracket result, side-by-side.
+                "hold_3day_return_pct": (
+                    float(src["realized_return_pct"])
+                    if src.get("realized_return_pct") is not None else None
+                ),
+                "hold_3day_exit_reason": src.get("exit_reason"),
+                "policy_version": POLICY_VERSION,
+                "created_at": created_at,
+            }
+
+        tour_conf = (pick_doc.get("v5_4_confidence") if pick_doc else None)
+        rows = [
+            _intraday_row("TOURNAMENT", tournament_record, tour_conf),
+            _intraday_row("TOP_SCORE", topscore_record, None),
+        ]
+        rows = [r for r in rows if r is not None]
+        if not rows:
+            logger.info(f"intraday shadow: no simulable arms for {target_date}; skip")
+            return
+        _write_shadow_records(client, SHADOW_INTRADAY_TABLE, target_date, rows)
+        logger.info(
+            f"intraday shadow: wrote {len(rows)} row(s) for {target_date}: "
+            + ", ".join(f"{r['arm']}={r['ticker']}:{r['intraday_return_pct']:+.4f}" for r in rows)
+        )
+    except Exception as e:
+        logger.error(f"intraday shadow write failed for {target_date} (non-fatal): {e}")
         return
 
 
 def _write_shadow_records(
-    client: bigquery.Client, target_date: date, rows: list[dict]
+    client: bigquery.Client, table: str, target_date: date, rows: list[dict]
 ) -> None:
-    """Idempotent delete-then-load append into SHADOW_TABLE only.
+    """Idempotent delete-then-load append into an ISOLATED shadow table only.
 
-    Mirrors _write_ledger_records' streaming-avoiding load-job pattern but is
-    HARDCODED to SHADOW_TABLE — deliberately NOT reusing _write_ledger_records
-    (which targets LEDGER_TABLE) so the live ledger can never be touched here.
+    Mirrors _write_ledger_records' streaming-avoiding load-job pattern but takes
+    an explicit ``table`` — deliberately NOT reusing _write_ledger_records (which
+    targets LEDGER_TABLE) so the live ledger can never be touched here. Callers
+    must pass a research shadow table (SHADOW_TABLE / SHADOW_INTRADAY_TABLE),
+    NEVER LEDGER_TABLE.
     """
     if not rows:
         return
     delete_query = (
-        f'DELETE FROM `{SHADOW_TABLE}` WHERE scan_date = "{target_date.isoformat()}"'
+        f'DELETE FROM `{table}` WHERE scan_date = "{target_date.isoformat()}"'
     )
     client.query(delete_query).result()
-    logger.info(f"topscore shadow: deleted prior rows for scan_date={target_date} in {SHADOW_TABLE}")
+    logger.info(f"shadow: deleted prior rows for scan_date={target_date} in {table}")
 
     import io
     jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
@@ -1122,11 +1299,11 @@ def _write_shadow_records(
     )
     load_job = client.load_table_from_file(
         io.BytesIO(jsonl.encode("utf-8")),
-        SHADOW_TABLE,
+        table,
         job_config=load_job_config,
     )
     load_job.result()
-    logger.info(f"topscore shadow: loaded {len(rows)} rows into {SHADOW_TABLE}")
+    logger.info(f"shadow: loaded {len(rows)} rows into {table}")
 
 
 def get_previous_trading_day(base_date: date) -> date:
@@ -1163,6 +1340,236 @@ def get_canonical_scan_date(today: date = None) -> date:
     for _ in range(HOLD_DAYS):
         d = get_previous_trading_day(d)
     return d
+
+
+def _coerce_float(v):
+    """pandas/numpy scalar -> native float, or None for NaN/NaT/None."""
+    try:
+        return float(v) if v is not None and pd.notna(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_int(v):
+    """pandas/numpy scalar -> native int, or None for NaN/NaT/None."""
+    try:
+        return int(v) if v is not None and pd.notna(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_enriched_outcomes(
+    client: bigquery.Client,
+    target_date: date,
+    entry_day: date,
+    exit_day: date,
+    vix_level: float | None,
+    spy_trend: str | None,
+    vix_5d_delta: float | None,
+    tournament_ticker: str | None,
+) -> dict:
+    """Replay the bracket over the FULL enriched BULLISH pool for one scan_date.
+
+    Reuses the EXACT pool query shape from _write_topscore_shadow and the EXACT
+    production simulator (_simulate_contract, pick_doc=None), then writes one row
+    per candidate to ENRICHED_OUTCOMES_TABLE. Idempotent delete-then-load via
+    _write_shadow_records (research table only — NEVER LEDGER_TABLE).
+
+    Leakage-safe by construction: only point-in-time enriched feature columns are
+    SELECTed (the win-tracker underlying-outcome columns next_day_pct/day2_pct/
+    day3_pct/peak_return_3d/is_win/outcome_tier are DELIBERATELY NOT selected).
+    Outcome columns are produced by the same forward-looking bracket replay the
+    live trader uses, and stored in their own column group as labels.
+
+    Returns a summary dict {pool_size, labeled, wins, losses}. Does not raise on
+    a per-row simulation error — that row is skipped and counted in `errors`.
+    """
+    bull_filter = 'AND UPPER(direction) = "BULLISH"' if ENRICHED_OUTCOMES_BULLISH_ONLY else ""
+    pool_sql = f"""
+    SELECT
+        ticker, scan_date, direction, recommended_contract, recommended_strike,
+        recommended_expiration, recommended_dte, recommended_volume, recommended_oi,
+        recommended_spread_pct, is_premium_signal, premium_score,
+        overnight_score, catalyst_score, contract_score,
+        recommended_delta, recommended_gamma, recommended_theta, recommended_vega,
+        recommended_iv, risk_reward_ratio, atr_normalized_move, moneyness_pct,
+        volume_oi_ratio, call_dollar_volume, put_dollar_volume,
+        underlying_price, atr_14, rsi_14, vix3m_at_enrich
+    FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+    WHERE DATE(scan_date) = "{target_date}"
+      {bull_filter}
+      AND recommended_strike IS NOT NULL
+      AND recommended_expiration IS NOT NULL
+      AND recommended_dte IS NOT NULL
+      AND recommended_volume IS NOT NULL
+      AND recommended_oi IS NOT NULL
+    """
+    pool_df = client.query(pool_sql).to_dataframe()
+    pool_size = int(len(pool_df))
+    if pool_size == 0:
+        logger.info(f"enriched outcomes: empty pool for {target_date}; nothing to label")
+        return {"pool_size": 0, "labeled": 0, "wins": 0, "losses": 0, "errors": 0}
+
+    # Deterministic top-score arm flag — identical ranking to _write_topscore_shadow:
+    # max overnight_score, tie-break GREATEST(call_dv, put_dv) desc.
+    pool_df["_score"] = pd.to_numeric(pool_df["overnight_score"], errors="coerce").fillna(-1.0)
+    pool_df["_uoa"] = pool_df[["call_dollar_volume", "put_dollar_volume"]].apply(
+        lambda c: max(_coerce_float(c["call_dollar_volume"]) or 0.0,
+                      _coerce_float(c["put_dollar_volume"]) or 0.0),
+        axis=1,
+    )
+    ranked = pool_df.sort_values(by=["_score", "_uoa"], ascending=[False, False],
+                                 kind="mergesort").reset_index(drop=True)
+    topscore_ticker = str(ranked.iloc[0]["ticker"]).upper()
+    tour_ticker = (tournament_ticker or "").upper()
+
+    labeled_at = datetime.now(est)
+    rows: list[dict] = []
+    wins = losses = errors = 0
+    for _, prow in pool_df.iterrows():
+        try:
+            # Identical mechanics to the live trade (pick_doc=None → policy_gate
+            # falls back to the service constant; no Firestore doc needed).
+            rec = _simulate_contract(
+                client, prow, entry_day, exit_day,
+                vix_level, spy_trend, vix_5d_delta, pick_doc=None,
+            )
+        except Exception as e:  # noqa: BLE001 — one bad contract must not abort the pool
+            errors += 1
+            logger.warning(f"enriched outcomes: sim failed for {prow.get('ticker')} on {target_date}: {e}")
+            continue
+
+        ret = rec.get("realized_return_pct")
+        if ret is not None:
+            if ret > 0:
+                wins += 1
+            else:
+                losses += 1
+
+        row_ticker = str(prow["ticker"]).upper()
+        exp = prow["recommended_expiration"]
+        out = {
+            # ---- IDENTITY ----
+            "scan_date": rec["scan_date"],
+            "entry_day": entry_day,
+            "exit_day": exit_day,
+            "ticker": rec["ticker"],
+            "direction": rec["direction"],
+            "recommended_contract": rec["recommended_contract"],
+            "recommended_strike": _coerce_float(prow["recommended_strike"]),
+            "recommended_expiration": exp.date() if isinstance(exp, (datetime, pd.Timestamp)) else exp,
+            "recommended_dte": rec["recommended_dte"],
+            # ---- FEATURES (point-in-time, leakage-safe) ----
+            "recommended_delta": _coerce_float(prow["recommended_delta"]),
+            "risk_reward_ratio": _coerce_float(prow["risk_reward_ratio"]),
+            "atr_normalized_move": _coerce_float(prow["atr_normalized_move"]),
+            "moneyness_pct": _coerce_float(prow["moneyness_pct"]),
+            "recommended_gamma": _coerce_float(prow["recommended_gamma"]),
+            "recommended_theta": _coerce_float(prow["recommended_theta"]),
+            "recommended_vega": _coerce_float(prow["recommended_vega"]),
+            "recommended_iv": _coerce_float(prow["recommended_iv"]),
+            "recommended_spread_pct": rec["recommended_spread_pct"],
+            "recommended_volume": rec["recommended_volume"],
+            "recommended_oi": rec["recommended_oi"],
+            "volume_oi_ratio": _coerce_float(prow["volume_oi_ratio"]),
+            "contract_score": _coerce_float(prow["contract_score"]),
+            "call_dollar_volume": _coerce_float(prow["call_dollar_volume"]),
+            "put_dollar_volume": _coerce_float(prow["put_dollar_volume"]),
+            "overnight_score": _coerce_int(prow["overnight_score"]),
+            "premium_score": rec["premium_score"],
+            "is_premium_signal": rec["is_premium_signal"],
+            "catalyst_score": _coerce_float(prow["catalyst_score"]),
+            "underlying_price": _coerce_float(prow["underlying_price"]),
+            "atr_14": _coerce_float(prow["atr_14"]),
+            "rsi_14": _coerce_float(prow["rsi_14"]),
+            # ---- REGIME (point-in-time) ----
+            "VIX_at_entry": rec["VIX_at_entry"],
+            "SPY_trend_state": rec["SPY_trend_state"],
+            "vix_5d_delta_entry": rec["vix_5d_delta_entry"],
+            "vix3m_at_enrich": _coerce_float(prow["vix3m_at_enrich"]),
+            # ---- OUTCOME (realized labels) ----
+            "entry_timestamp": rec["entry_timestamp"],
+            "entry_price": rec["entry_price"],
+            "target_price": rec["target_price"],
+            "stop_price": rec["stop_price"],
+            "trail_trigger_price": rec["trail_trigger_price"],
+            "peak_premium": rec["peak_premium"],
+            "trail_activated": rec["trail_activated"],
+            "trail_stop_at_exit": rec["trail_stop_at_exit"],
+            "exit_timestamp": rec["exit_timestamp"],
+            "exit_reason": rec["exit_reason"],
+            "realized_return_pct": rec["realized_return_pct"],
+            "exit_slippage": rec["exit_slippage"],
+            "illiquid_exit": rec["illiquid_exit"],
+            "late_fill_minutes": rec["late_fill_minutes"],
+            "iv_rank_entry": rec["iv_rank_entry"],
+            "iv_percentile_entry": rec["iv_percentile_entry"],
+            "hv_20d_entry": rec["hv_20d_entry"],
+            "underlying_entry_price": rec["underlying_entry_price"],
+            "underlying_exit_price": rec["underlying_exit_price"],
+            "underlying_return": rec["underlying_return"],
+            "spy_entry_price": rec["spy_entry_price"],
+            "spy_exit_price": rec["spy_exit_price"],
+            "spy_return_over_window": rec["spy_return_over_window"],
+            # ---- LINKAGE / META ----
+            "was_tournament_pick": (row_ticker == tour_ticker) if tour_ticker else False,
+            "was_topscore_pick": (row_ticker == topscore_ticker),
+            "pool_size": pool_size,
+            "policy_version": rec["policy_version"],
+            "labeled_at": labeled_at,
+        }
+        rows.append(out)
+
+    # Idempotent delete-then-load into the research table ONLY (never LEDGER_TABLE).
+    _write_shadow_records(client, ENRICHED_OUTCOMES_TABLE, target_date, rows)
+    logger.info(
+        f"enriched outcomes {target_date}: labeled {len(rows)}/{pool_size} "
+        f"(wins={wins} losses={losses} errors={errors}); tournament={tour_ticker or 'n/a'} "
+        f"topscore={topscore_ticker}"
+    )
+    return {"pool_size": pool_size, "labeled": len(rows), "wins": wins,
+            "losses": losses, "errors": errors}
+
+
+def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]:
+    """Driver for the daily counterfactual labeling of the enriched pool.
+
+    Same date/timing contract as run_forward_paper_trading: simulate ONLY when
+    the 3-day hold window has fully closed (refuse future windows so no partial
+    intraday bar masquerades as a TIMEOUT exit). Writes ONLY to
+    ENRICHED_OUTCOMES_TABLE; never touches forward_paper_ledger or any live
+    surface. Backfill-safe (idempotent per scan_date).
+    """
+    if not target_date:
+        target_date = get_canonical_scan_date()
+
+    entry_day = get_next_trading_day(target_date)
+    today_et = datetime.now(est).date()
+    if entry_day > today_et:
+        return False, f"Entry day {entry_day} is in the future; nothing to label."
+    exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+    if exit_day > today_et:
+        return False, (f"Exit day {exit_day} is in the future; hold window not closed, "
+                       f"refusing to label.")
+
+    vix_level, spy_trend, vix_5d_delta = get_regime_context(entry_day)
+
+    # Best-effort lookup of the live tournament pick for linkage (None on any
+    # failure — backfill of old dates still has todays_pick docs dual-written).
+    tournament_ticker = None
+    try:
+        _, _, tournament_ticker = _fetch_todays_pick(target_date)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"enriched outcomes: todays_pick lookup failed for {target_date}: {e}")
+
+    client = bigquery.Client(project=PROJECT_ID)
+    summary = _write_enriched_outcomes(
+        client, target_date, entry_day, exit_day,
+        vix_level, spy_trend, vix_5d_delta, tournament_ticker,
+    )
+    return True, {"scan_date": target_date.isoformat(), "entry_day": entry_day.isoformat(),
+                  "exit_day": exit_day.isoformat(), **summary}
+
 
 def run_iv_cache_update():
     """Daily IV cache refresh — one row per underlying per as_of_date in
@@ -1489,6 +1896,33 @@ def trigger_paper_trading():
     except Exception as e:
         logger.error(f"Error in paper trading endpoint: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/label_enriched_pool", methods=["POST", "GET"])
+def trigger_label_enriched_pool():
+    """RESEARCH-ONLY counterfactual labeling endpoint.
+
+    Replays the +80/-60/trail bracket over the FULL enriched BULLISH pool for one
+    scan_date and writes one outcome row per candidate to
+    enriched_option_outcomes. Hit by a dedicated daily Cloud Scheduler cron AFTER
+    the trade-exit cron (the cohort whose hold window just closed). Writes ONLY to
+    the research table — never forward_paper_ledger or any live surface. Accepts
+    an optional {"target_date": "YYYY-MM-DD"} for backfill; defaults to the
+    canonical just-closed scan_date.
+    """
+    try:
+        req_data = request.get_json(silent=True) or {}
+        target_date_str = req_data.get("target_date")
+        target_date = (datetime.strptime(target_date_str, "%Y-%m-%d").date()
+                       if target_date_str else get_canonical_scan_date())
+        success, result = run_label_enriched_pool(target_date)
+        if success:
+            return jsonify({"status": "success", **result}), 200
+        return jsonify({"status": "error", "message": result}), 500
+    except Exception as e:
+        logger.error(f"Error in label_enriched_pool endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
