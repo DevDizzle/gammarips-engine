@@ -37,13 +37,16 @@ OPERATOR_EMAIL="${OPERATOR_EMAIL:-evan@gammarips.com}"
 EMAIL_DRAFTS_BUCKET="${EMAIL_DRAFTS_BUCKET:-gammarips-content-drafts}"
 MAX_RECIPIENTS="${MAX_RECIPIENTS:-1000}"
 
-# /weekly_intel — GA4 + GSC integration (set when SA + permissions land):
-#   GA4_PROPERTY_ID  numeric GA4 property id (e.g. 312345678)
-#   GSC_SITE_URL     'https://gammarips.com/' or 'sc-domain:gammarips.com'
-# Both unset by default; the endpoint degrades to "not yet configured" until
-# they're set.
-GA4_PROPERTY_ID="${GA4_PROPERTY_ID:-}"
-GSC_SITE_URL="${GSC_SITE_URL:-}"
+# /weekly_intel — GA4 + GSC integration. Defaults point at the live GammaRips
+# properties (same ids the read-only scripts/seo/ tooling uses):
+#   GA4_PROPERTY_ID  534472819 is the live property; 506898594 is an empty
+#                    duplicate — do NOT use it.
+#   GSC_SITE_URL     'sc-domain:gammarips.com' (or 'https://gammarips.com/').
+# NOTE: the env var is necessary but not sufficient — the runtime SA
+# (406581297632-compute@) must also be granted GA4 Viewer + a GSC user, or the
+# API calls 403 and the endpoint still reports "unavailable".
+GA4_PROPERTY_ID="${GA4_PROPERTY_ID:-534472819}"
+GSC_SITE_URL="${GSC_SITE_URL:-sc-domain:gammarips.com}"
 
 # Runs as the project default compute SA — same as x-poster, has Vertex AI +
 # logging + Firestore + GCS via project-level inheritance. The earlier

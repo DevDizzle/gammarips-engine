@@ -152,7 +152,7 @@ def check_park_gates(bq_client, fs_client):
 
     try:
         # 30-pick gate (V5.4 cohort, post-2026-05-08 retirement of V5.3).
-        # The trader simulates EVERY enriched signal as V7_INTRADAY for
+        # The trader simulates EVERY enriched signal as V7_1_TILTED_GIGO for
         # research; counting raw closed rows would fire spuriously (~80/day).
         # Approximation: COUNT(DISTINCT scan_date) where the ledger has at
         # least one closed V5.4 row. One scan_date == one V5.4 pick day.
@@ -162,7 +162,7 @@ def check_park_gates(bq_client, fs_client):
             SELECT COUNT(DISTINCT scan_date) AS n
             FROM `{LEDGER_TABLE}`
             WHERE realized_return_pct IS NOT NULL
-              AND policy_version = 'V7_INTRADAY'
+              AND policy_version = 'V7_1_TILTED_GIGO'
         """
         row = next(iter(bq_client.query(query).result()))
         count = int(row["n"])

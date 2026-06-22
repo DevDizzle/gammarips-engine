@@ -71,7 +71,7 @@ SLIPPAGE_PCT = 0.02
 LATE_FILL_TOLERANCE_MIN = 30
 ENTRY_HHMM = "10:00"  # 10:00 ET on entry_day
 EXIT_HHMM = "15:45"   # 15:45 ET SAME day (V7 time-exit)
-POLICY_VERSION = "V7_INTRADAY"
+POLICY_VERSION = "V7_1_TILTED_GIGO"
 POLICY_GATE = "ENRICHMENT_ONLY_NO_TRADER_GATE"
 LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
 INTRADAY_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger_intraday"
@@ -115,6 +115,11 @@ def get_next_trading_day(base_date: date) -> date:
     schedule = nyse.schedule(start_date=base_date, end_date=end_date)
     future_dates = [d.date() for d in schedule.index if d.date() > base_date]
     return future_dates[0] if future_dates else None
+
+def is_trading_day(d: date) -> bool:
+    """True if `d` is an NYSE trading session (handles weekends + holidays)."""
+    schedule = nyse.schedule(start_date=d, end_date=d)
+    return len(schedule.index) > 0
 
 def get_nth_next_trading_day(base_date: date, n: int) -> date:
     d = base_date
@@ -362,7 +367,7 @@ def run_forward_paper_trading(target_date: date = None):
       - Trail:  OFF (USE_TRAIL=False)
       - Hold:   SAME day; flat at 15:45 ET on entry_day if neither fires
       - Ambiguous bar: STOP wins over TARGET (conservative)
-      - Writes to forward_paper_ledger with policy_version=V7_INTRADAY
+      - Writes to forward_paper_ledger with policy_version=V7_1_TILTED_GIGO
 
     V5.4-only ledger contract (2026-05-12, see docs/DECISIONS/
     2026-05-12-v5-4-pipeline-alignment.md): the trader simulates ONLY the
@@ -390,6 +395,20 @@ def run_forward_paper_trading(target_date: date = None):
     if not target_date:
         # Default to today if not provided
         target_date = datetime.now(est).date()
+
+    # Market-holiday stand-down. The cron fires on the RUN day; if the NYSE is
+    # closed that day (holiday/weekend) there is no session to trade — write a
+    # single MARKET_HOLIDAY skip row (reusing the existing skip_reason column —
+    # NOT a schema change) and return before any Polygon/FRED fetch or
+    # simulation. Keyed on the run day, not target_date (the prior scan date).
+    # See 2026-06-19 Juneteenth: a trade fired on a closed market.
+    run_day = datetime.now(est).date()
+    if not is_trading_day(run_day):
+        logger.info(f"Market closed on {run_day} (NYSE holiday/weekend) — standing down: writing MARKET_HOLIDAY skip row, no fetches/simulation.")
+        skip_record = _build_skip_record(
+            target_date, "MARKET_HOLIDAY", None, None, None,
+        )
+        return _write_ledger_records(bigquery.Client(project=PROJECT_ID), target_date, [skip_record])
 
     logger.info(f"Running V7 INTRADAY Forward Paper Trading for signals generated on {target_date} "
                 f"(entry={ENTRY_HHMM} ET, stop=-{STOP_PCT*100:.0f}%, target=+{TARGET_PCT*100:.0f}%, "

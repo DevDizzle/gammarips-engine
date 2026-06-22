@@ -256,6 +256,25 @@ Multi-agent fan-out over 8 feature families + walk-forward / day-block-bootstrap
 
 ---
 
+## Momentum lever + exploit falsification + pool-cap coverage (2026-06-19)
+
+**Data:** frozen 1,375 FILLED option-PnL set (`analysis_option_pnl.parquet`) + new 686-ticker adjusted underlying daily-bar cache (`backtesting_and_research/cache/poly_daily_underlying/`, Dec2024–Jun2026). Bullish baseline +4.11% EV / 47.0% win (reproduced). Evaluated on OPTION PnL; `mom_60` anchored ≤ scan_date (leakage-safe); bootstrap 95% CIs (5000 resamples).
+
+### Underlying momentum — REAL lever (SHIPPED 2026-06-19 as a soft edge-rank tilt)
+- Quintile by trailing-N underlying return; Q5−Q1 spread POSITIVE at every N (no reversal anywhere): N=20 +11.9pp, 60 +7.7pp, 126 +10.5pp, 189 +6.8pp, 252 +9.4pp.
+- **60-day top-quintile (`mom_60 ≥ +0.35`): ~+11.4% EV / 55.9% win; marginal lift over the bullish pool +8.4pp, CI clears zero.** Walk-forward (split 2026-05-04): H1 +16.9% / H2 +7.5%, both clear zero.
+- Literal YoY (252d ≥ +50%): +5.45% in-sample, monotone in threshold, BUT marginal lift +1.6pp CI does NOT clear zero AND collapses out-of-sample (H2 −0.22%) → 60-day is the tradeable horizon, not YoY.
+- Not redundant: corr(mom_60, overnight_score) = +0.29; high-mom beats low within every score stratum.
+- Implementation: `docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md`. Memory `project_momentum_60d_lever`.
+
+### Recent-option-WINNER persistence — FALSIFIED (anti-edge)
+- Recent winners underperform non-winners in every cell (whole-pool K=10: winners −2.5% vs non +0.3%; bullish K=5: winners −1.1% vs non +6.8%). In-pool ∩ recent-winner never beats the +4.11% baseline. 0/17 comparisons cleared zero in the exploit direction (< chance). Recent option winners MEAN-REVERT. The one stable cell pointed the OTHER way (buy recent losers; proxy-based, not promoted). Memory `project_exploit_winners_falsified`.
+
+### Pool-cap coverage (ceiling test)
+- Best-name capture vs full pool by edge-rank top-N: N=10 56% / 15 80% / 20 89% / **25 93.5%** / 50 100%. Ceiling-EV shortfall-vs-full CI touches zero only at N≥25. 50 almost never binds (4/46 days >50 candidates). → cap 50→25 safe on coverage; LLM-pick-quality untested (needs forward A/B). `docs/DECISIONS/2026-06-19-pool-cap-coverage.md`; memory `project_pool_cap_coverage`.
+
+---
+
 ## Bootstrap Validation — the `filt_rrr` autopsy
 
 Bootstrap CIs (5000 samples, RNG seed 42) on the `risk_reward_ratio >= 0.42` strategy under bracket `15:55 / no target / -20% stop / 3-day hold`.
@@ -599,3 +618,14 @@ Source: `handoffs/2026-04-08-deep-research-2-regime.md` (prompt) and the externa
 | `ROBUSTNESS_SWEEP_REPORT.md` | Execution Mechanics §robustness |
 | `UPSTREAM_LIQUIDITY_REPORT.md` | Liquidity Findings §upstream |
 | `SPEC-SCORING-V2.md` | Scoring v2 spec |
+
+---
+
+## 2026-06-22 — Entry-timing (10:00 ET vs earlier): RESOLVED — thin-tape mirage, KEEP 10:00
+
+Tested whether the fixed 10:00 ET entry systematically bleeds vs an earlier fill (prompted by TTWO 06-22 buying the morning pop and round-tripping). Re-simulated the identical V7 GIGO bracket (+40% TP / −30% stop / 15:45 flat) from open(9:30)/9:45/10:00/VWAP entries on the option-premium path.
+
+- **Substrate:** `enriched_option_outcomes` (46 days, 04-13..06-18) ⨝ fetched 1-min OPTION bars (2,694 contract-days). Scripts: `backtesting_and_research/entry_timing_backtest.py` + `entry_timing_fill_realism.py`. Sim validated vs production `realized_return_pct` (corr **0.922**). Leakage-safe (varies execution time only).
+- **Gross signal (real but not capturable):** 10:00 is the WORST entry tested; open beats it **+7.0pp** (paired, day-clustered CI [+2.1,+11.5], walk-forward stable; N=315/25d), 9:45 +3.4pp. Mechanism: at 10:00 you buy after the AM pop → TP-hit 13% vs 30%, timeout 48% vs 37%.
+- **Fill-realism KILLS it.** No NBBO on this Polygon plan → spread estimated from OHLC. Corwin-Schultz unreliable (trade-print bars understate spread → ~11bps, not credible). Under the model-free **adverse-bar fill** (buy entry-bar high / sell exit-bar low), in the **LIQUID subset (n_bars≥120, N=55 — the tradeable names): open Δ=+0.6% [−0.10,+0.10]; 9:45 negative, CI incl 0.** The edge lives ENTIRELY in illiquid contracts (median 66 traded min/session of 390; 77% <120 bars) where the early "fill price" isn't real.
+- **Decision:** do NOT change the live 10:00 entry. TTWO 06-22 was variance. Caveat: liquid N=55 + single regime → "no liquid edge" itself underpowered, but the thin-vs-liquid asymmetry is the tell; burden of proof was on the edge and it didn't clear. Memory: `project_entry_timing_1000_bleeds`.

@@ -91,7 +91,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 # the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
 #   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
-LIVE_COHORT_START_DATE = "2026-06-08"  # V7 GIGO cohort: first trade ENTRY (TER, scan 06-05 -> entry 06-08). V6 picks re-simulated under V7; entries span 06-08..06-15, so this floor keeps all 6.
+LIVE_COHORT_START_DATE = "2026-06-23"  # V7.1 Tilted GIGO cohort: first ENTRY is the first momentum-tilt-enriched pick (scan 06-22 -> entry 06-23). Ledger TRUNCATED 2026-06-22; the prior V7_INTRADAY cohort + the 06-22 TTWO pick (pre-tilt, enriched before the 06-19 tilt deploy) are EXCLUDED by this floor. See docs/DECISIONS/2026-06-22-v7-1-tilted-gigo-cohort-reset.md.
 
 # Fixed-dollar position sizing for the public cohort_stats panel.
 # The ledger records actual per-contract premium + percent return; the public
@@ -236,6 +236,12 @@ def get_previous_trading_day(base_date: date) -> date:
     schedule = nyse.schedule(start_date=start_date, end_date=base_date)
     valid_dates = [d.date() for d in schedule.index if d.date() < base_date]
     return valid_dates[-1] if valid_dates else None
+
+
+def is_trading_day(d: date) -> bool:
+    """True if `d` is an NYSE trading session (handles weekends + holidays)."""
+    schedule = nyse.schedule(start_date=d, end_date=d)
+    return len(schedule.index) > 0
 
 
 def get_next_trading_day(base_date: date) -> date:
@@ -450,7 +456,7 @@ def write_todays_pick_doc(
             "effective_at": None,
             "has_pick": False,
             "skip_reason": skip_reason,
-            "policy_version": "V7_INTRADAY",
+            "policy_version": "V7_1_TILTED_GIGO",
         }
     else:
         assert top is not None, "write_todays_pick_doc(has_pick=True) requires `top`"
@@ -491,7 +497,7 @@ def write_todays_pick_doc(
             "vix3m_at_enrich": _num("vix3m_at_enrich"),
             "vix_now_at_decision": float(vix_now) if vix_now is not None else None,
             "vix_source": _LAST_VIX_SOURCE,
-            "policy_version": "V7_INTRADAY",
+            "policy_version": "V7_1_TILTED_GIGO",
             # STRICT (ranker pick) or FALLBACK (daily-cadence deterministic
             # pick). Propagated to forward_paper_ledger.policy_gate so fallback
             # EV is separable. See DECISIONS/2026-06-01-daily-cadence-fallback.md.
@@ -687,24 +693,38 @@ def fetch_vix_close(scan_date: date) -> float | None:
 
 
 def claim_email_send(scan_date: date) -> bool:
-    """Atomically claim the right to send the daily pick for ``scan_date``.
+    """Atomically claim the right to send the daily pick on TODAY (ET run-day).
 
     Cloud Scheduler retries the notifier on attempt-deadline overrun, and
     ``run_notifier`` routinely takes 3+ minutes (signal-judge cold start + the
     bracket tournament). Without a guard, a retry re-runs the whole pipeline and
     double-sends the email + WhatsApp + subscriber fan-out (observed 2026-06-11;
     see docs/DECISIONS/2026-06-11-notifier-duplicate-send-guard.md). This
-    transactional claim makes the outbound send fire at most once per scan_date
-    no matter how many times the endpoint is triggered.
+    transactional claim makes the outbound send fire at most once per CALENDAR
+    SEND-DAY no matter how many times the endpoint is triggered.
+
+    KEY = the ET run-day, NOT ``scan_date``. The guard's job is "send at most
+    once this morning" — keying on the wall-clock day dedups same-morning
+    Scheduler retries (its only purpose; there is exactly one notifier run per
+    morning) while NEVER colliding across days. Keying on scan_date was wrong:
+    across a market holiday the SAME scan_date is the "previous trading day" for
+    two consecutive mornings, so a claim written on the first morning silenced
+    the legitimate send on the next (observed 2026-06-22 — Friday's Juneteenth
+    pre-guard run claimed scan_date=2026-06-18, suppressing Monday's real send of
+    the same scan_date). ``scan_date`` is retained in the doc body for audit.
 
     Returns True if THIS caller acquired the claim (proceed to send), False if a
     prior/concurrent run already claimed it (skip all outbound). Fail-OPEN: if
     Firestore raises we return True so a real outage never silences the signal —
     a rare duplicate is the lesser harm than a missed pick.
+
+    OPERATOR: to force a deliberate resend, delete ``email_sends/{TODAY_ET}``
+    (the send-day doc id), not ``email_sends/{scan_date}``.
     """
     try:
         db = firestore.Client(project=PROJECT_ID)
-        claim_ref = db.collection("email_sends").document(scan_date.isoformat())
+        run_day = datetime.now(est).date()
+        claim_ref = db.collection("email_sends").document(run_day.isoformat())
 
         @firestore.transactional
         def _claim(txn) -> bool:
@@ -712,6 +732,7 @@ def claim_email_send(scan_date: date) -> bool:
             if snap.exists:
                 return False
             txn.set(claim_ref, {
+                "run_day": run_day.isoformat(),
                 "scan_date": scan_date.isoformat(),
                 "claimed_at": firestore.SERVER_TIMESTAMP,
             })
@@ -926,7 +947,7 @@ def post_to_openclaw(message: str) -> None:
 # The V5.4 ticker lands in Firestore todays_pick/{scan_date} (canonical doc
 # for webapp banner, MCP get_todays_pick, x-poster signal, gamma-bot, blog
 # newsletter). forward-paper-trader simulates every enriched signal and
-# tags rows policy_version='V7_INTRADAY'; the "official pick" is
+# tags rows policy_version='V7_1_TILTED_GIGO'; the "official pick" is
 # identified by ticker JOIN to todays_pick.
 
 
@@ -1240,7 +1261,7 @@ def compute_and_write_cohort_stats() -> bool:
     """Refresh ``cohort_stats/current`` from forward_paper_ledger.
 
     Cohort definition: ``DATE(entry_timestamp) >= LIVE_COHORT_START_DATE``
-    AND ``policy_version = 'V7_INTRADAY'`` AND closed
+    AND ``policy_version = 'V7_1_TILTED_GIGO'`` AND closed
     (realized_return_pct not null). Pre-cohort rows were TRUNCATED 2026-05-08
     when V5.3 was retired; the ledger restarts fresh under V5.4.
 
@@ -1262,7 +1283,7 @@ def compute_and_write_cohort_stats() -> bool:
             GREATEST(1, CAST(ROUND({POSITION_SIZE_USD} / (entry_price * 100)) AS INT64)) AS n_contracts
           FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
           WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
-            AND policy_version = "V7_INTRADAY"
+            AND policy_version = "V7_1_TILTED_GIGO"
             AND realized_return_pct IS NOT NULL
             AND entry_price IS NOT NULL
             AND entry_price > 0
@@ -1284,7 +1305,7 @@ def compute_and_write_cohort_stats() -> bool:
 
         stats = {
             "cohort_start": LIVE_COHORT_START_DATE,
-            "policy_version": "V7_INTRADAY",
+            "policy_version": "V7_1_TILTED_GIGO",
             "position_size_usd": POSITION_SIZE_USD,
             "as_of": firestore.SERVER_TIMESTAMP,
             "trades_closed": int(r["trades_closed"]) if r else 0,
@@ -1336,7 +1357,7 @@ def compute_and_write_ledger_trades() -> bool:
     Powers the public scorecard per-trade ledger table. Uses the SAME cohort
     definition and fixed-dollar sizing as ``compute_and_write_cohort_stats``
     (``DATE(entry_timestamp) >= LIVE_COHORT_START_DATE`` AND
-    ``policy_version = 'V7_INTRADAY'`` AND closed), so the table rows and
+    ``policy_version = 'V7_1_TILTED_GIGO'`` AND closed), so the table rows and
     the aggregate tiles can never disagree. Idempotent (merge by doc id).
     Non-fatal: never raises into the email path. Returns True on success.
     """
@@ -1355,7 +1376,7 @@ def compute_and_write_ledger_trades() -> bool:
             GREATEST(1, CAST(ROUND({POSITION_SIZE_USD} / (entry_price * 100)) AS INT64)) AS n_contracts
           FROM `{PROJECT_ID}.profit_scout.forward_paper_ledger`
           WHERE DATE(entry_timestamp) >= "{LIVE_COHORT_START_DATE}"
-            AND policy_version = "V7_INTRADAY"
+            AND policy_version = "V7_1_TILTED_GIGO"
             AND realized_return_pct IS NOT NULL
             AND entry_price IS NOT NULL
             AND entry_price > 0
@@ -1394,7 +1415,7 @@ def compute_and_write_ledger_trades() -> bool:
                 "exit_value_usd": float(r["exit_value_usd"]),  # "Exit Value" column
                 "pl_usd": float(r["pl_usd"]),                  # "Profit" column
                 "policy_gate": r["policy_gate"],
-                "policy_version": "V7_INTRADAY",
+                "policy_version": "V7_1_TILTED_GIGO",
                 "as_of": firestore.SERVER_TIMESTAMP,
             }
             batch.set(db.collection("ledger_trades").document(f"{r['scan_date']}_{r['ticker']}"), doc, merge=True)
@@ -1508,6 +1529,29 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
 
 
 def run_notifier(target_date: date | None = None):
+    # Market-holiday stand-down. The notifier fires on the intended ENTRY day
+    # (the run day). On a closed-market day we send NOTHING (no email, no
+    # WhatsApp, no tournament spend) and write a clean skip doc so the webapp
+    # shows a "markets closed" state.
+    #
+    # DOC-KEYING: the webapp's getLatestTodaysPick() does
+    # orderBy('scan_date','desc').limit(1) — it returns the doc with the highest
+    # scan_date FIELD. Keying the skip doc to run_day (the holiday) would write
+    # an ORPHAN: the next real run keys its doc to get_previous_trading_day(next
+    # session) = the last session BEFORE the holiday (a smaller scan_date), so it
+    # never overwrites the holiday doc, and the orphan stays max → "markets
+    # closed" sticks on the next trading day, hiding the real pick.
+    # FIX: key the skip doc to get_previous_trading_day(run_day) — the same
+    # scan_date / doc id the next real run will use — so the next run cleanly
+    # overwrites the placeholder. No orphan.
+    # See 2026-06-19 Juneteenth: email + trade fired on a closed market.
+    run_day = datetime.now(est).date()
+    if not is_trading_day(run_day):
+        skip_scan_date = get_previous_trading_day(run_day)
+        logger.info(f"{run_day} is not an NYSE trading day (market holiday/closed). Standing down: no email, no tournament. Writing market_holiday skip doc keyed to {skip_scan_date}.")
+        write_todays_pick_doc(skip_scan_date, has_pick=False, skip_reason="market_holiday")
+        return True, "market_holiday"
+
     if not target_date:
         target_date = get_previous_trading_day(datetime.now(est).date())
 
@@ -1786,16 +1830,17 @@ def run_notifier(target_date: date | None = None):
         subject += " [FALLBACK]"
 
     # Idempotency guard: a Scheduler retry (or any double-trigger) must not
-    # re-send. Claim the send transactionally; if a prior run already claimed
-    # this scan_date, suppress all outbound (email + WhatsApp + sub fan-out) and
-    # report success so Scheduler stops retrying. todays_pick was already
-    # (idempotently) written above, so the webapp stays correct either way.
+    # re-send. Claim the send transactionally (keyed on the ET run-day); if this
+    # morning's send was already claimed, suppress all outbound (email + WhatsApp
+    # + sub fan-out) and report success so Scheduler stops retrying. todays_pick
+    # was already (idempotently) written above, so the webapp stays correct.
     if not claim_email_send(target_date):
         logger.warning(
-            f"Duplicate trigger for {target_date} — pick already sent. "
-            f"Suppressing email/WhatsApp/fan-out (Scheduler retry guard)."
+            f"Duplicate trigger today (scan_date={target_date}) — pick already "
+            f"sent this morning. Suppressing email/WhatsApp/fan-out (Scheduler "
+            f"retry guard, keyed on ET run-day)."
         )
-        return True, f"Duplicate trigger suppressed for {target_date} (already sent)."
+        return True, f"Duplicate trigger suppressed (already sent today; scan_date={target_date})."
 
     success = send_email(subject, html_content)
 

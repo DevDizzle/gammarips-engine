@@ -6,6 +6,7 @@ google-cloud-firestore==2.19.0
 google-genai==1.22.0
 pandas>=2.3.2
 pandas_ta==0.4.71b0
+pandas-market-calendars==4.6.1
 requests==2.32.3
 beautifulsoup4==4.12.3
 # trace_logger is installed separately in the Dockerfile from the vendored

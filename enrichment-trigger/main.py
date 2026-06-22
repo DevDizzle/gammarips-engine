@@ -16,6 +16,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import pandas_market_calendars as mcal
 import requests
 from flask import Flask, Request, jsonify, request
 from google.cloud import bigquery, storage
@@ -79,6 +80,16 @@ ENRICH_BULLISH_ONLY = os.getenv("BULLISH_ONLY", "true").strip().lower() in ("1",
 EDGE_DELTA_LO = float(os.getenv("EDGE_DELTA_LO", "0.20"))
 EDGE_DELTA_HI = float(os.getenv("EDGE_DELTA_HI", "0.46"))
 
+# 60-day underlying-momentum SOFT pre-rank tilt (2026-06-19). A SECOND soft lever
+# alongside the delta band: BULLISH names that are "ripping" (mom_60 >= MOM_THRESHOLD)
+# are favored into the top-ENRICH_TOP_N pool, but NO name is dropped for low/missing
+# momentum. Walk-forward-stable on the frozen 1,375-trade option-PnL set; 60d (not
+# YoY) is the tradeable horizon. MOMENTUM_TILT=false restores exact delta-only
+# behavior (kill switch). See docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md.
+MOMENTUM_TILT = os.getenv("MOMENTUM_TILT", "true").strip().lower() in ("1", "true", "yes")
+MOM_LOOKBACK_DAYS = int(os.getenv("MOM_LOOKBACK_DAYS", "60"))
+MOM_THRESHOLD = float(os.getenv("MOM_THRESHOLD", "0.35"))
+
 # Output prefixes in GCS
 NEWS_OUTPUT_PREFIX = "overnight-enrichment/news/"
 TECHNICALS_OUTPUT_PREFIX = "overnight-enrichment/technicals/"
@@ -92,6 +103,15 @@ ENRICHED_SIGNALS_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals_enriched"
 # Cache values for the lifetime of a single Cloud Run invocation.
 _VIX3M_CACHE: dict = {"value": "unset", "as_of": None}
 _VIX_CACHE: dict = {"value": "unset", "as_of": None}
+
+# NYSE trading calendar (used to resolve the momentum anchor + lookback sessions).
+_NYSE_CAL = mcal.get_calendar("NYSE")
+
+# Per-run cache of 60-day momentum maps, keyed by scan_date. Each value is
+# {"mom": {ticker: mom_60_float}, "anchor": "YYYY-MM-DD", "lookback": "YYYY-MM-DD"}
+# or {"mom": {}, ...} on a soft failure. Module-level so repeated _edge_select_top_n
+# calls within one invocation reuse the (at most 2) grouped-daily fetches.
+_MOM_CACHE: dict = {}
 
 
 def _parse_fred_csv_for_date(text: str, scan_date: str) -> float | None:
@@ -472,20 +492,138 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     return [dict(r) for r in rows], scan_date
 
 
-def _edge_select_top_n(signals: list[dict], k: int) -> list[dict]:
+def _resolve_momentum_dates(scan_date: str) -> tuple[str, str] | None:
+    """Resolve the two NYSE sessions for mom_60, both ON OR BEFORE scan_date.
+
+    Returns (anchor_date, lookback_date) as YYYY-MM-DD strings, where:
+      - anchor   = last trading session on or before scan_date (the entry-day-minus-1
+                   close; NEVER an entry-day-or-later bar — leakage guard).
+      - lookback = the session MOM_LOOKBACK_DAYS trading days earlier.
+    Returns None if the calendar lacks enough history (caller fails soft).
+    """
+    try:
+        target = datetime.strptime(scan_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    # Pull a generous trailing window of valid sessions and snap to scan_date.
+    # ~MOM_LOOKBACK_DAYS trading days span at most ~MOM_LOOKBACK_DAYS*1.6 calendar
+    # days; pad to be safe across holiday clusters.
+    start = target - timedelta(days=int(MOM_LOOKBACK_DAYS * 2.2) + 30)
+    schedule = _NYSE_CAL.schedule(start_date=start, end_date=target)
+    sessions = [d.date() for d in schedule.index if d.date() <= target]
+    if len(sessions) <= MOM_LOOKBACK_DAYS:
+        return None
+    anchor = sessions[-1]
+    lookback = sessions[-1 - MOM_LOOKBACK_DAYS]
+    # Leakage guard: both anchor and lookback must be <= scan_date.
+    if anchor > target or lookback > target:
+        return None
+    return anchor.isoformat(), lookback.isoformat()
+
+
+def _fetch_grouped_daily_closes(date_str: str, polygon_key: str) -> dict[str, float]:
+    """{ticker: adjusted_close} for ALL US stocks on `date_str` in ONE Polygon call.
+
+    Grouped-daily ADJUSTED endpoint — splits/dividends folded in so a corporate
+    action can't masquerade as a price move. Returns {} on any failure (caller
+    fails soft to delta-only ranking).
+    """
+    if not polygon_key:
+        return {}
+    try:
+        url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
+        params = {"adjusted": "true", "apiKey": polygon_key}
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json() or {}
+        out: dict[str, float] = {}
+        for bar in data.get("results", []) or []:
+            t = bar.get("T")
+            c = bar.get("c")
+            if t and c is not None:
+                try:
+                    out[str(t).upper()] = float(c)
+                except (TypeError, ValueError):
+                    continue
+        return out
+    except Exception as e:
+        logger.warning(f"  grouped-daily fetch failed for {date_str}: {e}")
+        return {}
+
+
+def _compute_momentum_map(scan_date: str, polygon_key: str) -> dict[str, float]:
+    """{ticker: mom_60} for the whole pre-cap pool via 2 grouped-daily calls.
+
+    mom_60 = adj_close(anchor) / adj_close(lookback) - 1, with anchor = last session
+    <= scan_date and lookback = MOM_LOOKBACK_DAYS sessions earlier. Cached per run
+    (keyed by scan_date). Returns {} on a soft failure so the caller drops back to
+    delta-only ranking without crashing enrichment.
+    """
+    cached = _MOM_CACHE.get(scan_date)
+    if cached is not None:
+        return cached["mom"]
+
+    dates = _resolve_momentum_dates(scan_date)
+    if dates is None:
+        logger.warning(f"momentum tilt: could not resolve anchor/lookback for {scan_date} — delta-only")
+        _MOM_CACHE[scan_date] = {"mom": {}, "anchor": None, "lookback": None}
+        return {}
+    anchor, lookback = dates
+
+    anchor_map = _fetch_grouped_daily_closes(anchor, polygon_key)
+    lookback_map = _fetch_grouped_daily_closes(lookback, polygon_key)
+    if not anchor_map or not lookback_map:
+        logger.warning(
+            f"momentum tilt: grouped-daily empty (anchor={anchor} n={len(anchor_map)}, "
+            f"lookback={lookback} n={len(lookback_map)}) — delta-only"
+        )
+        _MOM_CACHE[scan_date] = {"mom": {}, "anchor": anchor, "lookback": lookback}
+        return {}
+
+    mom: dict[str, float] = {}
+    for t, a_close in anchor_map.items():
+        l_close = lookback_map.get(t)
+        if l_close and l_close > 0 and a_close is not None:
+            mom[t] = (a_close / l_close) - 1.0
+    logger.info(
+        f"momentum tilt: mom_60 computed for {len(mom)} tickers "
+        f"(anchor={anchor}, lookback={lookback}, scan_date={scan_date})"
+    )
+    _MOM_CACHE[scan_date] = {"mom": mom, "anchor": anchor, "lookback": lookback}
+    return mom
+
+
+def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None,
+                       polygon_key: str | None = None) -> list[dict]:
     """Concentrate the grounded-LLM token budget on the names that can actually win.
 
     Pre-enrichment edge rank using ONLY point-in-time scan fields (leakage-safe):
-    apply the BULLISH gate (mirrors the downstream tournament), then rank by the
-    confirmed delta-band lever (|delta| 0.20-0.46, Q19 trap-escape), tie-broken by
-    overnight_score. Keep the top ``k``. The RR / ATR levers used by the notifier's
-    edge-rank are intentionally omitted here — they're computed DURING enrichment
-    (not yet available), and delta is the only CONFIRMED separator anyway. Returns
-    all qualifying signals unchanged when there are <= k of them. See
-    docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md."""
+    apply the BULLISH gate (mirrors the downstream tournament), then SOFT-rank by
+    two additive levers — the confirmed delta-band lever (|delta| 0.20-0.46, Q19
+    trap-escape) AND 60-day underlying momentum (mom_60 >= MOM_THRESHOLD; the
+    "stocks that are ripping" lever, walk-forward-stable). Tie-broken by mom_60
+    descending then overnight_score. Both levers are SOFT: no candidate is dropped
+    for missing/low delta OR missing/low momentum (recent IPOs without 60 sessions
+    of history get NEUTRAL momentum). Keep the top ``k``. The RR / ATR levers used
+    by the notifier's edge-rank are intentionally omitted here — they're computed
+    DURING enrichment (not yet available). Returns all qualifying signals unchanged
+    when there are <= k of them. See docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md
+    and docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md."""
     pool = signals
     if ENRICH_BULLISH_ONLY:
         pool = [s for s in pool if str(s.get("direction", "")).upper() == "BULLISH"]
+
+    # 60-day momentum map for the WHOLE pre-cap pool (2 grouped-daily calls, cached
+    # per run). Fails SOFT: empty map => every name gets neutral momentum and the
+    # rank degrades to today's delta-only behavior. mom_tilt_on tracks whether the
+    # tilt is contributing, purely for log clarity.
+    mom_map: dict[str, float] = {}
+    if MOMENTUM_TILT and scan_date and (polygon_key or POLYGON_API_KEY):
+        mom_map = _compute_momentum_map(scan_date, polygon_key or POLYGON_API_KEY)
+    mom_tilt_on = bool(mom_map)
+
+    def _mom_of(s: dict) -> float | None:
+        return mom_map.get(str(s.get("ticker", "")).upper())
 
     def _key(s: dict) -> tuple:
         edge = 0.0
@@ -497,11 +635,22 @@ def _edge_select_top_n(signals: list[dict], k: int) -> list[dict]:
                 edge += 1.5
         except (TypeError, ValueError):
             pass
+        # SOFT momentum lever: names clearing MOM_THRESHOLD get a positive bump,
+        # weighted just under the delta lever so a delta-band name still leads a
+        # bare momentum name, but a name satisfying BOTH leads either alone. Names
+        # with unknown/neutral momentum (IPO / not in grouped map / tilt off) get 0
+        # — never penalized below a low-momentum name they'd otherwise tie.
+        m = _mom_of(s)
+        if m is not None and m >= MOM_THRESHOLD:
+            edge += 1.25
+        # mom_sort: real mom_60 descending for ties; unknown momentum sorts as 0.0
+        # (median/neutral) so IPOs aren't pushed to the very bottom.
+        mom_sort = m if m is not None else 0.0
         try:
             score = float(s.get("overnight_score") or 0.0)
         except (TypeError, ValueError):
             score = 0.0
-        return (edge, score)
+        return (edge, mom_sort, score)
 
     capped = sorted(pool, key=_key, reverse=True)[:k]
     logger.info(
@@ -509,6 +658,19 @@ def _edge_select_top_n(signals: list[dict], k: int) -> list[dict]:
         f"{'BULLISH ' if ENRICH_BULLISH_ONLY else ''}qualifying -> grounding top "
         f"{len(capped)} (ENRICH_TOP_N={k}); tickers={[s.get('ticker') for s in capped]}"
     )
+    if MOMENTUM_TILT:
+        if mom_tilt_on:
+            audit = []
+            for s in capped:
+                m = _mom_of(s)
+                if m is None:
+                    audit.append(f"{s.get('ticker')}=NEUTRAL")
+                else:
+                    cleared = "Y" if m >= MOM_THRESHOLD else "N"
+                    audit.append(f"{s.get('ticker')}={m:+.3f}(>={MOM_THRESHOLD}?{cleared})")
+            logger.info(f"momentum tilt ON (mom_{MOM_LOOKBACK_DAYS}) selected: {audit}")
+        else:
+            logger.warning("momentum tilt requested but mom map empty — ranked delta-only (fail-soft)")
     return capped
 
 
@@ -1672,7 +1834,8 @@ def enrichment_trigger():
     # Cost discipline (2026-06-12): ground ONLY the top-N edge-ranked BULLISH names.
     # The funnel discards all but ~ENRICH_TOP_N downstream anyway, so spending
     # grounded-LLM tokens on the full ~344-name pool was pure waste.
-    signals = _edge_select_top_n(signals, ENRICH_TOP_N)
+    signals = _edge_select_top_n(signals, ENRICH_TOP_N, scan_date=scan_date,
+                                 polygon_key=POLYGON_API_KEY)
     if not signals:
         return jsonify({"status": "no_candidates_after_edge_rank", "scan_date": scan_date}), 200
     tickers = list(set(s["ticker"] for s in signals))
