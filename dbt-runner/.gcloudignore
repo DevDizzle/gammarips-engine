@@ -1,0 +1,7 @@
+# Ship only the service + the vendored dbt project. Exclude build artifacts.
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+__pycache__/
+*.pyc
+.git/

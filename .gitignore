@@ -73,6 +73,9 @@ dbt/profiles.yml
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+# dbt-runner vendors a copy of dbt/ at deploy time (regenerable, like the
+# trace_logger vendor) — never commit the duplicate.
+dbt-runner/dbt/
 .user.yml
 
 # SEO scripts local venv

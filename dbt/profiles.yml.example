@@ -28,3 +28,13 @@ gammarips:
       dataset: profitscout_dbt_ci
       location: US
       threads: 4
+
+    # prod — used by the dbt-runner Cloud Run service. method: oauth resolves to
+    # the Cloud Run default compute SA via ADC (no key/secret).
+    prod:
+      type: bigquery
+      method: oauth
+      project: profitscout-fida8
+      dataset: profitscout_dbt
+      location: US
+      threads: 4

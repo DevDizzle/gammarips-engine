@@ -1,0 +1,4 @@
+dbt-core==1.11.11
+dbt-bigquery==1.11.2
+Flask==3.0.3
+gunicorn==23.0.0

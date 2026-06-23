@@ -9,13 +9,25 @@ Run with:
     python scripts/ledger_and_tracking/current_ledger_stats.py
 """
 
+import os
 import sys
 
 import pandas as pd
 from google.cloud import bigquery
 
 PROJECT_ID = "profitscout-fida8"
-LEDGER_TABLE = f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
+
+# Source toggle. Default 'raw' = the live ledger table (unchanged behavior).
+# Set LEDGER_SOURCE=dbt to read the canonical dbt mart instead — same columns
+# (fct_paper_trades is `select l.* …` over the ledger) plus the canonical
+# win/loss flags. The 'dbt' path only works after the dbt layer has been built
+# (`dbt build` into profitscout_dbt); until then keep the default.
+LEDGER_SOURCE = os.environ.get("LEDGER_SOURCE", "raw").lower()
+LEDGER_TABLE = (
+    f"{PROJECT_ID}.profitscout_dbt.fct_paper_trades"
+    if LEDGER_SOURCE == "dbt"
+    else f"{PROJECT_ID}.profit_scout.forward_paper_ledger"
+)
 
 
 def fmt_pct(x) -> str:
