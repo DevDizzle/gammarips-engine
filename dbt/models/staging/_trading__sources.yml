@@ -87,3 +87,102 @@ sources:
             tests: [not_null]
           - name: ticker
             tests: [not_null]
+
+      # ---- Outcomes / research domain (Phase 2) ----
+
+      - name: enriched_option_outcomes
+        description: >
+          Counterfactual bracket-replay option-PnL labels over the FULL enriched
+          pool (every candidate we *could* have traded), so a leakage-safe label
+          set accrues ~50x faster than the 1-pick/day ledger. Partitioned by
+          entry_day, clustered by ticker. `realized_return_pct` is the option PnL.
+          NOTE: known data-quality issues (≈145 duplicate rows, uneven daily
+          counts pre-Jun11) — the uniqueness test below is WARN, not error.
+        config:
+          loaded_at_field: labeled_at
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 120, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
+              arguments:
+                combination_of_columns: [scan_date, ticker, recommended_contract]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: entry_day
+            tests: [not_null]
+          - name: ticker
+            tests: [not_null]
+
+      - name: signal_performance
+        description: >
+          Post-trade underlying-outcome tracking (win-tracker). Underlying-price
+          based, NOT option PnL — kept for context only. Has historical column
+          drift across writer eras; staging is intentionally lossless `select *`.
+        config:
+          loaded_at_field: performance_updated
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 168, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
+              arguments:
+                combination_of_columns: [scan_date, ticker]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: ticker
+            tests: [not_null]
+
+      - name: paper_shadow_topscore
+        description: >
+          Isolated research shadow: Tournament pick vs deterministic top-score
+          pick (one row per arm per day; arm in {TOURNAMENT, TOP_SCORE}).
+          Walled off from Scorecard/website.
+        config:
+          loaded_at_field: created_at
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 168, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
+              arguments:
+                combination_of_columns: [scan_date, arm]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: entry_day
+            tests: [not_null]
+          - name: arm
+            tests: [not_null]
+
+      - name: paper_shadow_intraday
+        description: >
+          Isolated research shadow: intraday-hold vs 3-day-hold for both the
+          Tournament and top-score picks (completes the 2x2). One row per arm
+          per day; arm in {TOURNAMENT, TOP_SCORE}.
+        config:
+          loaded_at_field: created_at
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 168, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
+              arguments:
+                combination_of_columns: [scan_date, arm]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: entry_day
+            tests: [not_null]
+          - name: arm
+            tests: [not_null]

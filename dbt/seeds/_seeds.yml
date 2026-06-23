@@ -1,0 +1,19 @@
+version: 2
+
+seeds:
+  - name: regimes
+    description: >
+      Human-defined market-regime epochs. Regime boundaries are judgment, not
+      computed data, so they live in a seed. Joined into facts by date range.
+      EDIT THIS FILE to refine boundaries; do not compute regimes in SQL.
+    config:
+      column_types:
+        start_date: date
+        end_date: date
+    columns:
+      - name: regime_name
+        tests: [not_null, unique]
+      - name: start_date
+        tests: [not_null]
+      - name: end_date
+        tests: [not_null]

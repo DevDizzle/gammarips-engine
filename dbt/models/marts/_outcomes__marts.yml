@@ -1,0 +1,103 @@
+version: 2
+
+models:
+  - name: dim_regime
+    description: Market-regime epochs (seed-backed), joined into facts by date range.
+    columns:
+      - name: regime_name
+        tests: [not_null, unique]
+      - name: start_date
+        tests: [not_null]
+      - name: end_date
+        tests: [not_null]
+
+  - name: fct_enriched_option_outcomes
+    description: >
+      Counterfactual option-PnL labels over the full enriched pool. option_return_pct
+      is the canonical PnL; regime_name attached by date range. Grain uniqueness is
+      WARN — the source has ~145 known duplicate rows (a real finding to clean, not
+      a build blocker).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          config:
+            severity: warn
+          arguments:
+            combination_of_columns: [scan_date, ticker, recommended_contract]
+    columns:
+      - name: outcome_id
+        tests: [not_null]
+      - name: scan_date
+        tests: [not_null]
+      - name: entry_day
+        tests: [not_null]
+      - name: ticker
+        tests: [not_null]
+      - name: direction
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ['BULLISH', 'BEARISH']
+      - name: is_labeled
+        tests: [not_null]
+      - name: is_winner
+        tests: [not_null]
+
+  - name: fct_signal_performance
+    description: Underlying-based post-trade tracking (context only, not option PnL).
+    columns:
+      - name: signal_perf_id
+        tests: [not_null]
+      - name: scan_date
+        tests: [not_null]
+
+  - name: fct_shadow_topscore
+    description: Tournament vs top-score shadow. One row per arm per day.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          config:
+            severity: warn
+          arguments:
+            combination_of_columns: [scan_date, arm]
+    columns:
+      - name: shadow_topscore_id
+        tests: [not_null]
+      - name: arm
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['TOURNAMENT', 'TOP_SCORE']
+
+  - name: fct_shadow_intraday
+    description: Intraday vs 3-day-hold shadow (the 2x2). One row per arm per day.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          config:
+            severity: warn
+          arguments:
+            combination_of_columns: [scan_date, arm]
+    columns:
+      - name: shadow_intraday_id
+        tests: [not_null]
+      - name: arm
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['TOURNAMENT', 'TOP_SCORE']
+
+  - name: agg_pool_outcomes
+    description: >
+      Full-pool counterfactual EV on option PnL, by regime x direction with ROLLUP
+      grand totals (the research counterpart to agg_paper_performance).
+    columns:
+      - name: win_rate
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 1
