@@ -186,3 +186,59 @@ sources:
             tests: [not_null]
           - name: arm
             tests: [not_null]
+
+      # ---- Eval / LLM-observability domain (Phase 3) ----
+
+      - name: llm_traces_v1
+        description: >
+          One row per LLM call across all instrumented services (trace logger).
+          Carries tokens, cost, latency, status/error. Partitioned by scan_date,
+          clustered by (service, model_id). Grain = trace_id.
+        config:
+          loaded_at_field: created_at
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 168, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
+              arguments:
+                combination_of_columns: [trace_id]
+        columns:
+          - name: trace_id
+            tests: [not_null]
+          - name: service
+            tests: [not_null]
+          - name: model_id
+            tests: [not_null]
+          - name: scan_date
+            tests: [not_null]
+          - name: status
+            tests: [not_null]
+
+      - name: llm_eval_results_v1
+        description: >
+          One row per (trace, evaluator) eval result (gammarips-eval). Carries
+          score / passed / judge_model. Partitioned by scan_date, clustered by
+          (service, evaluator). Grain = eval_id.
+        config:
+          loaded_at_field: created_at
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 168, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
+              arguments:
+                combination_of_columns: [eval_id]
+        columns:
+          - name: eval_id
+            tests: [not_null]
+          - name: trace_id
+            tests: [not_null]
+          - name: evaluator
+            tests: [not_null]
+          - name: scan_date
+            tests: [not_null]

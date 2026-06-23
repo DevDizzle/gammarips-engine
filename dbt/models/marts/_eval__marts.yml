@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: fct_llm_traces
+    description: One row per LLM call. Derived total_tokens + is_error.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          config:
+            severity: warn
+          arguments:
+            combination_of_columns: [trace_id]
+    columns:
+      - name: trace_id
+        tests: [not_null]
+      - name: service
+        tests: [not_null]
+      - name: is_error
+        tests: [not_null]
+
+  - name: fct_llm_eval_results
+    description: One row per (trace, evaluator) eval result.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          config:
+            severity: warn
+          arguments:
+            combination_of_columns: [eval_id]
+    columns:
+      - name: eval_id
+        tests: [not_null]
+      - name: trace_id
+        tests: [not_null]
+      - name: is_passed
+        tests: [not_null]
+
+  - name: agg_llm_cost
+    description: Cost/latency/error rollup by service x model_id (ROLLUP totals).
+    columns:
+      - name: error_rate
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: agg_eval_quality
+    description: Eval pass-rate / score rollup by service x evaluator (ROLLUP totals).
+    columns:
+      - name: eval_pass_rate
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 1
