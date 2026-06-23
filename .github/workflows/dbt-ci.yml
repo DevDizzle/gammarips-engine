@@ -4,7 +4,9 @@ name: dbt CI
 # project, against an ISOLATED CI dataset so PR builds never touch prod marts.
 #
 # One-time setup before this passes:
-#   1. Create the CI dataset:  bq mk --location=US profitscout-fida8:profitscout_dbt_ci
+#   1. Create the CI dataset:  bq mk --location=us-central1 profitscout-fida8:profitscout_dbt_ci
+#      (must match the source dataset profit_scout, which is us-central1 — a US
+#       multiregion CI dataset fails at the cross-location read of the sources.)
 #   2. Add a GitHub secret GCP_SA_KEY = a service-account JSON with
 #      BigQuery Data Editor + BigQuery User on profitscout_dbt_ci AND
 #      BigQuery Data Viewer on profit_scout (to read the source tables).

@@ -90,8 +90,11 @@ vs option-up 41% — evaluating on the underlying is misleading.
 3. `/home/user/gammarips-engine/.venv_dbt/bin/dbt deps --profiles-dir .`
 4. `dbt build --profiles-dir .` → materializes everything into `profitscout_dbt`,
    runs all tests. Paste any failures (most likely a `select *` column mismatch).
-5. Once green: `bq mk --location=US profitscout-fida8:profitscout_dbt_ci`, add the
+5. Once green: `bq mk --location=us-central1 profitscout-fida8:profitscout_dbt_ci`
+   (us-central1, NOT US — must match the source dataset's location), add the
    `GCP_SA_KEY` GitHub secret, then run `gammarips-review` and proceed to P4b.
+   Grant the CI/runner SA least privilege: `BigQuery Data Editor` on the dbt
+   dataset(s) + `Data Viewer` on `profit_scout` — never write on `profit_scout`.
 
 ## Decisions locked (2026-06-23)
 
