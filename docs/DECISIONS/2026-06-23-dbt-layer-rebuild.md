@@ -1,10 +1,10 @@
 # 2026-06-23 — dbt semantic layer: full rebuild as production infra
 
-**Status:** BUILT GREEN against BigQuery (2026-06-23, `c70866e`):
-`PASS=121 WARN=7 ERROR=0 SKIP=0`. Materialized into `profitscout_dbt` (+ `_staging`,
-`_seeds`), all `us-central1`. Layer = 25 models + 1 seed + 3 exposures + 6 metrics.
-Phase 4b deploy (Cloud Run runner + Scheduler) + the `LEDGER_SOURCE=dbt` cutover
-remain, gated on a gammarips-review pass.
+**Status:** COMPLETE & LIVE (2026-06-23). Built green (`PASS=124 WARN=5 ERROR=0`),
+merged to `master` + pushed, gammarips-review PASS, and the `dbt-runner` Cloud Run
+service + daily Scheduler are deployed and smoke-tested. Layer = 25 models + 1 seed
++ 3 exposures + 6 metrics in `profitscout_dbt` (us-central1), rebuilt automatically
+06:30 ET Mon–Fri. Only optional items remain (CI secret; `LEDGER_SOURCE=dbt` flip).
 
 Build notes: source dataset `profit_scout` is in **us-central1** (not US). Auth here
 used a short-lived token minted from the gcloud `eraphaelparra@gmail.com` session
@@ -75,13 +75,15 @@ vs option-up 41% — evaluating on the underlying is misleading.
   `agg_eval_quality` (cost/latency/error + pass-rate rollups). ✅
 - **P4a — Platform scaffolding (no deploy):** `exposures.yml`, `scripts/dbt_docs.sh`,
   `.github/workflows/dbt-ci.yml`. ✅
-- **P4b — Platform deploy (DRAFTED `835fc3e`; deploy = operator action after build
-  + review):** `dbt-runner/` Cloud Run service (POST `/` build, `/freshness`;
-  read-only over prod; ADC via compute SA; `deploy.sh` vendors `../dbt` + prints the
-  Scheduler setup), `prod` profile target, and a guarded opt-in repoint of
-  `current_ledger_stats.py` (`LEDGER_SOURCE=dbt`, default `raw`). Operator still
-  owes: run `deploy.sh` + create the Scheduler jobs; create `profitscout_dbt_ci` +
-  `GCP_SA_KEY` for CI; flip `LEDGER_SOURCE=dbt` once marts exist.
+- **P4b — Platform deploy: LIVE (2026-06-23).** `dbt-runner` Cloud Run service
+  deployed (`https://dbt-runner-hrhjaecvhq-uc.a.run.app`, private). Two Cloud
+  Scheduler jobs ENABLED: `dbt-daily-build` (POST `/`, 06:30 ET Mon–Fri) +
+  `dbt-source-freshness` (POST `/freshness`, 07:00 ET). Compute SA granted
+  `run.invoker`. CI dataset `profitscout_dbt_ci` created (us-central1). Smoke-test
+  PASS: triggered run rebuilt the marts at 22:31 UTC (Scheduler→OIDC→Run→build→BQ).
+  STILL OPTIONAL/operator: `GCP_SA_KEY` GitHub secret for CI (recommend skip or
+  keyless WIF — runner already covers refresh); flip `LEDGER_SOURCE=dbt` to cut
+  `current_ledger_stats.py` over to the mart.
 
 ## Operator runbook to unblock Phase 4b
 
