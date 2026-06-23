@@ -1,0 +1,107 @@
+version: 2
+
+models:
+  - name: fct_paper_trades
+    description: >
+      One row per terminal paper-trade/skip record. Win/loss/completion flags are
+      the canonical outcome definitions and are gated on is_completed_trade.
+      option_return_pct is the canonical OPTION premium PnL.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scan_date, ticker, recommended_contract]
+    columns:
+      - name: trade_id
+        description: Surrogate key — md5(scan_date, ticker, recommended_contract).
+        tests: [not_null, unique]
+      - name: scan_date
+        tests: [not_null]
+      - name: ticker
+        tests: [not_null]
+      - name: direction
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['BULLISH', 'BEARISH']
+      - name: exit_reason
+        description: Terminal bracket outcome or skip marker.
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ['TARGET', 'STOP', 'TRAIL', 'TIMEOUT', 'STALE_NO_TIMEOUT_PRINT',
+                         'INVALID_LIQUIDITY', 'SKIPPED', 'MARKET_HOLIDAY']
+      - name: policy_gate
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ['ENRICHMENT_ONLY_NO_TRADER_GATE', 'STRICT', 'FALLBACK']
+      - name: is_skipped
+        tests: [not_null]
+      - name: is_completed_trade
+        tests: [not_null]
+      - name: is_winner
+        tests: [not_null]
+      - name: is_loser
+        tests: [not_null]
+      - name: option_return_pct
+        description: Option premium return (canonical PnL). Long-option floor ≈ -1.
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: -1.05
+
+  - name: fct_paper_trades_intraday
+    description: One row per open position per trading day (V7 intraday MTM).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scan_date, snapshot_date, ticker]
+    columns:
+      - name: intraday_snapshot_id
+        tests: [not_null, unique]
+      - name: scan_date
+        tests: [not_null]
+      - name: direction
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['BULLISH', 'BEARISH']
+
+  - name: fct_signals_enriched
+    description: One row per enriched candidate signal (scan_date, ticker).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scan_date, ticker]
+    columns:
+      - name: signal_id
+        tests: [not_null, unique]
+      - name: scan_date
+        tests: [not_null]
+      - name: ticker
+        tests: [not_null]
+      - name: direction
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['BULLISH', 'BEARISH']
+
+  - name: agg_paper_performance
+    description: >
+      Canonical performance rollup (win_rate, expectancy_pct, profit_factor) on
+      OPTION PnL, by policy_version x direction with ROLLUP grand totals.
+    columns:
+      - name: win_rate
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 1

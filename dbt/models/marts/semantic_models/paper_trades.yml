@@ -1,0 +1,92 @@
+version: 2
+
+semantic_models:
+  - name: paper_trades
+    description: >
+      Semantic model over fct_paper_trades. Defines the canonical trading
+      measures so win_rate / expectancy are computed identically everywhere
+      via the dbt Semantic Layer (`dbt sl query`).
+    model: ref('fct_paper_trades')
+    defaults:
+      agg_time_dimension: scan_date
+
+    entities:
+      - name: trade
+        type: primary
+        expr: trade_id
+
+    dimensions:
+      - name: scan_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: direction
+        type: categorical
+      - name: exit_reason
+        type: categorical
+      - name: policy_version
+        type: categorical
+
+    measures:
+      - name: paper_trades_count
+        description: Count of all ledger records (trades + skips).
+        agg: count
+        expr: trade_id
+      - name: completed_trades
+        description: Count of completed (non-skip, priced) trades.
+        agg: sum
+        expr: case when is_completed_trade then 1 else 0 end
+      - name: winning_trades
+        agg: sum
+        expr: case when is_winner then 1 else 0 end
+      - name: completed_option_return_pct
+        description: Sum of option returns over completed trades.
+        agg: sum
+        expr: case when is_completed_trade then option_return_pct else 0 end
+
+metrics:
+  # Simple metrics (one per measure) — ratio metrics below reference these.
+  - name: total_paper_trades
+    description: All ledger records.
+    type: simple
+    label: Total paper records
+    type_params:
+      measure: paper_trades_count
+
+  - name: completed_paper_trades
+    description: Completed (priced, non-skip) trades.
+    type: simple
+    label: Completed trades
+    type_params:
+      measure: completed_trades
+
+  - name: winning_paper_trades
+    description: Winning completed trades.
+    type: simple
+    label: Winning trades
+    type_params:
+      measure: winning_trades
+
+  - name: completed_return_total
+    description: Sum of option returns over completed trades.
+    type: simple
+    label: Total option return (completed)
+    type_params:
+      measure: completed_option_return_pct
+
+  # Canonical ratio metrics.
+  - name: win_rate
+    description: Winning trades / completed trades (option PnL).
+    type: ratio
+    label: Win rate
+    type_params:
+      numerator: winning_paper_trades
+      denominator: completed_paper_trades
+
+  - name: expectancy_pct
+    description: Mean option return per completed trade (canonical expectancy).
+    type: ratio
+    label: Expectancy (option PnL)
+    type_params:
+      numerator: completed_return_total
+      denominator: completed_paper_trades

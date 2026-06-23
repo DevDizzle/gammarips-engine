@@ -1,0 +1,89 @@
+version: 2
+
+sources:
+  - name: profit_scout
+    database: profitscout-fida8
+    schema: profit_scout
+    description: >
+      Raw production tables written by the GammaRips Python Cloud Run pipeline.
+      dbt reads these read-only; it never writes back here.
+
+    tables:
+      - name: forward_paper_ledger
+        description: >
+          Terminal paper-trade records (3-day hold era + current). One row per
+          signal after the hold closes — trade rows and skip rows
+          (`is_skipped=true`). `realized_return_pct` is the OPTION premium return,
+          the canonical PnL for this project (never the underlying).
+        config:
+          loaded_at_field: "CAST(exit_timestamp AS TIMESTAMP)"
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 120, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [scan_date, ticker, recommended_contract]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: ticker
+            tests: [not_null]
+
+      - name: forward_paper_ledger_intraday
+        description: >
+          Intraday end-of-day mark-to-market snapshots of open positions
+          (V7 GIGO). One row per open position per trading day.
+          `unrealized_return_pct` is the live option PnL of the open position.
+        config:
+          loaded_at_field: "CAST(snapshot_ts AS TIMESTAMP)"
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 120, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [scan_date, snapshot_date, ticker]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: snapshot_date
+            tests: [not_null]
+
+      - name: overnight_signals_enriched
+        description: >
+          Enriched + scored signal pool (the tournament candidate set). Scanner
+          fields carried over plus technicals, news, risk, and premium scoring.
+        config:
+          loaded_at_field: enriched_at
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 120, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [scan_date, ticker]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: ticker
+            tests: [not_null]
+
+      - name: overnight_signals
+        description: >
+          Raw overnight scan output (pre-enrichment). One row per scored ticker
+          per scan date.
+        config:
+          loaded_at_field: scan_timestamp
+          freshness:
+            warn_after: {count: 48, period: hour}
+            error_after: {count: 120, period: hour}
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [scan_date, ticker]
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: ticker
+            tests: [not_null]
