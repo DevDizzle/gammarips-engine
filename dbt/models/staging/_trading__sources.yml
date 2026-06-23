@@ -54,6 +54,8 @@ sources:
         description: >
           Enriched + scored signal pool (the tournament candidate set). Scanner
           fields carried over plus technicals, news, risk, and premium scoring.
+          NOTE: source has ~329 dup (scan_date, ticker) pairs from re-enrichment
+          runs — uniqueness is WARN; staging dedups to latest by enriched_at.
         config:
           loaded_at_field: enriched_at
           freshness:
@@ -61,6 +63,8 @@ sources:
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
               arguments:
                 combination_of_columns: [scan_date, ticker]
         columns:
@@ -71,8 +75,9 @@ sources:
 
       - name: overnight_signals
         description: >
-          Raw overnight scan output (pre-enrichment). One row per scored ticker
-          per scan date.
+          Raw overnight scan output (pre-enrichment). NOTE: source appends
+          re-scans (~1940 dup (scan_date, ticker) pairs) — uniqueness is WARN;
+          staging dedups to latest by scan_timestamp.
         config:
           loaded_at_field: scan_timestamp
           freshness:
@@ -80,6 +85,8 @@ sources:
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
+              config:
+                severity: warn
               arguments:
                 combination_of_columns: [scan_date, ticker]
         columns:

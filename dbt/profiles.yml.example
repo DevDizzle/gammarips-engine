@@ -16,7 +16,7 @@ gammarips:
       method: oauth
       project: profitscout-fida8
       dataset: profitscout_dbt
-      location: US
+      location: us-central1
       threads: 4
       priority: interactive
 
@@ -26,7 +26,7 @@ gammarips:
       keyfile_json: "{{ env_var('GCP_SA_KEY') | as_native }}"
       project: profitscout-fida8
       dataset: profitscout_dbt_ci
-      location: US
+      location: us-central1
       threads: 4
 
     # prod — used by the dbt-runner Cloud Run service. method: oauth resolves to
@@ -36,5 +36,5 @@ gammarips:
       method: oauth
       project: profitscout-fida8
       dataset: profitscout_dbt
-      location: US
+      location: us-central1
       threads: 4
