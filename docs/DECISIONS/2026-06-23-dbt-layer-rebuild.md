@@ -1,9 +1,10 @@
 # 2026-06-23 — dbt semantic layer: full rebuild as production infra
 
-**Status:** In progress. Phases 0–3 + 4a complete (`b0817f2`, `bf40fbc`,
-`a771cea`, `313e591`, `b48da52`). Phase 4b (deploy + consumer repoint) pending —
-blocked on the first live `dbt build` + a gammarips-review pass.
-Layer = 25 models + 1 seed + 3 exposures + 6 metrics across 3 domains, parse-clean.
+**Status:** All code written. Phases 0–3, 4a, and the **4b DRAFT** are committed
+(`b0817f2`, `bf40fbc`, `a771cea`, `313e591`, `b48da52`, `835fc3e`). What remains is
+purely operator/deploy actions gated on the first live `dbt build` + a
+gammarips-review pass — no more authoring. Layer = 25 models + 1 seed + 3 exposures
++ 6 metrics across 3 domains, parse-clean.
 **Scope:** Reporting/analytics layer only. Reads production BigQuery tables; does
 **not** touch trading execution. New isolated dataset `profitscout_dbt`.
 
@@ -62,10 +63,13 @@ vs option-up 41% — evaluating on the underlying is misleading.
   `agg_eval_quality` (cost/latency/error + pass-rate rollups). ✅
 - **P4a — Platform scaffolding (no deploy):** `exposures.yml`, `scripts/dbt_docs.sh`,
   `.github/workflows/dbt-ci.yml`. ✅
-- **P4b — Platform deploy (DEFERRED, needs build + review):** deploy Cloud Run
-  `dbt-runner` + Cloud Scheduler daily build + source freshness; create CI dataset
-  `profitscout_dbt_ci` + `GCP_SA_KEY` secret; repoint `current_ledger_stats.py`
-  (and researcher workflows) at the marts.
+- **P4b — Platform deploy (DRAFTED `835fc3e`; deploy = operator action after build
+  + review):** `dbt-runner/` Cloud Run service (POST `/` build, `/freshness`;
+  read-only over prod; ADC via compute SA; `deploy.sh` vendors `../dbt` + prints the
+  Scheduler setup), `prod` profile target, and a guarded opt-in repoint of
+  `current_ledger_stats.py` (`LEDGER_SOURCE=dbt`, default `raw`). Operator still
+  owes: run `deploy.sh` + create the Scheduler jobs; create `profitscout_dbt_ci` +
+  `GCP_SA_KEY` for CI; flip `LEDGER_SOURCE=dbt` once marts exist.
 
 ## Operator runbook to unblock Phase 4b
 
