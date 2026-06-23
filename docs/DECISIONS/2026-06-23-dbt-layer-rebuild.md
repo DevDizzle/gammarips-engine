@@ -1,10 +1,18 @@
 # 2026-06-23 — dbt semantic layer: full rebuild as production infra
 
-**Status:** All code written. Phases 0–3, 4a, and the **4b DRAFT** are committed
-(`b0817f2`, `bf40fbc`, `a771cea`, `313e591`, `b48da52`, `835fc3e`). What remains is
-purely operator/deploy actions gated on the first live `dbt build` + a
-gammarips-review pass — no more authoring. Layer = 25 models + 1 seed + 3 exposures
-+ 6 metrics across 3 domains, parse-clean.
+**Status:** BUILT GREEN against BigQuery (2026-06-23, `c70866e`):
+`PASS=121 WARN=7 ERROR=0 SKIP=0`. Materialized into `profitscout_dbt` (+ `_staging`,
+`_seeds`), all `us-central1`. Layer = 25 models + 1 seed + 3 exposures + 6 metrics.
+Phase 4b deploy (Cloud Run runner + Scheduler) + the `LEDGER_SOURCE=dbt` cutover
+remain, gated on a gammarips-review pass.
+
+Build notes: source dataset `profit_scout` is in **us-central1** (not US). The raw
+`overnight_signals` (~1940) and `overnight_signals_enriched` (~329) tables append
+re-scans → staging dedups to (scan_date, ticker) by latest timestamp; the source
+uniqueness tests are WARN. 7 WARNs total are all intentional dup findings —
+notable: **`llm_eval_results_v1` has 2233 dup `eval_id`s** (eval-writer re-run bug
+to triage). Auth here used a short-lived token minted from the gcloud
+`eraphaelparra@gmail.com` session (ADC was bound to the wrong identity, `evan@`).
 **Scope:** Reporting/analytics layer only. Reads production BigQuery tables; does
 **not** touch trading execution. New isolated dataset `profitscout_dbt`.
 
