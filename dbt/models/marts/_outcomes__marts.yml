@@ -18,9 +18,8 @@ models:
       WARN — the source has ~145 known duplicate rows (a real finding to clean, not
       a build blocker).
     tests:
+      # error-level: staging dedups to this grain, so the mart must be unique
       - dbt_utils.unique_combination_of_columns:
-          config:
-            severity: warn
           arguments:
             combination_of_columns: [scan_date, ticker, recommended_contract]
     columns:
@@ -46,6 +45,11 @@ models:
 
   - name: fct_signal_performance
     description: Underlying-based post-trade tracking (context only, not option PnL).
+    tests:
+      # error-level: staging dedups to this grain
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scan_date, ticker]
     columns:
       - name: signal_perf_id
         tests: [not_null]
