@@ -1,0 +1,33 @@
+name: 'gammarips'
+version: '2.0.0'
+config-version: 2
+
+# The profile lives in dbt/profiles.yml (gitignored — see profiles.yml.example).
+# Run from this directory with: dbt build --profiles-dir .
+profile: 'gammarips'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Layered materialization: staging = ephemeral/views (lossless 1:1 projections),
+# marts = tables (analytics-ready facts the consumers read).
+models:
+  gammarips:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+
+seeds:
+  gammarips:
+    +schema: seeds

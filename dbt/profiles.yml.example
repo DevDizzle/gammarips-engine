@@ -1,0 +1,30 @@
+# Template for dbt/profiles.yml (the real file is gitignored — it is the only
+# secret/connection file in the dbt project). Copy to dbt/profiles.yml and fill in.
+#
+#   cp profiles.yml.example profiles.yml
+#
+# `dev`  — local development against your own gcloud OAuth (Application Default Creds).
+#          Run `gcloud auth application-default login` once.
+# `ci`   — service-account JSON injected via the GCP_SA_KEY env var (GitHub Actions).
+#          Writes to an isolated CI dataset so PR builds never touch prod marts.
+
+gammarips:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: profitscout-fida8
+      dataset: profitscout_dbt
+      location: US
+      threads: 4
+      priority: interactive
+
+    ci:
+      type: bigquery
+      method: service-account-json
+      keyfile_json: "{{ env_var('GCP_SA_KEY') | as_native }}"
+      project: profitscout-fida8
+      dataset: profitscout_dbt_ci
+      location: US
+      threads: 4

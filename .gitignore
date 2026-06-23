@@ -65,8 +65,14 @@ backtesting_and_research/cache/
 # Claude Code scheduled-task lock files (local runtime state).
 .claude/scheduled_tasks.lock
 
-# dbt — incomplete/stale project, not in use. Ignore the whole directory.
-dbt/
+# dbt — production semantic layer (tracked). Ignore ONLY the secret/connection
+# profile and the regenerable build artifacts, never the project source.
+# (History: the whole dir was wrongly ignored in 6f0686f and the untracked
+#  source was later lost to a working-tree clean. Do not re-ignore dbt/.)
+dbt/profiles.yml
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
 .user.yml
 
 # SEO scripts local venv
