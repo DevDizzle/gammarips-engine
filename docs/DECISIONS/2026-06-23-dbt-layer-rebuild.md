@@ -6,13 +6,17 @@
 Phase 4b deploy (Cloud Run runner + Scheduler) + the `LEDGER_SOURCE=dbt` cutover
 remain, gated on a gammarips-review pass.
 
-Build notes: source dataset `profit_scout` is in **us-central1** (not US). The raw
-`overnight_signals` (~1940) and `overnight_signals_enriched` (~329) tables append
-re-scans → staging dedups to (scan_date, ticker) by latest timestamp; the source
-uniqueness tests are WARN. 7 WARNs total are all intentional dup findings —
-notable: **`llm_eval_results_v1` has 2233 dup `eval_id`s** (eval-writer re-run bug
-to triage). Auth here used a short-lived token minted from the gcloud
-`eraphaelparra@gmail.com` session (ADC was bound to the wrong identity, `evan@`).
+Build notes: source dataset `profit_scout` is in **us-central1** (not US). Auth here
+used a short-lived token minted from the gcloud `eraphaelparra@gmail.com` session
+(ADC was bound to the wrong identity, `evan@`).
+
+**Read-side dedup complete (`6e1736a`):** all five dup-prone sources are deduped in
+staging to their grain (latest by timestamp), so every mart is clean; mart
+uniqueness tests are ERROR (assert the dedup), source uniqueness tests stay WARN
+(surface the upstream bug). Removed: overnight_signals 1940, overnight_signals_
+enriched 329, enriched_option_outcomes 145, signal_performance 315, **llm_eval_
+results 3450 (~57% — eval-writer idempotency bug, BACKLOG root-cause fix).** Final
+build: PASS=124 WARN=5 ERROR=0; the 5 WARNs are all source-level dup findings.
 **Scope:** Reporting/analytics layer only. Reads production BigQuery tables; does
 **not** touch trading execution. New isolated dataset `profitscout_dbt`.
 
