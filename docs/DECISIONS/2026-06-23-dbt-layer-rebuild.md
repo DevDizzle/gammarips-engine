@@ -1,7 +1,8 @@
 # 2026-06-23 — dbt semantic layer: full rebuild as production infra
 
-**Status:** In progress. Phases 0–2 complete (`b0817f2`, `bf40fbc`, `a771cea`).
-Phases 3–4 pending. Live `dbt build` validation still owed (operator OAuth / CI).
+**Status:** In progress. Phases 0–3 complete (`b0817f2`, `bf40fbc`, `a771cea`,
+`313e591`). Phase 4 (platform) pending. Live `dbt build` validation still owed
+(operator OAuth / CI). Layer = 24 models + 1 seed across 3 domains, parse-clean.
 **Scope:** Reporting/analytics layer only. Reads production BigQuery tables; does
 **not** touch trading execution. New isolated dataset `profitscout_dbt`.
 
@@ -56,7 +57,8 @@ vs option-up 41% — evaluating on the underlying is misleading.
 - **P2 — Outcomes/research:** `fct_enriched_option_outcomes` (+ `agg_pool_outcomes`),
   `fct_signal_performance`, `fct_shadow_topscore`, `fct_shadow_intraday`,
   `regimes.csv` seed → `dim_regime`. ✅
-- **P3 — Eval:** `fct_llm_traces`, `fct_llm_eval_results`; cost/latency/pass-rate metrics.
+- **P3 — Eval:** `fct_llm_traces`, `fct_llm_eval_results`, `agg_llm_cost`,
+  `agg_eval_quality` (cost/latency/error + pass-rate rollups). ✅
 - **P4 — Platform:** `dbt docs` site, GitHub Actions CI (`profitscout_dbt_ci`),
   Cloud Run + Cloud Scheduler daily build + source freshness, `exposures.yml` and
   re-point `current_ledger_stats.py` (and researcher workflows) at the marts.
