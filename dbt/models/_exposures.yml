@@ -1,0 +1,51 @@
+version: 2
+
+# Declares the downstream consumers of the semantic layer. Turns the dbt graph
+# into bidirectional impact analysis:
+#   dbt ls --select +exposure:current_ledger_stats   # everything upstream of it
+# NOTE: current_ledger_stats is declared here but is NOT yet repointed at the
+# marts — that wiring is deferred until the first live `dbt build` materializes
+# them. See docs/DECISIONS/2026-06-23-dbt-layer-rebuild.md (Phase 4).
+
+exposures:
+  - name: current_ledger_stats
+    type: analysis
+    maturity: medium
+    owner:
+      name: GammaRips Operator
+      email: eparra@owenec.com
+    description: >
+      Read-only ledger health snapshot. Will read win_rate / expectancy from the
+      canonical marts instead of re-deriving them (repoint pending first build).
+    depends_on:
+      - ref('fct_paper_trades')
+      - ref('agg_paper_performance')
+    url: https://github.com/DevDizzle/gammarips-engine/blob/master/scripts/ledger_and_tracking/current_ledger_stats.py
+
+  - name: pool_edge_research
+    type: analysis
+    maturity: low
+    owner:
+      name: GammaRips Researcher
+      email: eparra@owenec.com
+    description: >
+      Counterfactual full-pool edge research (gates, regime, direction) reads the
+      leakage-safe option-PnL label set and its rollup.
+    depends_on:
+      - ref('fct_enriched_option_outcomes')
+      - ref('agg_pool_outcomes')
+
+  - name: eval_weekly_report
+    type: analysis
+    maturity: low
+    owner:
+      name: GammaRips Operator
+      email: eparra@owenec.com
+    description: >
+      LLM observability — cost, latency, error rate, and eval pass-rate monitoring
+      across instrumented services.
+    depends_on:
+      - ref('fct_llm_traces')
+      - ref('fct_llm_eval_results')
+      - ref('agg_llm_cost')
+      - ref('agg_eval_quality')

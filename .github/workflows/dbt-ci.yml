@@ -1,0 +1,52 @@
+name: dbt CI
+
+# Runs `dbt build` (models + tests, DAG order) on every PR that touches the dbt
+# project, against an ISOLATED CI dataset so PR builds never touch prod marts.
+#
+# One-time setup before this passes:
+#   1. Create the CI dataset:  bq mk --location=US profitscout-fida8:profitscout_dbt_ci
+#   2. Add a GitHub secret GCP_SA_KEY = a service-account JSON with
+#      BigQuery Data Editor + BigQuery User on profitscout_dbt_ci AND
+#      BigQuery Data Viewer on profit_scout (to read the source tables).
+# Until both exist, the workflow runs but the build step fails at auth — expected.
+
+on:
+  pull_request:
+    paths:
+      - 'dbt/**'
+      - 'requirements.txt'
+      - '.github/workflows/dbt-ci.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dbt
+        run: pip install "dbt-core==1.11.11" "dbt-bigquery==1.11.2"
+
+      - name: Materialize profiles.yml from template
+        working-directory: dbt
+        run: cp profiles.yml.example profiles.yml
+
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps --profiles-dir .
+
+      - name: dbt build (CI target → profitscout_dbt_ci)
+        working-directory: dbt
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: dbt build --no-partial-parse --profiles-dir . --target ci
+
+      - name: Upload dbt artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target
+          path: dbt/target/
