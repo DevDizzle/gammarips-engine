@@ -1,8 +1,9 @@
 # 2026-06-23 — dbt semantic layer: full rebuild as production infra
 
-**Status:** In progress. Phases 0–3 complete (`b0817f2`, `bf40fbc`, `a771cea`,
-`313e591`). Phase 4 (platform) pending. Live `dbt build` validation still owed
-(operator OAuth / CI). Layer = 24 models + 1 seed across 3 domains, parse-clean.
+**Status:** In progress. Phases 0–3 + 4a complete (`b0817f2`, `bf40fbc`,
+`a771cea`, `313e591`, `b48da52`). Phase 4b (deploy + consumer repoint) pending —
+blocked on the first live `dbt build` + a gammarips-review pass.
+Layer = 25 models + 1 seed + 3 exposures + 6 metrics across 3 domains, parse-clean.
 **Scope:** Reporting/analytics layer only. Reads production BigQuery tables; does
 **not** touch trading execution. New isolated dataset `profitscout_dbt`.
 
@@ -59,9 +60,22 @@ vs option-up 41% — evaluating on the underlying is misleading.
   `regimes.csv` seed → `dim_regime`. ✅
 - **P3 — Eval:** `fct_llm_traces`, `fct_llm_eval_results`, `agg_llm_cost`,
   `agg_eval_quality` (cost/latency/error + pass-rate rollups). ✅
-- **P4 — Platform:** `dbt docs` site, GitHub Actions CI (`profitscout_dbt_ci`),
-  Cloud Run + Cloud Scheduler daily build + source freshness, `exposures.yml` and
-  re-point `current_ledger_stats.py` (and researcher workflows) at the marts.
+- **P4a — Platform scaffolding (no deploy):** `exposures.yml`, `scripts/dbt_docs.sh`,
+  `.github/workflows/dbt-ci.yml`. ✅
+- **P4b — Platform deploy (DEFERRED, needs build + review):** deploy Cloud Run
+  `dbt-runner` + Cloud Scheduler daily build + source freshness; create CI dataset
+  `profitscout_dbt_ci` + `GCP_SA_KEY` secret; repoint `current_ledger_stats.py`
+  (and researcher workflows) at the marts.
+
+## Operator runbook to unblock Phase 4b
+
+1. `gcloud auth application-default login` (as a user with BQ on `profitscout-fida8`).
+2. `cd dbt && cp profiles.yml.example profiles.yml`
+3. `/home/user/gammarips-engine/.venv_dbt/bin/dbt deps --profiles-dir .`
+4. `dbt build --profiles-dir .` → materializes everything into `profitscout_dbt`,
+   runs all tests. Paste any failures (most likely a `select *` column mismatch).
+5. Once green: `bq mk --location=US profitscout-fida8:profitscout_dbt_ci`, add the
+   `GCP_SA_KEY` GitHub secret, then run `gammarips-review` and proceed to P4b.
 
 ## Decisions locked (2026-06-23)
 
