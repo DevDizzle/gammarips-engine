@@ -1,6 +1,7 @@
 # 2026-06-23 — dbt semantic layer: full rebuild as production infra
 
-**Status:** In progress. Phase 0 (foundation) complete. Phases 1–4 pending.
+**Status:** In progress. Phases 0–1 complete (committed `b0817f2`, `bf40fbc`).
+Phases 2–4 pending. Live `dbt build` validation still owed (operator OAuth / CI).
 **Scope:** Reporting/analytics layer only. Reads production BigQuery tables; does
 **not** touch trading execution. New isolated dataset `profitscout_dbt`.
 
@@ -50,7 +51,8 @@ vs option-up 41% — evaluating on the underlying is misleading.
 - **P0 — Foundation:** un-ignore `dbt/` (secret-only), scaffold project, `dbt_utils`,
   bump dbt-core 1.11.8→1.11.11, commit the skeleton. ✅
 - **P1 — Trading core:** sources + `stg_*`; marts `fct_paper_trades` (3-day),
-  `fct_paper_trades_intraday` (V7), `fct_signals_enriched`; canonical metrics; tests.
+  `fct_paper_trades_intraday` (V7), `fct_signals_enriched`, `agg_paper_performance`
+  (canonical option-PnL rollup) + MetricFlow semantic model/metrics; tests. ✅
 - **P2 — Outcomes/research:** `fct_enriched_option_outcomes`, `fct_signal_performance`,
   shadow facts, `regimes.csv` seed → `dim_regime`.
 - **P3 — Eval:** `fct_llm_traces`, `fct_llm_eval_results`; cost/latency/pass-rate metrics.
