@@ -91,7 +91,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 # the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
 #   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
-LIVE_COHORT_START_DATE = "2026-06-23"  # V7.1 Tilted GIGO cohort: first ENTRY is the first momentum-tilt-enriched pick (scan 06-22 -> entry 06-23). Ledger TRUNCATED 2026-06-22; the prior V7_INTRADAY cohort + the 06-22 TTWO pick (pre-tilt, enriched before the 06-19 tilt deploy) are EXCLUDED by this floor. See docs/DECISIONS/2026-06-22-v7-1-tilted-gigo-cohort-reset.md.
+LIVE_COHORT_START_DATE = "2026-06-26"  # LIVE-OI FLOOR cohort (reset 2026-06-25): first ENTRY is the first live-OI-floor pick (scan 06-25 -> entry 06-26). Ledger TRUNCATED 2026-06-25 (3 prior V7_1 rows TTWO/VICR/AFL dumped to .scratch/forward_paper_ledger_pre_2026-06-26_reset.json); BBWI (entry 06-25, pre-floor old-gates pick) is EXCLUDED by this floor. policy_version STAYS V7_1_TILTED_GIGO (mechanics unchanged; only selection now liquidity-aware). See docs/DECISIONS/2026-06-25-cohort-reset-live-oi.md.
 
 # Fixed-dollar position sizing for the public cohort_stats panel.
 # The ledger records actual per-contract premium + percent return; the public
