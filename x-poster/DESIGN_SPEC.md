@@ -21,7 +21,7 @@ Shares code with `blog-generator` via `libs/gammarips_content/` (voice rules, co
 
 | # | Type | Trigger | Payload | Image | Length |
 |---|---|---|---|---|---|
-| 1 | `signal` | Mon–Fri 09:05 ET | `{"post_type":"signal"}` | YES (required) | 400 chars premium |
+| 1 | `signal` | Mon–Fri **09:55 ET** | `{"post_type":"signal"}` | YES (required) | 400 chars premium |
 | 2 | `standby` | Auto when `signal` finds no pick | — | YES (minimal "silence" card) | ≤280 chars |
 | 3 | `report` | Mon–Fri 08:30 ET | `{"post_type":"report"}` | optional | ≤280 chars |
 | 4 | `teaser` | Mon–Fri 12:30 ET | `{"post_type":"teaser"}` | optional | ≤300 chars |
@@ -30,6 +30,15 @@ Shares code with `blog-generator` via `libs/gammarips_content/` (voice rules, co
 | 7 | `scorecard` (3-tweet thread) | Fridays 17:00 ET | `{"post_type":"scorecard"}` | YES on tweet 1 | 400 chars × 3 |
 
 **Weekly total:** ~20 auto posts + ~3 Evan originals + ~60 Evan replies = 83 touchpoints. FinTwit sweet spot.
+
+> **2026-06-25 — `signal` post moved to 09:55 ET (co-move with the notifier cron).**
+> The notifier+tournament cron moves 07:30 → ~09:45 ET so it can re-fetch LIVE
+> open interest at pick time (live-OI liquidity floor). The `signal` post reads
+> `todays_pick`, so it MUST fire AFTER the ~09:50 finalize — 09:55 ET. The live
+> Scheduler job for this post is `x-poster-signal-0800` (its name still encodes
+> the old 08:00 slot; rename is optional). The exact `gcloud scheduler jobs
+> update` commands are the deploy checklist in
+> `docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md` — NOT yet executed.
 
 ---
 

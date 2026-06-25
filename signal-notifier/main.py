@@ -224,6 +224,47 @@ EDGE_DELTA_HI = 0.46
 # is the single worst thing in the data (-7.7%). Penalize, don't ban.
 EDGE_RR_MAX = 1.4
 
+# Live-OI liquidity floor (2026-06-25, see
+# docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md). At ~09:45 ET pick time we
+# re-fetch LIVE open interest per candidate from Polygon's option snapshot and drop
+# contracts whose live OI is below OI_FLOOR. The tournament kept selecting dead
+# contracts (e.g. BBWI live OI ~617, today-vol 2) because the enriched row carries
+# a one-day-stale scan-time OI snapshot. The threshold is set on FILL-RATE
+# tradeability (an ~OI=200 fill-rate cliff in the backtest), NOT on PnL — thin
+# contracts show a spurious "0% PnL" stale-print artifact, so PnL can't set the
+# floor. This explicitly REVERSES the 2026-06-04 OI-strip (which removed the
+# STALE scan-time OI from the judge); re-introducing OI is safe here because it is
+# (a) FRESH (re-fetched at pick time, not the scan snapshot) and (b) OI-ONLY —
+# every other live snapshot field (IV, greeks, day OHLC, last trade/quote) is
+# DISCARDED immediately after the fetch (entry-day-live leakage, the 10:00+ window).
+#   * OI_FLOOR: contracts with live_oi < OI_FLOOR are dropped (200 = fill cliff).
+#   * TOURNEY_MIN: fail-soft floor — if fewer than this survive, keep the top
+#     live_oi names up to TOURNEY_MIN so the tournament never starves to zero.
+#   * LIQUIDITY_TILT: kill switch (same shape as enrichment-trigger MOMENTUM_TILT).
+#     When false, behavior is bit-identical to today (no re-fetch, no drop, no tilt).
+OI_FLOOR = int(os.environ.get("OI_FLOOR", "200"))
+TOURNEY_MIN = int(os.environ.get("TOURNEY_MIN", "8"))
+LIQUIDITY_TILT = os.environ.get("LIQUIDITY_TILT", "true").strip().lower() in ("1", "true", "yes")
+
+# Per-candidate Polygon option-snapshot timeout (seconds). Matches the
+# compute_active_days_20d single-attempt / 8s fail-soft pattern. The whole
+# re-fetch is parallelized across a ThreadPoolExecutor, so worst-case
+# wall-clock is ~one timeout (not 50 * 8s) — see _refresh_live_oi_batch.
+LIVE_OI_FETCH_TIMEOUT_S = int(os.environ.get("LIVE_OI_FETCH_TIMEOUT_S", "8"))
+LIVE_OI_MAX_WORKERS = int(os.environ.get("LIVE_OI_MAX_WORKERS", "16"))
+
+# Entry-day-live snapshot fields that MUST NEVER reach the /rank payload (C1/C3
+# leakage guard, 2026-06-25). The Polygon option snapshot returns IV, greeks, day
+# OHLC, last trade and last quote alongside open_interest — all of those reflect
+# the LIVE entry-day (10:00+) tape and would leak the future. Only live_oi is
+# extracted and surfaced; everything here is discarded at fetch time and asserted
+# absent again just before the payload is built.
+_FORBIDDEN_LIVE_KEYS = {
+    "live_iv", "live_delta", "live_gamma", "live_theta", "live_vega",
+    "last_trade", "last_trade_price", "last_quote",
+    "day_close", "day_open", "day_high", "day_low", "day_vwap",
+}
+
 # V5.3 execution knobs — must mirror forward-paper-trader/main.py.
 # Displayed in the operator email so the routine matches what the simulator
 # actually models. If these diverge from the trader, update both.
@@ -490,6 +531,11 @@ def write_todays_pick_doc(
             "recommended_mid_price": _num("recommended_mid_price"),
             "recommended_dte": _int("recommended_dte"),
             "overnight_score": _int("overnight_score") if "overnight_score" in top else None,
+            # live_oi: fresh pick-time open interest (2026-06-25 liquidity floor).
+            # Firestore is schemaless so this is C5-safe (it never touches the
+            # forward_paper_ledger load job). None on liquidity-tilt-off / failed
+            # refresh / FALLBACK days (the col only exists post-_liquidity_refresh).
+            "live_oi": _int("live_oi") if "live_oi" in top else None,
             "vol_oi_ratio": _num("volume_oi_ratio"),
             "moneyness_pct": _num("moneyness_pct"),
             "call_dollar_volume": _num("call_dollar_volume"),
@@ -1091,6 +1137,231 @@ def _edge_rank_and_cap(df: pd.DataFrame, k: int) -> pd.DataFrame:
     return scored
 
 
+def _fetch_live_oi(underlying: str, contract: str) -> tuple[int | None, int | None, str]:
+    """Re-fetch LIVE open interest for one option contract at pick time.
+
+    Returns ``(live_oi, today_volume, status)`` where:
+      * ``live_oi``      — ``results.open_interest`` (int) or None.
+      * ``today_volume`` — ``results.day.volume`` (int) or None. INTERNAL ONLY:
+        the caller pops this out before building the /rank payload — it is never
+        surfaced to the judge.
+      * ``status``       — "ok" | "polygon_empty" | "polygon_error".
+
+    C1 (LEAKAGE, non-negotiable): the v3/snapshot/options response also carries
+    ``implied_volatility``, ``greeks`` (delta/gamma/theta/vega), ``day`` OHLC,
+    ``last_trade`` and ``last_quote`` — all entry-day-LIVE (10:00+ window). This
+    function extracts ONLY open_interest and day.volume and lets the rest of the
+    response go out of scope here. NOTHING else crosses the function boundary.
+
+    Single attempt, 8s timeout, fail-soft — never raises (mirrors
+    compute_active_days_20d). On any failure the caller keeps the candidate with
+    its frozen scan-time OI (C4: a fetch failure for a contract = "no live OI",
+    NOT a drop).
+    """
+    if not POLYGON_API_KEY:
+        logger.error(
+            f"POLYGON_API_KEY not set; cannot re-fetch live OI for {contract}"
+        )
+        return None, None, "polygon_error"
+    url = (
+        f"https://api.polygon.io/v3/snapshot/options/{underlying}/{contract}"
+        f"?apiKey={POLYGON_API_KEY}"
+    )
+    try:
+        resp = requests.get(url, timeout=LIVE_OI_FETCH_TIMEOUT_S)
+        if resp.status_code != 200:
+            logger.warning(
+                f"Polygon option snapshot {contract} HTTP {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+            return None, None, "polygon_error"
+        body = resp.json()
+    except Exception as e:
+        logger.warning(f"Polygon option snapshot {contract} fetch failed: {e}")
+        return None, None, "polygon_error"
+
+    if not isinstance(body, dict):
+        logger.warning(f"Polygon option snapshot {contract} non-dict body: {str(body)[:200]}")
+        return None, None, "polygon_error"
+    res = body.get("results")
+    if not isinstance(res, dict) or not res:
+        # 200 with no results = contract not found / no snapshot. Fail-soft.
+        return None, None, "polygon_empty"
+
+    # --- C1: extract ONLY open_interest + day.volume; discard everything else ---
+    # `res.get("greeks")`, `res.get("implied_volatility")`, `res.get("day")` OHLC,
+    # `res.get("last_trade")`, `res.get("last_quote")` are all entry-day-live and
+    # are DELIBERATELY NOT read. `oi` and `vol` below are the only two scalars
+    # that survive past this point.
+    oi_raw = res.get("open_interest")
+    day = res.get("day") if isinstance(res.get("day"), dict) else {}
+    vol_raw = day.get("volume")
+    try:
+        live_oi = int(oi_raw) if oi_raw is not None else None
+    except (TypeError, ValueError):
+        live_oi = None
+    try:
+        today_volume = int(vol_raw) if vol_raw is not None else None
+    except (TypeError, ValueError):
+        today_volume = None
+    return live_oi, today_volume, "ok"
+
+
+def _refresh_live_oi_batch(df: pd.DataFrame) -> pd.DataFrame:
+    """Re-fetch live OI for every candidate in parallel and attach two transient
+    columns: ``live_oi`` and ``_today_volume`` (internal). Returns a COPY of df.
+
+    C4 (per-candidate fail-soft): each future is individually try/excepted. A
+    timeout / error for one contract = ``live_oi=None`` for that row — it is KEPT
+    (the floor falls back to frozen ``recommended_oi``), never dropped here.
+
+    Worst-case wall-clock: with up to ~50 candidates fanned across
+    LIVE_OI_MAX_WORKERS (default 16) threads at LIVE_OI_FETCH_TIMEOUT_S (8s) each,
+    the bound is ceil(50/16) * 8s ~= 24s (plus negligible HTTP setup). Even at
+    workers=1 the absolute worst case is ~50 * 8s = 400s, still inside the
+    notifier's 540s request timeout AND well before the trader cron reads
+    todays_pick — but the default 16-worker pool keeps it to ~half a minute.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    out = df.copy()
+    out["live_oi"] = None
+    out["_today_volume"] = None
+
+    # Build the work list: (index, underlying, contract). Skip rows with no
+    # contract symbol — those keep live_oi=None and fall back to frozen OI.
+    work: list[tuple] = []
+    for idx, row in out.iterrows():
+        contract = row.get("recommended_contract")
+        underlying = row.get("ticker")
+        if (contract is None or pd.isna(contract)
+                or underlying is None or pd.isna(underlying)):
+            continue
+        work.append((idx, str(underlying), str(contract)))
+
+    if not work:
+        return out
+
+    n_ok = n_empty = n_err = 0
+    workers = max(1, min(LIVE_OI_MAX_WORKERS, len(work)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        fut_to_idx = {
+            pool.submit(_fetch_live_oi, u, c): idx for (idx, u, c) in work
+        }
+        for fut in as_completed(fut_to_idx):
+            idx = fut_to_idx[fut]
+            try:
+                live_oi, today_volume, status = fut.result()
+            except Exception as e:
+                # C4: a per-future blow-up = "no live OI for this contract".
+                logger.warning(f"live-OI future raised for row {idx}: {e}")
+                continue
+            if status == "ok":
+                n_ok += 1
+            elif status == "polygon_empty":
+                n_empty += 1
+            else:
+                n_err += 1
+            if live_oi is not None:
+                out.at[idx, "live_oi"] = live_oi
+            if today_volume is not None:
+                out.at[idx, "_today_volume"] = today_volume
+
+    logger.info(
+        f"Live-OI refresh: {len(work)} contracts queried "
+        f"(ok={n_ok} empty={n_empty} err={n_err}); "
+        f"with-live-oi={int(out['live_oi'].notna().sum())}"
+    )
+    return out
+
+
+def _effective_oi(row: pd.Series) -> float:
+    """Live OI if present, else the frozen scan-time recommended_oi, else 0."""
+    lo = row.get("live_oi")
+    if lo is not None and not pd.isna(lo):
+        try:
+            return float(lo)
+        except (TypeError, ValueError):
+            pass
+    ro = row.get("recommended_oi")
+    if ro is not None and not pd.isna(ro):
+        try:
+            return float(ro)
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
+    """Deterministic live-OI liquidity floor + soft tilt, run on the edge-capped
+    strict pool just before the tournament. See
+    docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md.
+
+    Steps:
+      1. Re-fetch LIVE OI per candidate (C1: OI-only; entry-day-live fields
+         discarded at fetch time).
+      2. DROP candidates with live_oi < OI_FLOOR (fill-rate cliff, not PnL).
+      3. FAIL-SOFT FLOOR: if fewer than TOURNEY_MIN survive, restore the
+         top-effective-OI names up to TOURNEY_MIN so the tournament never starves
+         to zero (which would spuriously surface no_candidates_passed_gates).
+      4. SOFT TILT: order survivors by effective OI desc (fillability).
+
+    C4 (total fail-soft): the whole body is wrapped — ANY exception returns the
+    INPUT df unchanged (frozen-OI / edge-rank order), never empty, never raising
+    into the live pick. The LIQUIDITY_TILT kill switch short-circuits to identical
+    pre-2026-06-25 behavior.
+
+    `live_oi` is the only NEW key that surfaces to /rank (C1). `_today_volume` is
+    internal — it is popped before the payload is built (see call_signal_ranker).
+    """
+    if not LIQUIDITY_TILT:
+        return candidates_df
+    if candidates_df is None or len(candidates_df) == 0:
+        return candidates_df
+    try:
+        refreshed = _refresh_live_oi_batch(candidates_df)
+
+        # Effective OI per row (live where available, frozen otherwise).
+        eff = refreshed.apply(_effective_oi, axis=1)
+        survivors = refreshed[eff >= OI_FLOOR].copy()
+
+        n_total = len(refreshed)
+        n_pass = len(survivors)
+
+        if n_pass < TOURNEY_MIN:
+            # Fail-soft floor: never starve the tournament. Take the top-OI names
+            # up to TOURNEY_MIN regardless of the floor so a thin day still ranks.
+            ordered_all = refreshed.assign(_eff_oi=eff).sort_values(
+                "_eff_oi", ascending=False
+            )
+            keep_n = min(TOURNEY_MIN, n_total)
+            survivors = ordered_all.head(keep_n).drop(columns=["_eff_oi"]).copy()
+            logger.info(
+                f"Live-OI floor: only {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
+                f"fail-soft restored top-{keep_n} by effective OI "
+                f"(survivors: {list(survivors['ticker'])})"
+            )
+        else:
+            # Soft tilt: order the passing pool by effective OI desc (fillability).
+            survivors = survivors.assign(
+                _eff_oi=survivors.apply(_effective_oi, axis=1)
+            ).sort_values("_eff_oi", ascending=False).drop(columns=["_eff_oi"])
+            logger.info(
+                f"Live-OI floor: {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
+                f"tilted by effective OI (survivors: {list(survivors['ticker'])})"
+            )
+
+        return survivors.reset_index(drop=True)
+    except Exception as e:
+        # C4: never raise into the live pick. Fall back to the input df untouched
+        # (edge-rank order, frozen OI). Worst case = today's exact behavior.
+        logger.error(
+            f"Live-OI liquidity refresh failed ({e}); falling back to "
+            f"edge-rank pool unchanged (fail-soft)."
+        )
+        return candidates_df
+
+
 def call_signal_ranker(
     top_10_df: pd.DataFrame,
     scan_date: date,
@@ -1115,6 +1386,25 @@ def call_signal_ranker(
         _candidate_for_ranker(row, idx)
         for idx, (_, row) in enumerate(top_10_df.iterrows(), start=1)
     ]
+    # C1: `_today_volume` is an INTERNAL liquidity-floor input (today's live
+    # option volume). It must NEVER reach the judge — pop it out of every
+    # candidate before the payload is built. `live_oi` (the only new permitted
+    # live key) stays. `_candidate_for_ranker` copies all df columns verbatim, so
+    # this is where the internal column is stripped from the wire format.
+    for cand in candidates:
+        cand.pop("_today_volume", None)
+
+    # C3 leakage guard (2026-06-25): the live-OI snapshot also carries entry-day
+    # IV / greeks / day OHLC / last trade / last quote. Those are discarded at
+    # fetch time (_fetch_live_oi, C1) and must never appear on a candidate. Assert
+    # it explicitly here, immediately before the payload is serialized, so any
+    # future regression that re-attaches a live field fails CLOSED (the notifier
+    # raises -> the V5.4 path catches it -> fail-closed, no pick) instead of
+    # silently leaking the future into the tournament.
+    for cand in candidates:
+        leaked = _FORBIDDEN_LIVE_KEYS & set(cand.keys())
+        assert not leaked, f"entry-day-live leak into /rank payload: {leaked}"
+
     payload = {
         "scan_date": scan_date.isoformat(),
         "entry_day": entry_day.isoformat(),
@@ -1749,6 +2039,14 @@ def run_notifier(target_date: date | None = None):
             # ~39 model calls/pick to ~9 (cap=12). Soft cap — bearish/high-RR names
             # can still survive. See docs/DECISIONS/2026-06-11-edge-rank-pool-cap.md.
             df = _edge_rank_and_cap(df, TOURNEY_POOL_CAP)
+            # Live-OI liquidity floor (2026-06-25): re-fetch live OI at pick time,
+            # drop dead contracts below OI_FLOOR (fill-rate cliff, not PnL), and
+            # soft-tilt by fillability. Fail-soft on every axis — never empties the
+            # pool, never raises (returns df unchanged on any error / when
+            # LIQUIDITY_TILT=false). live_oi is injected here and surfaces to the
+            # judge; _today_volume is internal and popped before the /rank payload.
+            # See docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md.
+            df = _liquidity_refresh_and_rank(df)
             v5_4_response = call_signal_ranker(
                 df, target_date, entry_day, report_md, ledger_summary
             )

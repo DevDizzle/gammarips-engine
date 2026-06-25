@@ -79,6 +79,32 @@ STALE_FIELDS_BLOCKLIST: frozenset[str] = frozenset({
     "volume_oi_ratio",
     "call_vol_oi_ratio",
     "put_vol_oi_ratio",
+    # Entry-day-LIVE snapshot fields (2026-06-25 defense-in-depth). The notifier's
+    # live-OI re-fetch reads Polygon's option snapshot at pick time. That payload
+    # also carries entry-day IV / greeks / day OHLC / last trade / last quote —
+    # all 10:00+-window leakage. The notifier discards them at fetch time (C1) and
+    # asserts them absent before /rank (C3); this blocklist is the third wall so
+    # that even if one slips through it never reaches the LLM. NOTE: `live_oi` —
+    # the FRESH, OI-only field — is intentionally NOT here; it is the one new
+    # permitted live key (it replaces the stale recommended_oi for liquidity).
+    "live_iv",
+    "live_delta",
+    "live_gamma",
+    "live_theta",
+    "live_vega",
+    "last_trade",
+    "last_trade_price",
+    "last_quote",
+    "day_close",
+    "day_open",
+    "day_high",
+    "day_low",
+    "day_vwap",
+    # `_today_volume` is the notifier's INTERNAL liquidity-floor input (today's
+    # live option volume). It is popped before the /rank payload (C1); blocked
+    # here too in case a future caller forgets the pop.
+    "_today_volume",
+    "today_volume",
 })
 
 
