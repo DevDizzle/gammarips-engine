@@ -253,6 +253,19 @@ LIQUIDITY_TILT = os.environ.get("LIQUIDITY_TILT", "true").strip().lower() in ("1
 LIVE_OI_FETCH_TIMEOUT_S = int(os.environ.get("LIVE_OI_FETCH_TIMEOUT_S", "8"))
 LIVE_OI_MAX_WORKERS = int(os.environ.get("LIVE_OI_MAX_WORKERS", "16"))
 
+# Entry-mark (POST-SELECTION display) knobs, 2026-06-30. After the tournament
+# has already picked, we fetch a FRESH entry-day (~09:50 ET) price for the CHOSEN
+# contract ONLY and publish a fair-value limit + reference bracket — so the
+# webapp/email stop showing the stale overnight recommended_mid_price. This is
+# DISPLAY/execution-guidance only and never re-enters selection (see
+# _fetch_entry_mark). Buffer/cap are heuristics (no NBBO on this Polygon plan;
+# the mark approximates fair value from the last printed trade) — revisit when a
+# real quote feed lands. See docs/DECISIONS/2026-06-30-entry-day-mark-and-limit.md.
+ENTRY_MARK_TIMEOUT_S = int(os.environ.get("ENTRY_MARK_TIMEOUT_S", "8"))
+ENTRY_LIMIT_BUFFER = float(os.environ.get("ENTRY_LIMIT_BUFFER", "0.02"))   # marketable limit = mark x (1+buffer)
+ENTRY_CHASE_CAP = float(os.environ.get("ENTRY_CHASE_CAP", "0.08"))         # hard "do not chase above" = mark x (1+cap)
+ENTRY_MARK_STALE_SECS = int(os.environ.get("ENTRY_MARK_STALE_SECS", "900"))  # last trade older than this -> flag stale
+
 # Entry-day-live snapshot fields that MUST NEVER reach the /rank payload (C1/C3
 # leakage guard, 2026-06-25). The Polygon option snapshot returns IV, greeks, day
 # OHLC, last trade and last quote alongside open_interest — all of those reflect
@@ -265,11 +278,13 @@ _FORBIDDEN_LIVE_KEYS = {
     "day_close", "day_open", "day_high", "day_low", "day_vwap",
 }
 
-# V5.3 execution knobs — must mirror forward-paper-trader/main.py.
-# Displayed in the operator email so the routine matches what the simulator
-# actually models. If these diverge from the trader, update both.
-STOP_PCT_DISPLAY = 0.60   # -60% on option premium
-TARGET_PCT_DISPLAY = 0.80  # +80% on option premium
+# V7.1 GIGO execution knobs — must mirror forward-paper-trader/main.py
+# (STOP_PCT / TARGET_PCT). Used to publish the subscriber-facing target/stop
+# off the fresh entry-day mark. If these diverge from the trader, update both.
+# (Corrected 2026-06-30: these had drifted to the retired V6 3-day −60%/+80%
+# brackets; the live trader is V7.1 GIGO −30%/+40%.)
+STOP_PCT_DISPLAY = 0.30   # -30% on option premium (V7.1 GIGO hard stop)
+TARGET_PCT_DISPLAY = 0.40  # +40% on option premium (V7.1 GIGO take-profit)
 
 
 def get_previous_trading_day(base_date: date) -> date:
@@ -467,7 +482,7 @@ def write_todays_pick_doc(
     skip_reason: str | None = None,
     v5_4_meta: dict | None = None,
     policy_gate: str = "STRICT",
-) -> None:
+) -> dict | None:
     """Canonical writer for Firestore ``todays_pick/{scan_date}``.
 
     This is the single source of truth for "what did GammaRips pick today"
@@ -489,6 +504,10 @@ def write_todays_pick_doc(
     """
     db = firestore.Client(project=PROJECT_ID)
     doc_ref = db.collection("todays_pick").document(scan_date.isoformat())
+    # Entry-mark display dict (has_pick=True only); returned so the email/
+    # WhatsApp templates render the SAME fresh mark this writes to Firestore,
+    # from ONE fetch. None on skip days.
+    entry_disp = None
 
     if not has_pick:
         doc_data = {
@@ -562,6 +581,33 @@ def write_todays_pick_doc(
                 "v5_4_picker_model": v5_4_meta.get("picker_model"),
             })
 
+        # --- Fresh entry-day mark (POST-SELECTION display/limit ONLY; never
+        # re-enters selection — see _fetch_entry_mark). Replaces the stale
+        # overnight recommended_mid_price on the webapp/email with a ~09:50 ET
+        # mark, a fair-value BUY limit, and a V7.1 GIGO reference bracket. The
+        # tournament has already chosen `top`; this is execution guidance, not a
+        # selection input. Fail-soft: source="unavailable" leaves the limit/
+        # bracket null rather than reverting to the overnight number. ---
+        _u, _c = _str("ticker"), _str("recommended_contract")
+        mark = (
+            _fetch_entry_mark(_u, _c) if (_u and _c)
+            else {"price": None, "asof_iso": None, "source": "unavailable", "stale": False}
+        )
+        em = mark["price"]
+        entry_disp = {
+            "entry_mark": em,                              # fresh entry-day (~09:50 ET) mark
+            "entry_mark_asof": mark["asof_iso"],
+            "entry_mark_source": mark["source"],           # last_trade | day_close | unavailable
+            "entry_mark_stale": mark["stale"],
+            "limit_entry_price": _round_tick(em * (1 + ENTRY_LIMIT_BUFFER)) if em else None,
+            "do_not_chase_above": _round_tick(em * (1 + ENTRY_CHASE_CAP)) if em else None,
+            "limit_good_til": "10:15 ET",
+            "display_target_price": round(em * (1 + TARGET_PCT_DISPLAY), 2) if em else None,
+            "display_stop_price": round(em * (1 - STOP_PCT_DISPLAY), 2) if em else None,
+            "entry_bracket_basis": "live_entry_day_mark",  # vs overnight recommended_mid_price
+        }
+        doc_data.update(entry_disp)
+
     doc_ref.set(doc_data)
     logger.info(
         f"Wrote todays_pick/{scan_date.isoformat()} has_pick={has_pick}"
@@ -578,6 +624,9 @@ def write_todays_pick_doc(
     if entry_day_iso and entry_day_iso != scan_date.isoformat():
         db.collection("todays_pick").document(entry_day_iso).set(doc_data)
         logger.info(f"Mirrored todays_pick/{entry_day_iso} (entry day)")
+
+    # Returned for the email/WhatsApp render (single-fetch contract). None on skips.
+    return entry_disp
 
 
 # VIX sanity + fallback-corroboration policy --------------------------------
@@ -876,6 +925,39 @@ def fan_out_to_paid_subscribers(subject: str, html_content: str) -> int:
     return sent
 
 
+def _entry_display_strings(entry_disp: dict | None) -> dict | None:
+    """Render-ready strings from the entry-mark dict returned by
+    write_todays_pick_doc, or None if there's no usable fresh mark (caller then
+    falls back to the overnight Mid line). Shared by the email + WhatsApp
+    templates so both surfaces show the SAME fresh ~09:50 ET mark from one fetch.
+    """
+    if not entry_disp or entry_disp.get("entry_mark") is None:
+        return None
+
+    def _d(v):
+        try:
+            return f"${float(v):.2f}" if v is not None else "—"
+        except (TypeError, ValueError):
+            return "—"
+
+    asof_label = "9:50 ET"
+    asof = entry_disp.get("entry_mark_asof")
+    if asof:
+        try:
+            asof_label = datetime.fromisoformat(asof).astimezone(est).strftime("%H:%M ET")
+        except (ValueError, TypeError):
+            asof_label = "9:50 ET"
+    return {
+        "entry": _d(entry_disp.get("entry_mark")),
+        "limit": _d(entry_disp.get("limit_entry_price")),
+        "chase": _d(entry_disp.get("do_not_chase_above")),
+        "target": _d(entry_disp.get("display_target_price")),
+        "stop": _d(entry_disp.get("display_stop_price")),
+        "asof_label": asof_label,
+        "stale": bool(entry_disp.get("entry_mark_stale")),
+    }
+
+
 def format_whatsapp_message(
     row: pd.Series | None,
     target_date: date,
@@ -883,6 +965,7 @@ def format_whatsapp_message(
     has_pick: bool,
     skip_reason: str | None = None,
     v5_4_meta: dict | None = None,
+    entry_disp: dict | None = None,
 ) -> str:
     """Plain-text WhatsApp message — mirrors the email content, concise.
 
@@ -938,11 +1021,24 @@ def format_whatsapp_message(
         j = (v5_4_meta.get("justification") or "").strip()
         if j:
             why_line = f"_Why:_ {j[:180]}{'…' if len(j) > 180 else ''}\n\n"
+    eds = _entry_display_strings(entry_disp)
+    if eds:
+        stale_tag = " (stale)" if eds["stale"] else ""
+        contract_lines = (
+            f"Strike {strike} · DTE {dte} · Entry ~{eds['entry']} @{eds['asof_label']}{stale_tag}\n"
+            f"Limit BUY {eds['limit']} · do not chase > {eds['chase']}\n"
+            f"Target {eds['target']} (+40%) · Stop {eds['stop']} (-30%)\n"
+            f"V/OI {vol_oi_str} · {money_str}\n\n"
+        )
+    else:
+        contract_lines = (
+            f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}\n\n"
+        )
     return (
         f"*GammaRips — {entry_day.isoformat()}*\n"
         f"*{ticker} {direction}*\n"
         f"`{contract}`\n"
-        f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}\n\n"
+        f"{contract_lines}"
         f"{why_line}"
         f"Full rationale: {signal_url}\n\n"
         f"_Paper-trading, educational only. Not investment advice._"
@@ -1207,6 +1303,90 @@ def _fetch_live_oi(underlying: str, contract: str) -> tuple[int | None, int | No
     return live_oi, today_volume, "ok"
 
 
+def _round_tick(price: float, tick: float = 0.05) -> float:
+    """Round a premium to a placeable option tick (default $0.05, a valid
+    increment across all series). Used ONLY for the subscriber-facing limit /
+    do-not-chase prices so they're real, postable order prices. Floored at one
+    tick so a degenerate sub-tick mark can never yield a $0.00 order price."""
+    return max(tick, round(round(price / tick) * tick, 2))
+
+
+def _fetch_entry_mark(underlying: str, contract: str) -> dict:
+    """Fetch a FRESH entry-day price mark for the CHOSEN contract, post-selection.
+
+    Returns ``{"price", "asof_iso", "source", "stale", "status"}`` where:
+      * ``price``    — last printed trade price (float), else day close, else None.
+      * ``asof_iso`` — ISO8601 of the last trade (None if unavailable/day_close).
+      * ``source``   — "last_trade" | "day_close" | "unavailable".
+      * ``stale``    — True if the last trade is older than ENTRY_MARK_STALE_SECS.
+      * ``status``   — "ok" | "polygon_empty" | "polygon_error".
+
+    POST-SELECTION / DISPLAY ONLY — the mirror image of _fetch_live_oi's C1 wall.
+    That function DELIBERATELY DISCARDS last_trade / day OHLC because they are
+    entry-day-live and forbidden from SELECTION. Here the pick is ALREADY made
+    (called from write_todays_pick_doc(has_pick=True)), so the SAME fields are
+    legal: they feed subscriber-facing display + limit math ONLY and never
+    re-enter enrichment / tournament / judge. NaN-safe, never raises (mirrors
+    _fetch_live_oi). On ANY failure returns source="unavailable" so the webapp
+    shows 'live mark unavailable' rather than reverting to the stale overnight
+    recommended_mid_price (which is the whole bug this fixes).
+    """
+    fail = {"price": None, "asof_iso": None, "source": "unavailable", "stale": False}
+    if not POLYGON_API_KEY:
+        logger.error(f"POLYGON_API_KEY not set; cannot fetch entry mark for {contract}")
+        return {**fail, "status": "polygon_error"}
+    url = (
+        f"https://api.polygon.io/v3/snapshot/options/{underlying}/{contract}"
+        f"?apiKey={POLYGON_API_KEY}"
+    )
+    try:
+        resp = requests.get(url, timeout=ENTRY_MARK_TIMEOUT_S)
+        if resp.status_code != 200:
+            logger.warning(
+                f"Entry-mark snapshot {contract} HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+            return {**fail, "status": "polygon_error"}
+        body = resp.json()
+    except Exception as e:
+        logger.warning(f"Entry-mark snapshot {contract} fetch failed: {e}")
+        return {**fail, "status": "polygon_error"}
+
+    res = body.get("results") if isinstance(body, dict) else None
+    if not isinstance(res, dict) or not res:
+        return {**fail, "status": "polygon_empty"}
+
+    # Prefer the most recent printed trade; fall back to the day close. (No NBBO
+    # on this plan, so there is no real mid — the last trade IS our fair-value
+    # proxy, same as enrichment's _best_contract last-trade pricing.)
+    lt = res.get("last_trade") if isinstance(res.get("last_trade"), dict) else {}
+    price_raw = lt.get("price")
+    sip_ns = lt.get("sip_timestamp")  # Polygon sip_timestamp is nanoseconds
+    source = "last_trade"
+    if price_raw is None:
+        day = res.get("day") if isinstance(res.get("day"), dict) else {}
+        price_raw = day.get("close")
+        sip_ns = None
+        source = "day_close" if price_raw is not None else "unavailable"
+    try:
+        price = float(price_raw) if price_raw is not None else None
+    except (TypeError, ValueError):
+        price = None
+    if price is None or price <= 0:
+        return {**fail, "status": "ok"}
+
+    asof_iso, stale = None, False
+    if sip_ns is not None:
+        try:
+            asof_dt = datetime.fromtimestamp(int(sip_ns) / 1e9, tz=pytz.UTC)
+            asof_iso = asof_dt.isoformat()
+            age_s = (datetime.now(pytz.UTC) - asof_dt).total_seconds()
+            stale = age_s > ENTRY_MARK_STALE_SECS
+        except (TypeError, ValueError, OSError, OverflowError):
+            asof_iso, stale = None, False
+
+    return {"price": price, "asof_iso": asof_iso, "source": source, "stale": stale, "status": "ok"}
+
+
 def _refresh_live_oi_batch(df: pd.DataFrame) -> pd.DataFrame:
     """Re-fetch live OI for every candidate in parallel and attach two transient
     columns: ``live_oi`` and ``_today_volume`` (internal). Returns a COPY of df.
@@ -1457,6 +1637,7 @@ def format_email_html(
     target_date: date,
     entry_day: date,
     v5_4_meta: dict | None = None,
+    entry_disp: dict | None = None,
 ) -> str:
     """V5.4 email: one signal, one routine + agent-ranker justification.
 
@@ -1520,6 +1701,20 @@ def format_email_html(
       </div>
             """
 
+    eds = _entry_display_strings(entry_disp)
+    if eds:
+        stale_tag = ' <span style="color:#c62828;">(stale)</span>' if eds["stale"] else ""
+        contract_detail_html = (
+            f'Strike {strike} · DTE {dte} · Entry ~{eds["entry"]} @{eds["asof_label"]}{stale_tag}'
+            f'<br>Limit BUY {eds["limit"]} · do not chase &gt; {eds["chase"]}'
+            f'<br>Target {eds["target"]} (+40%) · Stop {eds["stop"]} (-30%)'
+            f'<br>V/OI {vol_oi_str} · {money_str}'
+        )
+    else:
+        contract_detail_html = (
+            f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}"
+        )
+
     html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 560px;">
       <h2 style="margin-bottom: 0;">GammaRips Signal — {entry_day}</h2>
@@ -1533,8 +1728,8 @@ def format_email_html(
           <div style="font-size: 15px; margin-top: 4px;">
             <code>{contract}</code>
           </div>
-          <div style="color: #555; margin-top: 6px;">
-            Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}
+          <div style="color: #555; margin-top: 6px; line-height: 1.6;">
+            {contract_detail_html}
           </div>
           <div style="color: #1a73e8; margin-top: 8px; font-size: 13px;">
             Read the full rationale →
@@ -2113,7 +2308,7 @@ def run_notifier(target_date: date | None = None):
     # if the Firestore write raises, we do NOT send an email (the operator
     # would see email-without-webapp state and that's the exact drift we're
     # preventing with the single-source-of-truth contract).
-    write_todays_pick_doc(
+    entry_disp = write_todays_pick_doc(
         target_date, has_pick=True, top=top, vix_now=vix_now, v5_4_meta=v5_4_meta,
         policy_gate=gate_mode,
     )
@@ -2122,7 +2317,7 @@ def run_notifier(target_date: date | None = None):
     # V5.4 justification embedded under the contract card. No operator-only
     # shadow block (retired with V5.3 promotion 2026-05-08). Fallback picks are
     # marked in the subject so the recipient knows it's a low-conviction day.
-    html_content = format_email_html(top, target_date, entry_day, v5_4_meta=v5_4_meta)
+    html_content = format_email_html(top, target_date, entry_day, v5_4_meta=v5_4_meta, entry_disp=entry_disp)
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
     if gate_mode == POLICY_GATE_FALLBACK:
         subject += " [FALLBACK]"
@@ -2146,6 +2341,7 @@ def run_notifier(target_date: date | None = None):
     # it's an independent fan-out to a different channel, not a retry path.
     post_to_openclaw(format_whatsapp_message(
         top, target_date, entry_day, has_pick=True, v5_4_meta=v5_4_meta,
+        entry_disp=entry_disp,
     ))
 
     # Paid subscriber fan-out — additive, non-blocking. Subscribers receive
