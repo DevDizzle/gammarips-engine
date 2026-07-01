@@ -30,7 +30,7 @@ Memory: `project_substrate_audit_2026_07_01`. Plan/detail: `.scratch/substrate_r
 
 **PHASE C:** once the mom/regime backfills land, activate the PENDING features in `enriched_features_v1` (uncomment `PENDING_FEATURE_ALLOWLIST`: `vix_at_scan`/`spy_trend_at_scan`/`vix_5d_delta_at_scan`/`mom_60`/`mom_*`) + re-run the tag script + update the dbt features model. Optional one-liner flagged by the polish pass: add `("vix3m_at_enrich","FLOAT64")` to `ENRICHED_OUTCOMES_RESEARCH_COLUMNS` for full FRED-column explicit-typing.
 
-**GIT:** working tree is **UNCOMMITTED on `master`** — a large substrate diff across `forward-paper-trader/`, `enrichment-trigger/`, `scripts/ledger_and_tracking/`, `dbt/`, `docs/DECISIONS/`, `docs/DATA-CONTRACTS.md`. **Branch before committing** (don't commit straight to master). Not committed/pushed yet.
+**GIT:** committed + pushed to branch **`substrate-hardening-2026-07-01`** (commit `6d48707`, 26 files) — `master` is UNTOUCHED. Open a PR / merge to master when ready. (The commit also swept in two stray pre-existing `.scratch` files — `judge_v6.md`, `replay_err.txt` — harmless.)
 
 **PENDING PRODUCT WORK (after substrate is live + backfilled):** Option 1 build — note `/signals` is currently FREE (SEO haystack), so decide the free/paid split before gating it; **fix the MCP public pick-leak** (`gammarips-mcp get_todays_pick` is unauthenticated → leaks the pick the pivot wants private); agent-mode/MCP positioning workflow (WF #2) never run. Memories: `project_monetization_pivot_decouple_pick`, `project_agent_mode_mcp_byoa`, `project_gigo_pool_composite_negative`.
 
