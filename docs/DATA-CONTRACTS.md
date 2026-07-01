@@ -129,6 +129,40 @@ Daily EOD snapshots of open V5.4 positions. Pure observability — never feeds b
 
 Idempotent per `snapshot_date`: `DELETE FROM forward_paper_ledger_intraday WHERE snapshot_date = CURRENT_DATE()` before append. Same write pattern as the canonical ledger.
 
+## Research substrate — `profitscout-fida8.profit_scout.enriched_option_outcomes` (added 2026-06-17)
+
+Counterfactual bracket-replay option-PnL labels over the **full** enriched BULLISH pool (~50 rows/day), so a leakage-safe label set accrues ~50x faster than the 1-pick/day ledger. Written by the `/label_enriched_pool` cron via a mechanical replay of `forward-paper-trader/main.py:_simulate_contract` (no LLM). **HARD ISOLATION: research-only** — never read or written by the Scorecard / Firestore / webapp / blog. Partitioned by `entry_day` (DAY), clustered by `ticker`. Schema source of truth: `scripts/ledger_and_tracking/create_enriched_option_outcomes.py`.
+
+### Label definitions (exact mechanics — do NOT infer from `policy_version`)
+
+Each row's label mechanics are stamped in per-row `label_*` semantics tags so horizons never silently mix. The tags are authoritative; the summaries below are the current settings.
+
+- **Same-day GIGO label (`realized_return_pct`)** — the canonical label. Byte-identical to production: **10:00 ET entry, +40% target, −30% stop, flat exit at 15:45 ET, no trail** (V7 GIGO). STOP wins over TARGET on ambiguous bars. Realistic slippage / gap-through-stop; the labeler refuses to simulate an unclosed window (→ NULL). Mechanics stamped in `label_sim_version` / `label_hold_days` / `label_stop_pct` / `label_target_pct`.
+- **3-day bracket label (`realized_return_pct_3d`)** — a **parallel, distinct-horizon** arm: **−60% stop, +80% target, HOLD_DAYS=3**. This is the horizon the flagship `mom_60`×delta finding lives on. NEVER pool it with the same-day label. Mechanics stamped in `label_3d_*`. *(Not yet on the live table — lands with the substrate must-fix #6 schema expansion + `backfill_opportunity_surface.py`.)*
+- **Opportunity surface (`opp_peak_return` = MFE, `opp_trough_return` = MAE)** — max favorable / max adverse excursion of the option premium over a multi-day window with **NO exit rule**. This is exit-free *profit potential* so any exit rule is derivable offline — it is **NOT a tradeable label** and **NOT a feature**. `opp_status` ∈ {OK, WINDOW_OPEN, NO_BARS, INVALID_LIQUIDITY, NO_POST_ENTRY_BARS, ERROR, DISABLED}. *(Not yet on the live table — see above.)*
+
+### Column classification (the leakage boundary)
+
+Every column belongs to exactly one group. The classification is written into the BQ **column descriptions** (machine-readable) by `scripts/ledger_and_tracking/tag_enriched_column_descriptions.py`, prefixed `[feature|label|opportunity|regime_telemetry|identity | as-of <boundary>]`. Adopt the prefix convention going forward: `label_*` = label-semantics tag, `oc_*` = entry-close regime telemetry (realized after the trade), `opp_*` = opportunity-surface excursion.
+
+- **IDENTITY / keys** (known at selection): `scan_date`, `entry_day`, `exit_day` (realized), `ticker`, `direction`, `recommended_contract`, `recommended_strike`, `recommended_expiration`, `recommended_dte`; cohort meta `was_tournament_pick`, `was_topscore_pick`, `pool_size`, `policy_version`, `labeled_at`.
+- **FEATURE** (point-in-time, safe as model inputs): the study levers (`recommended_delta`, `risk_reward_ratio`, `atr_normalized_move`, `moneyness_pct`), greeks + contract liquidity (`recommended_gamma/theta/vega/iv/spread_pct/volume/oi`, `volume_oi_ratio`, `contract_score`), flow (`call_dollar_volume`, `put_dollar_volume`), scoring (`overnight_score`, `premium_score`, `is_premium_signal`, `catalyst_score`), scan-time technicals (`underlying_price`, `atr_14`, `rsi_14`), regime feature `vix3m_at_enrich`. Pending (source-of-truth, not yet live): scan-date regime `vix_at_scan` / `spy_trend_at_scan` / `vix_5d_delta_at_scan` and momentum `mom_60` + `mom_anchor_date` / `mom_lookback_date` / `mom_lookback_days`.
+- **LABEL** (realized after entry — NEVER a feature): `entry_timestamp/price`, `target_price`, `stop_price`, `trail_trigger_price`, `peak_premium`, `trail_activated`, `trail_stop_at_exit`, `exit_timestamp`, `exit_reason`, `realized_return_pct`, fill-realism (`exit_slippage`, `illiquid_exit`, `late_fill_minutes`), benchmarking (`iv_rank_entry`, `iv_percentile_entry`, `hv_20d_entry`, `underlying_entry/exit_price`, `underlying_return`, `spy_entry/exit_price`, `spy_return_over_window`), the 3-day arm (`realized_return_pct_3d` + `exit_*_3d` + `entry_price_3d` + `peak_premium_3d`), and the `label_*` semantics tags.
+- **OPPORTUNITY** (`opp_*`): exit-free MFE/MAE — not a label, not a feature.
+- **REGIME_TELEMETRY** (realized entry-close, benchmarking only): `oc_vix_at_close`, `oc_spy_trend_at_close`, `oc_vix_5d_delta_at_close`. **Legacy leak** `VIX_at_entry` / `SPY_trend_state` / `vix_5d_delta_entry` are entry-**close** values realized after the same-day trade — they were mislabeled as features and are being re-homed to `oc_*` (substrate must-fix #2). **Do NOT use them as features.**
+
+### Leakage rule
+
+- A **FEATURE** is known as-of **≤ scan_date** (the real selection point). Entry-window values known **≤ 10:00 ET entry** (e.g. the `*_entry` IV benchmarks) are realized-context, NOT features. **Everything else is an outcome.**
+- **Agents / MCP / research MUST query `enriched_features_v1` (never the raw table) for features.** The raw `enriched_option_outcomes` table is for LABEL JOINS ONLY, by a human who understands this rule. dbt equivalent: `features_enriched_option_outcomes` (agent-facing) vs `fct_enriched_option_outcomes` (label-carrying kitchen sink).
+
+### Leakage-safe access surfaces (substrate must-fix #4)
+
+- **`enriched_features_v1`** — VIEW over `enriched_option_outcomes` exposing ONLY the FEATURE + IDENTITY + cohort-meta allowlist above. Created by `scripts/ledger_and_tracking/create_enriched_features_view.py` (gated: dry-run default, `--execute` after `gammarips-review`).
+- **`overnight_signals_enriched_safe`** — VIEW over `overnight_signals_enriched` that drops the win-tracker forward-outcome columns (`next_day_pct`, `day2_pct`, `day3_pct`, `peak_return_3d`, `is_win`, `outcome_tier`, the `*_close` forward prices, `performance_updated`) so an agent that wanders upstream can't leak. Created by `scripts/ledger_and_tracking/create_enriched_signals_safe_view.py` (same gating). The base `overnight_signals_enriched` **still carries** those forward-outcome columns (merged in by `win-tracker`) — do not `SELECT *` it for features.
+
+**Known data-quality caveats:** ~145 duplicate rows (a real finding, not a build blocker; `stg_enriched_option_outcomes` dedups to latest by `labeled_at`); ~27.7% of rows are `INVALID_LIQUIDITY` NULL-label (non-random illiquid tail — document the exclusion in any screen); pre-2026-06-11 daily counts are uneven.
+
 ## Firestore — `ledger_trades/{scan_date}_{ticker}` (added 2026-06-03)
 
 Per-trade publish of the closed V5.4 cohort for the public webapp scorecard table (`/scorecard`). Written by `signal-notifier/main.py:compute_and_write_ledger_trades` alongside `cohort_stats/current`, on the same daily cron and the `/refresh_stats` endpoint. **Uses the identical cohort filter and fixed-dollar sizing as `cohort_stats/current`** (`DATE(entry_timestamp) >= LIVE_COHORT_START_DATE` AND `policy_version = 'V5_4_AGENT_RANKER'` AND `realized_return_pct IS NOT NULL` AND `entry_price > 0`; `n_contracts = GREATEST(1, ROUND(POSITION_SIZE_USD/(entry_price*100)))`), so the table rows and the aggregate tiles can never disagree. Idempotent upsert (`merge=True`) keyed by `{scan_date}_{ticker}`; non-gating, display-only. Read-only consumer; never feeds any execution gate.

@@ -110,6 +110,137 @@ ENRICHED_OUTCOMES_TABLE = f"{PROJECT_ID}.profit_scout.enriched_option_outcomes"
 # only (the live strategy's universe), not the raw all-direction scan pool.
 ENRICHED_OUTCOMES_BULLISH_ONLY = True
 
+# ---- OPPORTUNITY-SURFACE + 3-DAY RESEARCH LABEL (substrate must-fix #6) --------
+# The substrate previously carried ONLY the same-day GIGO bracket label, but the
+# flagship finding is a 3-DAY hold and — more generally — profitability depends on
+# HOW a contract is traded. Owner's guiding principle: the engine SURFACES good
+# contracts; exit is the trader's free variable. So we ALSO capture the raw
+# PROFIT POTENTIAL (max favorable / max adverse excursion) over a multi-day window
+# with NO exit rule, plus an interim bracketed 3-day label — RESEARCH-ONLY, in
+# their own clearly-tagged column groups. NEITHER changes the live same-day trader
+# or the live ledger. These arms only run once the multi-day hold WINDOW HAS
+# CLOSED (a fresh scan_date whose window is still open writes NULLs for them and
+# is filled later by the gated backfill). See
+# docs/DECISIONS/2026-07-01-momentum-persist-and-opportunity-surface.md.
+OPP_SURFACE_ENABLED = os.getenv("OPP_SURFACE", "true").strip().lower() in ("1", "true", "yes")
+OPP_WINDOW_DAYS = int(os.getenv("OPP_WINDOW_DAYS", "3"))   # trading days incl. entry_day
+OPP_EXIT_HHMM = os.getenv("OPP_EXIT_HHMM", "15:50")        # window end on the last day
+
+LABEL_3D_ENABLED = os.getenv("LABEL_3D", "true").strip().lower() in ("1", "true", "yes")
+LABEL_3D_HOLD_DAYS = int(os.getenv("LABEL_3D_HOLD_DAYS", "3"))
+LABEL_3D_STOP_PCT = float(os.getenv("LABEL_3D_STOP_PCT", "0.60"))    # legacy V6 -60%
+LABEL_3D_TARGET_PCT = float(os.getenv("LABEL_3D_TARGET_PCT", "0.80"))  # legacy V6 +80%
+LABEL_3D_EXIT_HHMM = os.getenv("LABEL_3D_EXIT_HHMM", "15:50")
+
+# Label-semantics tags persisted per row so horizons never silently mix (must-fix
+# #6f). Bumped whenever the mechanics that produced a label group change; do NOT
+# rely on the hardcoded policy_version to disambiguate a horizon.
+LABEL_SAMEDAY_SIM_VERSION = "SAMEDAY_V7_1_GIGO"        # same-day: HOLD=1 -30/+40
+LABEL_3D_SIM_VERSION = "HOLD3D_V6_LEGACY_8060"         # 3-day:   HOLD=3 -60/+80
+OPP_SIM_VERSION = "OPP_MFE_MAE_V1"                      # excursion surface
+
+# ---- ENRICHED_OUTCOMES research columns — EXPLICIT type creation (must-fix #2/#5/#6)
+# The must-fix #2 regime scan-date FEATURE + entry-close TELEMETRY columns, the
+# must-fix #5 momentum FEATURE, and the must-fix #6 opportunity-surface / 3-day-label
+# / label-semantics columns are FREQUENTLY ALL-NULL on a given batch write: mom_60 is
+# NULL for names without a persisted momentum, and the ENTIRE opp_*/3d/label_3d_*
+# group is NULL for every row while the multi-day window is still open. The #2 regime
+# columns (vix_at_scan / spy_trend_at_scan / vix_5d_delta_at_scan and the
+# oc_*_at_close telemetry) are FRED-sourced, so they go ALL-NULL together on a full
+# FRED-outage batch — and if the FIRST post-deploy write lands on such a batch,
+# autodetect mistypes them exactly like the #5/#6 groups (defense-in-depth from the
+# #5/#6 re-review). When a column is all-NULL across a JSON load, autodetect cannot
+# infer its type — it drops the column, or (worse, on a mixed batch) creates it as
+# STRING which then 500s on the next FLOAT/DATE/TIMESTAMP write. That is exactly the
+# schema-drift landmine gammarips-review flagged. We therefore create every one of
+# these columns EXPLICITLY with an idempotent ADD COLUMN IF NOT EXISTS before any
+# write (mirroring the enrichment-trigger V5.2 schema-ensure pattern at
+# enrichment-trigger/main.py).
+#
+# SINGLE SOURCE OF TRUTH for names/types = create_enriched_option_outcomes.py's
+# schema (BQ legacy names mapped to GoogleSQL DDL here). This one list is shared
+# with scripts/ledger_and_tracking/backfill_opportunity_surface.py so both write
+# paths guarantee identical columns. Reconciliation note: the must-fix batch spec
+# tentatively typed opp_minutes_to_peak / opp_minutes_to_trough as INT64, but both
+# the schema script (FLOAT) and the _simulate_opportunity_surface output dict
+# (float(... / 60000.0)) are FLOAT64 — the schema is authoritative, so FLOAT64 wins.
+ENRICHED_OUTCOMES_RESEARCH_COLUMNS: list[tuple[str, str]] = [
+    # -- momentum FEATURE (must-fix #5) --
+    ("mom_60", "FLOAT64"),
+    ("mom_anchor_date", "DATE"),
+    ("mom_lookback_date", "DATE"),
+    ("mom_lookback_days", "INT64"),
+    # -- regime scan-date FEATURES (must-fix #2; as-of scan_date close, leakage-safe;
+    #    FRED-sourced -> all-NULL on a full FRED-outage batch) --
+    ("vix_at_scan", "FLOAT64"),
+    ("spy_trend_at_scan", "STRING"),
+    ("vix_5d_delta_at_scan", "FLOAT64"),
+    # -- regime entry-close TELEMETRY (must-fix #2; oc_ prefix, realized post-entry;
+    #    also FRED-sourced -> all-NULL on a full FRED-outage batch) --
+    ("oc_vix_at_close", "FLOAT64"),
+    ("oc_spy_trend_at_close", "STRING"),
+    ("oc_vix_5d_delta_at_close", "FLOAT64"),
+    # -- opportunity surface / MFE-MAE (must-fix #6e) --
+    ("opp_window_days", "INT64"),
+    ("opp_status", "STRING"),
+    ("opp_entry_timestamp", "TIMESTAMP"),
+    ("opp_entry_price", "FLOAT64"),
+    ("opp_peak_return", "FLOAT64"),
+    ("opp_trough_return", "FLOAT64"),
+    ("opp_minutes_to_peak", "FLOAT64"),
+    ("opp_minutes_to_trough", "FLOAT64"),
+    ("opp_bar_count", "INT64"),
+    ("opp_sim_version", "STRING"),
+    # -- 3-day bracket label (must-fix #6) --
+    ("realized_return_pct_3d", "FLOAT64"),
+    ("exit_reason_3d", "STRING"),
+    ("exit_day_3d", "DATE"),
+    ("exit_timestamp_3d", "TIMESTAMP"),
+    ("entry_price_3d", "FLOAT64"),
+    ("peak_premium_3d", "FLOAT64"),
+    # -- label-semantics tags (must-fix #6f) --
+    ("label_sim_version", "STRING"),
+    ("label_hold_days", "INT64"),
+    ("label_stop_pct", "FLOAT64"),
+    ("label_target_pct", "FLOAT64"),
+    ("label_3d_sim_version", "STRING"),
+    ("label_3d_hold_days", "INT64"),
+    ("label_3d_stop_pct", "FLOAT64"),
+    ("label_3d_target_pct", "FLOAT64"),
+]
+
+
+def _ensure_enriched_outcomes_columns(
+    client: bigquery.Client, table: str = ENRICHED_OUTCOMES_TABLE
+) -> None:
+    """Idempotently create the must-fix #5/#6 research columns with EXPLICIT types
+    BEFORE any write to ``table`` (BLOCKER A/B fix, 2026-07-01).
+
+    Runs ONE `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` covering every column in
+    ENRICHED_OUTCOMES_RESEARCH_COLUMNS so an all-NULL batch can never leave a column
+    uncreated or STRING-typed (the schema-drift landmine). A no-op once the columns
+    exist. Shared by _write_enriched_outcomes (daily) and the opportunity-surface
+    backfill so both write paths agree on names/types.
+
+    Best-effort: on a benign DDL hiccup we log and let the caller proceed (the
+    downstream staged/atomic write still surfaces a real load error). ``table``
+    defaults to ENRICHED_OUTCOMES_TABLE; a caller may pass an equivalent table
+    string (the backfill uses the same physical table).
+    """
+    adds = ",\n            ".join(
+        f"ADD COLUMN IF NOT EXISTS `{name}` {sqltype}"
+        for name, sqltype in ENRICHED_OUTCOMES_RESEARCH_COLUMNS
+    )
+    ddl = f"ALTER TABLE `{table}`\n            {adds}"
+    try:
+        client.query(ddl).result()
+    except Exception as e:  # noqa: BLE001 — never abort the write on a benign schema no-op
+        logger.warning(
+            f"enriched outcomes schema-ensure failed for {table} "
+            f"(will still attempt write): {e}"
+        )
+
+
 def get_next_trading_day(base_date: date) -> date:
     end_date = base_date + timedelta(days=7)
     schedule = nyse.schedule(start_date=base_date, end_date=end_date)
@@ -577,8 +708,29 @@ def _simulate_contract(
     spy_trend: str | None,
     vix_5d_delta: float | None,
     pick_doc: dict | None,
+    *,
+    hold_days: int = HOLD_DAYS,
+    stop_pct: float = STOP_PCT,
+    target_pct: float = TARGET_PCT,
+    exit_hhmm: str = EXIT_HHMM,
+    use_trail: bool = USE_TRAIL,
+    trail_trigger_pct: float = TRAIL_TRIGGER_PCT,
+    trail_drawdown_pct: float = TRAIL_DRAWDOWN_PCT,
+    fetch_benchmarks: bool = True,
 ) -> dict:
     """Simulate one option contract over the V7 same-day intraday bracket.
+
+    RESEARCH-ONLY mechanics overrides (keyword-only; substrate must-fix #6): the
+    ``hold_days``/``stop_pct``/``target_pct``/``exit_hhmm``/``use_trail``/
+    ``trail_*``/``fetch_benchmarks`` params DEFAULT to the live V7.1 module
+    constants, so EVERY existing call site (the live ledger path in
+    run_forward_paper_trading and the same-day research label in
+    _write_enriched_outcomes) that passes none is BYTE-IDENTICAL to before. They
+    exist only so the research collector can invoke a parallel bracketed 3-day
+    label (HOLD_DAYS=3, +80/-60) WITHOUT a second copy of the touch-walk. Passing
+    fetch_benchmarks=False skips the SPY/IVR/underlying benchmarking fetches (the
+    3-day arm reuses the same-day row's benchmarks). No new keys are added to the
+    returned ``record`` — the live-ledger schema is untouched.
 
     Pure mechanical extraction of the per-ticker simulation body that used to
     live inline in run_forward_paper_trading's HAS_PICK happy path. Builds and
@@ -655,16 +807,17 @@ def _simulate_contract(
     opt_ticker = build_polygon_ticker(row["ticker"], exp_date, row["direction"], float(row["recommended_strike"]))
 
     # V7 mechanics: entry 10:00 ET, same-day hold, flat 15:45 ET on entry_day.
-    # HOLD_DAYS is the number of trading days held inclusive of entry_day.
-    # V7 HOLD_DAYS=1: exit_day = get_nth_next_trading_day(entry_day, 0) == entry_day.
-    exit_day = get_nth_next_trading_day(entry_day, HOLD_DAYS - 1)
+    # hold_days is the number of trading days held inclusive of entry_day
+    # (defaults to the live HOLD_DAYS=1 → exit_day == entry_day). The research
+    # 3-day arm passes hold_days=3 → exit_day = entry_day + 2 trading days.
+    exit_day = get_nth_next_trading_day(entry_day, hold_days - 1)
 
     bars = fetch_minute_bars(opt_ticker, entry_day, exit_day)
     time.sleep(0.2)
 
     entry_dt = datetime.combine(entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time())
     entry_ts_ms = int(est.localize(entry_dt).timestamp() * 1000)
-    timeout_dt = datetime.combine(exit_day, datetime.strptime(EXIT_HHMM, "%H:%M").time())
+    timeout_dt = datetime.combine(exit_day, datetime.strptime(exit_hhmm, "%H:%M").time())
     timeout_ts_ms = int(est.localize(timeout_dt).timestamp() * 1000)
 
     # Find the entry bar (Bug #13 fix, 2026-06-04). The 10:00 ET fill must
@@ -706,10 +859,10 @@ def _simulate_contract(
         record["exit_reason"] = "INVALID_LIQUIDITY"
     else:
         base_entry = entry_bar["c"] * (1.0 + SLIPPAGE_PCT)  # adverse entry slippage
-        # V7 base: -30% option stop AND +40% option target (trail inert, USE_TRAIL=False).
-        stop = base_entry * (1.0 - STOP_PCT)
-        target = base_entry * (1.0 + TARGET_PCT)
-        trail_trigger = base_entry * (1.0 + TRAIL_TRIGGER_PCT)
+        # V7 base: -30% option stop AND +40% option target (trail inert, use_trail=False).
+        stop = base_entry * (1.0 - stop_pct)
+        target = base_entry * (1.0 + target_pct)
+        trail_trigger = base_entry * (1.0 + trail_trigger_pct)
 
         record["entry_timestamp"] = datetime.fromtimestamp(entry_bar["t"]/1000, tz=est).isoformat()
         record["entry_price"] = base_entry
@@ -722,33 +875,36 @@ def _simulate_contract(
         # lookup after the bar-walk.
         stock_bars_for_trade: list = []
         spy_bars_for_trade: list = []
-        try:
-            stock_bars_for_trade = fetch_minute_bars(
-                row["ticker"], entry_day, exit_day
-            )
-            time.sleep(0.1)
-            price = bctx.find_price_at_or_after(
-                stock_bars_for_trade, entry_bar["t"]
-            )
-            record["underlying_entry_price"] = price
-        except Exception as e:
-            logger.warning(f"underlying_entry_price fetch failed for {row['ticker']}: {e}")
+        # fetch_benchmarks=False (research 3-day arm) skips these — the same-day
+        # row already carries the benchmarks; the 3-day arm only needs the label.
+        if fetch_benchmarks:
+            try:
+                stock_bars_for_trade = fetch_minute_bars(
+                    row["ticker"], entry_day, exit_day
+                )
+                time.sleep(0.1)
+                price = bctx.find_price_at_or_after(
+                    stock_bars_for_trade, entry_bar["t"]
+                )
+                record["underlying_entry_price"] = price
+            except Exception as e:
+                logger.warning(f"underlying_entry_price fetch failed for {row['ticker']}: {e}")
 
-        try:
-            spy_bars_for_trade = bctx.get_spy_bars_cached(entry_day, exit_day)
-            record["spy_entry_price"] = bctx.find_price_at_or_after(
-                spy_bars_for_trade, entry_bar["t"]
-            )
-        except Exception as e:
-            logger.warning(f"spy_entry_price fetch failed: {e}")
+            try:
+                spy_bars_for_trade = bctx.get_spy_bars_cached(entry_day, exit_day)
+                record["spy_entry_price"] = bctx.find_price_at_or_after(
+                    spy_bars_for_trade, entry_bar["t"]
+                )
+            except Exception as e:
+                logger.warning(f"spy_entry_price fetch failed: {e}")
 
-        try:
-            ivr, ivp, hv = bctx.fetch_underlying_context(row["ticker"], entry_day)
-            record["iv_rank_entry"] = ivr
-            record["iv_percentile_entry"] = ivp
-            record["hv_20d_entry"] = hv
-        except Exception as e:
-            logger.warning(f"underlying context fetch failed for {row['ticker']}: {e}")
+            try:
+                ivr, ivp, hv = bctx.fetch_underlying_context(row["ticker"], entry_day)
+                record["iv_rank_entry"] = ivr
+                record["iv_percentile_entry"] = ivp
+                record["hv_20d_entry"] = hv
+            except Exception as e:
+                logger.warning(f"underlying context fetch failed for {row['ticker']}: {e}")
         # ------------------------------------------------------------------
 
         # Start the bracket walk at the first bar strictly AFTER 10:00 ET
@@ -820,12 +976,12 @@ def _simulate_contract(
             # activate the trail and stop out on it within the same bar.
             if b["h"] > peak_premium:
                 peak_premium = b["h"]
-                # V7: USE_TRAIL=False -> trail never activates; effective_stop
+                # V7: use_trail=False -> trail never activates; effective_stop
                 # stays the -30% hard stop and the bracket is a flat 3-leg OCO.
-                if USE_TRAIL and peak_premium >= trail_trigger:
+                if use_trail and peak_premium >= trail_trigger:
                     trail_active = True
                 if trail_active:
-                    trail_stop_level = peak_premium * (1.0 - TRAIL_DRAWDOWN_PCT)
+                    trail_stop_level = peak_premium * (1.0 - trail_drawdown_pct)
 
             # Effective stop: the -30% hard stop (trail inert under V7, USE_TRAIL=False).
             effective_stop = trail_stop_level if trail_active else stop
@@ -896,43 +1052,164 @@ def _simulate_contract(
         record["trail_stop_at_exit"] = float(trail_stop_level) if trail_stop_level is not None else None
 
         # ---- Benchmarking exit-side fetches (non-blocking) ----
-        # Reuse the stock and SPY bar lists fetched at entry time.
-        try:
-            stock_exit_px = bctx.find_price_at_or_before(
-                stock_bars_for_trade, exit_ts
-            )
-            record["underlying_exit_price"] = stock_exit_px
-            stock_entry_px = record.get("underlying_entry_price")
-            if (
-                stock_entry_px is not None
-                and stock_exit_px is not None
-                and stock_entry_px > 0
-            ):
-                raw = (stock_exit_px - stock_entry_px) / stock_entry_px
-                sign = 1.0 if str(row["direction"]).upper() == "BULLISH" else -1.0
-                record["underlying_return"] = float(sign * raw)
-        except Exception as e:
-            logger.warning(f"underlying_exit fetch failed for {row['ticker']}: {e}")
-
-        try:
-            spy_exit_px = bctx.find_price_at_or_before(
-                spy_bars_for_trade, exit_ts
-            )
-            record["spy_exit_price"] = spy_exit_px
-            spy_entry_px = record.get("spy_entry_price")
-            if (
-                spy_entry_px is not None
-                and spy_exit_px is not None
-                and spy_entry_px > 0
-            ):
-                record["spy_return_over_window"] = float(
-                    (spy_exit_px - spy_entry_px) / spy_entry_px
+        # Reuse the stock and SPY bar lists fetched at entry time. Skipped when
+        # fetch_benchmarks=False (research 3-day arm) — the lists are empty then.
+        if fetch_benchmarks:
+            try:
+                stock_exit_px = bctx.find_price_at_or_before(
+                    stock_bars_for_trade, exit_ts
                 )
-        except Exception as e:
-            logger.warning(f"spy_exit fetch failed: {e}")
+                record["underlying_exit_price"] = stock_exit_px
+                stock_entry_px = record.get("underlying_entry_price")
+                if (
+                    stock_entry_px is not None
+                    and stock_exit_px is not None
+                    and stock_entry_px > 0
+                ):
+                    raw = (stock_exit_px - stock_entry_px) / stock_entry_px
+                    sign = 1.0 if str(row["direction"]).upper() == "BULLISH" else -1.0
+                    record["underlying_return"] = float(sign * raw)
+            except Exception as e:
+                logger.warning(f"underlying_exit fetch failed for {row['ticker']}: {e}")
+
+            try:
+                spy_exit_px = bctx.find_price_at_or_before(
+                    spy_bars_for_trade, exit_ts
+                )
+                record["spy_exit_price"] = spy_exit_px
+                spy_entry_px = record.get("spy_entry_price")
+                if (
+                    spy_entry_px is not None
+                    and spy_exit_px is not None
+                    and spy_entry_px > 0
+                ):
+                    record["spy_return_over_window"] = float(
+                        (spy_exit_px - spy_entry_px) / spy_entry_px
+                    )
+            except Exception as e:
+                logger.warning(f"spy_exit fetch failed: {e}")
         # --------------------------------------------------------
 
     return record
+
+
+def _multi_day_window_closed(entry_day: date, n_days: int, today_et: date) -> bool:
+    """True iff the [entry_day .. entry_day+(n_days-1) td] window has fully closed
+    by ``today_et`` — i.e. it is safe to read complete bars (no partial-window bar
+    masquerading as a peak/timeout).
+
+    STRICTLY earlier than today (`< today_et`, not `<=`): the MULTI-DAY research arms
+    (opportunity surface + 3-day label) can be filled by an INTRADAY backfill run,
+    unlike the live same-day trader which only fires post-close at 16:30 ET. If the
+    window end were allowed to equal today, an intraday backfill on that exact last
+    window day would read a PARTIAL final session and record a false MFE/MAE peak or
+    3-day timeout. Requiring the window to have ended on a PRIOR trading day
+    guarantees every in-window bar is final regardless of run time. The daily label
+    cron therefore writes opp_status=WINDOW_OPEN for a window ending today and the
+    gated backfill fills it on the next trading day (one-day lag by design)."""
+    return get_nth_next_trading_day(entry_day, n_days - 1) < today_et
+
+
+def _simulate_opportunity_surface(row, entry_day: date, n_days: int = OPP_WINDOW_DAYS) -> dict:
+    """RESEARCH-ONLY 'profit potential' surface: the max favorable (MFE) and max
+    adverse (MAE) excursion of the option premium over [entry_day .. entry_day +
+    (n_days-1) trading days], with NO exit rule applied (substrate must-fix #6e).
+
+    This is the opportunity metric that makes EXIT A FREE VARIABLE per the owner's
+    guiding principle: an agent/owner derives ANY exit rule offline from (peak,
+    trough, minutes-to-each). It is NOT a tradeable label — it is the counterfactual
+    best/worst the contract ever offered while held.
+
+    Leakage-safe: the caller only invokes this once the window has CLOSED, and only
+    bars WITHIN the window are read. The entry cost basis mirrors _simulate_contract
+    (entry-bar close x (1+SLIPPAGE_PCT), first print at/after 10:00 ET) so
+    excursions are relative to a realistic fill; NO exit slippage is applied — the
+    raw achievable path, so the deriving agent applies its own exit costs.
+
+    Reuses build_polygon_ticker + fetch_minute_bars (no duplicate bar plumbing).
+    The compact entry-bar heuristic is kept standalone so the live same-day
+    _simulate_contract is not touched. Never raises: opp_status explains any
+    degenerate case (NO_BARS / INVALID_LIQUIDITY / NO_POST_ENTRY_BARS / ERROR / OK).
+    """
+    out = {
+        "opp_window_days": int(n_days),
+        "opp_status": None,
+        "opp_entry_timestamp": None,
+        "opp_entry_price": None,
+        "opp_peak_return": None,
+        "opp_trough_return": None,
+        "opp_minutes_to_peak": None,
+        "opp_minutes_to_trough": None,
+        "opp_bar_count": None,
+    }
+    try:
+        exp = row["recommended_expiration"]
+        exp_date = exp.date() if isinstance(exp, (datetime, pd.Timestamp)) else exp
+        opt_ticker = build_polygon_ticker(
+            row["ticker"], exp_date, row["direction"], float(row["recommended_strike"])
+        )
+        window_exit_day = get_nth_next_trading_day(entry_day, n_days - 1)
+        bars = fetch_minute_bars(opt_ticker, entry_day, window_exit_day)
+        time.sleep(0.2)
+
+        entry_dt = datetime.combine(entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time())
+        entry_ts_ms = int(est.localize(entry_dt).timestamp() * 1000)
+        end_dt = datetime.combine(window_exit_day, datetime.strptime(OPP_EXIT_HHMM, "%H:%M").time())
+        end_ts_ms = int(est.localize(end_dt).timestamp() * 1000)
+
+        entry_day_bars = [b for b in bars
+                          if datetime.fromtimestamp(b["t"]/1000, tz=est).date() == entry_day]
+        if not entry_day_bars:
+            out["opp_status"] = "NO_BARS"
+            return out
+        after_or_at = [b for b in entry_day_bars if b["t"] >= entry_ts_ms]
+        if after_or_at:
+            entry_bar = after_or_at[0]
+        else:
+            before = [b for b in entry_day_bars if b["t"] < entry_ts_ms]
+            entry_bar = before[-1] if before else None
+        if not entry_bar or entry_bar.get("v", 0) == 0:
+            out["opp_status"] = "INVALID_LIQUIDITY"
+            return out
+
+        base_entry = entry_bar["c"] * (1.0 + SLIPPAGE_PCT)
+        out["opp_entry_price"] = float(base_entry)
+        out["opp_entry_timestamp"] = datetime.fromtimestamp(entry_bar["t"]/1000, tz=est).isoformat()
+
+        # Walk every bar strictly AFTER the entry print, at-or-after the 10:00 ET
+        # entry anchor, and within the window — tracking the highest high (MFE) and
+        # lowest low (MAE). The `>= entry_ts_ms` clause mirrors _simulate_contract's
+        # walk anchor (bars[k]["t"] >= entry_ts_ms and > entry_bar["t"]): when
+        # entry_bar is a PRE-10:00 proxy fill, the pre-10:00 bars between the proxy
+        # and 10:00 must NOT enter the excursion — otherwise a pre-entry bar could
+        # set a false MFE/MAE peak and drive opp_minutes_to_peak/trough negative
+        # (peak_ts < entry_ts_ms). Post-scan realism fix (NOT leakage — the whole
+        # window is already closed). When entry_bar is at/after 10:00 (the normal
+        # case) the `<= entry_bar["t"]` clause already dominates: no behavior change.
+        peak = peak_ts = trough = trough_ts = None
+        n_in_window = 0
+        for b in bars:
+            if b["t"] <= entry_bar["t"] or b["t"] < entry_ts_ms or b["t"] > end_ts_ms:
+                continue
+            n_in_window += 1
+            if peak is None or b["h"] > peak:
+                peak, peak_ts = b["h"], b["t"]
+            if trough is None or b["l"] < trough:
+                trough, trough_ts = b["l"], b["t"]
+        out["opp_bar_count"] = int(n_in_window)
+        if peak is None:
+            out["opp_status"] = "NO_POST_ENTRY_BARS"
+            return out
+        out["opp_peak_return"] = float((peak - base_entry) / base_entry)
+        out["opp_trough_return"] = float((trough - base_entry) / base_entry)
+        out["opp_minutes_to_peak"] = float((peak_ts - entry_ts_ms) / 60000.0)
+        out["opp_minutes_to_trough"] = float((trough_ts - entry_ts_ms) / 60000.0)
+        out["opp_status"] = "OK"
+        return out
+    except Exception as e:  # noqa: BLE001 — research surface must never abort a pool row
+        logger.warning(f"opportunity surface failed for {row.get('ticker')}: {e}")
+        out["opp_status"] = "ERROR"
+        return out
 
 
 def _write_ledger_records(
@@ -1293,36 +1570,124 @@ def _write_intraday_shadow(
 def _write_shadow_records(
     client: bigquery.Client, table: str, target_date: date, rows: list[dict]
 ) -> None:
-    """Idempotent delete-then-load append into an ISOLATED shadow table only.
+    """ATOMIC, schema-drift-safe idempotent replace of one scan_date's rows in an
+    ISOLATED research shadow table only.
+
+    Atomic-write fix (schema-drift landmine — see
+    docs/DECISIONS/2026-07-01-atomic-schema-drift-safe-substrate-write.md): the
+    prior delete-then-load pattern committed the DELETE *before* the load, so a
+    failed/timed-out load (e.g. a new dict key with no matching column under
+    ALLOW_FIELD_ADDITION + autodetect OFF) 500'd AFTER the delete already
+    committed — silently wiping that scan_date's rows with nothing to reload. New
+    rows are now STAGED first, verified, then the target scan_date is replaced
+    inside a single transaction that rolls back on any error, so the original rows
+    always survive a failure. autodetect=True keeps a newly-added feature column
+    from 500-ing the load; any new column is propagated onto the target BEFORE the
+    swap. When no new columns are present this is byte-for-byte equivalent to the
+    old delete-then-overwrite (scan_date fully replaced, no dups).
 
     Mirrors _write_ledger_records' streaming-avoiding load-job pattern but takes
     an explicit ``table`` — deliberately NOT reusing _write_ledger_records (which
     targets LEDGER_TABLE) so the live ledger can never be touched here. Callers
-    must pass a research shadow table (SHADOW_TABLE / SHADOW_INTRADAY_TABLE),
-    NEVER LEDGER_TABLE.
+    must pass a research shadow table (SHADOW_TABLE / SHADOW_INTRADAY_TABLE /
+    ENRICHED_OUTCOMES_TABLE), NEVER LEDGER_TABLE.
     """
+    # Structural guard (hardening 2026-07-01, from must-fix #1's review):
+    # enforce "never write the live ledger via the shadow writer" in CODE, not
+    # just docstring convention. An explicit raise (not assert — asserts are
+    # stripped under -O) so a mis-wired caller fails loudly before any DDL/DML.
+    if table == LEDGER_TABLE:
+        raise ValueError(
+            f"_write_shadow_records refuses to write the live ledger ({LEDGER_TABLE}); "
+            "it is for isolated research tables only (SHADOW_TABLE / "
+            "SHADOW_INTRADAY_TABLE / ENRICHED_OUTCOMES_TABLE)."
+        )
+
     if not rows:
         return
-    delete_query = (
-        f'DELETE FROM `{table}` WHERE scan_date = "{target_date.isoformat()}"'
-    )
-    client.query(delete_query).result()
-    logger.info(f"shadow: deleted prior rows for scan_date={target_date} in {table}")
 
     import io
-    jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
-    load_job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+    import uuid
+
+    scan_date_str = target_date.isoformat()
+    project, dataset, name = table.split(".")
+    staging = (
+        f"{project}.{dataset}._stg_{name}_"
+        f"{scan_date_str.replace('-', '')}_{uuid.uuid4().hex[:8]}"
     )
-    load_job = client.load_table_from_file(
-        io.BytesIO(jsonl.encode("utf-8")),
-        table,
-        job_config=load_job_config,
-    )
-    load_job.result()
-    logger.info(f"shadow: loaded {len(rows)} rows into {table}")
+    # BQ API returns legacy type names (INTEGER/FLOAT/BOOLEAN); DDL wants GoogleSQL.
+    _ddl_type = {"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL"}
+
+    # 1) Clone the target's schema/types (and partitioning) into a fresh staging
+    #    table so the staged load is typed EXACTLY as the live table
+    #    (behavior-preserving). The 1-day expiration self-cleans if a run dies
+    #    before the finally-drop.
+    client.query(
+        f"CREATE TABLE `{staging}` LIKE `{table}` "
+        f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY))"
+    ).result()
+
+    try:
+        # 2) Load new rows into staging. autodetect=True + ALLOW_FIELD_ADDITION
+        #    means a genuinely NEW field is ADDED to staging instead of 500-ing.
+        jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
+        load_job = client.load_table_from_file(
+            io.BytesIO(jsonl.encode("utf-8")),
+            staging,
+            job_config=bigquery.LoadJobConfig(
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+                autodetect=True,
+            ),
+        )
+        load_job.result()  # raises on load failure -> target still untouched
+
+        # 3) Verify the staged load BEFORE we touch the target at all.
+        staged = load_job.output_rows
+        if staged != len(rows):
+            raise RuntimeError(
+                f"shadow staging row-count mismatch for {table} "
+                f"scan_date={scan_date_str}: staged {staged} != built {len(rows)}"
+            )
+
+        # 4) Propagate any newly-added columns onto the target BEFORE the swap so
+        #    the INSERT column lists line up (schema-drift safety on the live table).
+        staging_fields = client.get_table(staging).schema
+        target_names = {f.name for f in client.get_table(table).schema}
+        add_cols = [f for f in staging_fields if f.name not in target_names]
+        if add_cols:
+            adds = ", ".join(
+                f"ADD COLUMN IF NOT EXISTS `{f.name}` "
+                f"{_ddl_type.get(f.field_type, f.field_type)}"
+                for f in add_cols
+            )
+            client.query(f"ALTER TABLE `{table}` {adds}").result()
+            logger.info(
+                f"shadow: added {len(add_cols)} new column(s) to {table}: "
+                + ", ".join(f.name for f in add_cols)
+            )
+
+        # 5) Atomic replace: DELETE the scan_date rows, then INSERT from staging,
+        #    in a single transaction. Any failure rolls back the DELETE, so the
+        #    original rows are never lost.
+        cols = ", ".join(f"`{f.name}`" for f in staging_fields)
+        client.query(
+            "BEGIN TRANSACTION;\n"
+            f'DELETE FROM `{table}` WHERE scan_date = "{scan_date_str}";\n'
+            f"INSERT INTO `{table}` ({cols}) SELECT {cols} FROM `{staging}`;\n"
+            "COMMIT TRANSACTION;"
+        ).result()
+        logger.info(
+            f"shadow: atomically replaced scan_date={scan_date_str} in {table} "
+            f"with {len(rows)} row(s)"
+        )
+    finally:
+        # 6) Best-effort staging drop (the OPTIONS expiration is the safety net).
+        try:
+            client.query(f"DROP TABLE IF EXISTS `{staging}`").result()
+        except Exception as e:  # noqa: BLE001 — cleanup must never mask the real result
+            logger.warning(f"shadow: staging cleanup failed for {staging} (non-fatal): {e}")
 
 
 def get_previous_trading_day(base_date: date) -> date:
@@ -1378,6 +1743,27 @@ def _coerce_int(v):
         return None
 
 
+def _coerce_date(v):
+    """pandas Timestamp / datetime / date / ISO string -> datetime.date, else None.
+
+    Used for the persisted mom_60 audit dates (mom_anchor_date/mom_lookback_date)
+    so they load cleanly into BQ DATE columns (json default=str on a date yields
+    an ISO 'YYYY-MM-DD' literal; a bare Timestamp would carry a time component)."""
+    try:
+        if v is None or pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        return None
+    if isinstance(v, (datetime, pd.Timestamp)):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
 def _write_enriched_outcomes(
     client: bigquery.Client,
     target_date: date,
@@ -1386,6 +1772,9 @@ def _write_enriched_outcomes(
     vix_level: float | None,
     spy_trend: str | None,
     vix_5d_delta: float | None,
+    scan_vix: float | None,
+    scan_spy_trend: str | None,
+    scan_vix_5d_delta: float | None,
     tournament_ticker: str | None,
 ) -> dict:
     """Replay the bracket over the FULL enriched BULLISH pool for one scan_date.
@@ -1401,10 +1790,34 @@ def _write_enriched_outcomes(
     Outcome columns are produced by the same forward-looking bracket replay the
     live trader uses, and stored in their own column group as labels.
 
+    Regime is split by as-of (leakage-fix 2026-07-01, substrate must-fix #2):
+    the ``scan_*`` args are the SCAN_DATE-close regime — the point-in-time FEATURE
+    the model may condition on (persisted vix_at_scan/spy_trend_at_scan/
+    vix_5d_delta_at_scan). The ``vix_level``/``spy_trend``/``vix_5d_delta`` args are
+    the ENTRY-day-close regime — realized AFTER the same-day trade closes, so they
+    are persisted ONLY as oc_*_at_close TELEMETRY (benchmarking), NEVER as features.
+
     Returns a summary dict {pool_size, labeled, wins, losses}. Does not raise on
     a per-row simulation error — that row is skipped and counted in `errors`.
     """
     bull_filter = 'AND UPPER(direction) = "BULLISH"' if ENRICHED_OUTCOMES_BULLISH_ONLY else ""
+
+    # Schema-aware mom_60 selection (substrate must-fix #5): the enrichment writer
+    # adds mom_60/mom_anchor_date/mom_lookback_date/mom_lookback_days on its first
+    # post-deploy run, but this labeler may run against a table that predates them
+    # (deploy ordering / backfill of old scan_dates). Select each column only when
+    # it exists, else NULL AS <col>, so the labeler is self-healing and never 500s
+    # on a missing column. These flow through to enriched_option_outcomes as
+    # point-in-time FEATURES (NULL for names/dates without a persisted momentum).
+    enriched_src = f"{PROJECT_ID}.profit_scout.overnight_signals_enriched"
+    try:
+        _src_cols = {f.name for f in client.get_table(enriched_src).schema}
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"enriched outcomes: schema probe of {enriched_src} failed ({e}); assuming no mom cols")
+        _src_cols = set()
+    _mom_cols = ["mom_60", "mom_anchor_date", "mom_lookback_date", "mom_lookback_days"]
+    mom_select = ", ".join(c if c in _src_cols else f"NULL AS {c}" for c in _mom_cols)
+
     pool_sql = f"""
     SELECT
         ticker, scan_date, direction, recommended_contract, recommended_strike,
@@ -1414,8 +1827,9 @@ def _write_enriched_outcomes(
         recommended_delta, recommended_gamma, recommended_theta, recommended_vega,
         recommended_iv, risk_reward_ratio, atr_normalized_move, moneyness_pct,
         volume_oi_ratio, call_dollar_volume, put_dollar_volume,
-        underlying_price, atr_14, rsi_14, vix3m_at_enrich
-    FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+        underlying_price, atr_14, rsi_14, vix3m_at_enrich,
+        {mom_select}
+    FROM `{enriched_src}`
     WHERE DATE(scan_date) = "{target_date}"
       {bull_filter}
       AND recommended_strike IS NOT NULL
@@ -1444,6 +1858,17 @@ def _write_enriched_outcomes(
     tour_ticker = (tournament_ticker or "").upper()
 
     labeled_at = datetime.now(est)
+
+    # Opportunity-surface + 3-day-label window gating (substrate must-fix #6). These
+    # RESEARCH arms need a CLOSED multi-day window; a fresh scan_date labeled by the
+    # daily cron still has an OPEN window, so they write NULLs now (opp_status=
+    # WINDOW_OPEN) and are filled later by the gated backfill / a lagged re-label.
+    # Depends only on entry_day, so computed once per pool.
+    today_et = datetime.now(est).date()
+    opp_closed = OPP_SURFACE_ENABLED and _multi_day_window_closed(entry_day, OPP_WINDOW_DAYS, today_et)
+    exit_day_3d = get_nth_next_trading_day(entry_day, LABEL_3D_HOLD_DAYS - 1)
+    d3_closed = LABEL_3D_ENABLED and _multi_day_window_closed(entry_day, LABEL_3D_HOLD_DAYS, today_et)
+
     rows: list[dict] = []
     wins = losses = errors = 0
     for _, prow in pool_df.iterrows():
@@ -1458,6 +1883,26 @@ def _write_enriched_outcomes(
             errors += 1
             logger.warning(f"enriched outcomes: sim failed for {prow.get('ticker')} on {target_date}: {e}")
             continue
+
+        # ---- Opportunity surface (MFE/MAE) — exit is a FREE VARIABLE ----------
+        opp_d = (
+            _simulate_opportunity_surface(prow, entry_day, OPP_WINDOW_DAYS)
+            if opp_closed else {}
+        )
+        # ---- Interim bracketed 3-day label (own horizon; -60/+80, HOLD=3) -----
+        rec3_d: dict = {}
+        if d3_closed:
+            try:
+                rec3_d = _simulate_contract(
+                    client, prow, entry_day, exit_day_3d,
+                    vix_level, spy_trend, vix_5d_delta, pick_doc=None,
+                    hold_days=LABEL_3D_HOLD_DAYS, stop_pct=LABEL_3D_STOP_PCT,
+                    target_pct=LABEL_3D_TARGET_PCT, exit_hhmm=LABEL_3D_EXIT_HHMM,
+                    use_trail=False, fetch_benchmarks=False,
+                )
+            except Exception as e:  # noqa: BLE001 — one bad 3-day sim must not abort the pool
+                logger.warning(f"enriched outcomes: 3-day sim failed for {prow.get('ticker')} on {target_date}: {e}")
+                rec3_d = {}
 
         ret = rec.get("realized_return_pct")
         if ret is not None:
@@ -1502,11 +1947,19 @@ def _write_enriched_outcomes(
             "underlying_price": _coerce_float(prow["underlying_price"]),
             "atr_14": _coerce_float(prow["atr_14"]),
             "rsi_14": _coerce_float(prow["rsi_14"]),
-            # ---- REGIME (point-in-time) ----
-            "VIX_at_entry": rec["VIX_at_entry"],
-            "SPY_trend_state": rec["SPY_trend_state"],
-            "vix_5d_delta_entry": rec["vix_5d_delta_entry"],
-            "vix3m_at_enrich": _coerce_float(prow["vix3m_at_enrich"]),
+            # 60-day underlying momentum FEATURE (substrate must-fix #5) — the
+            # flagship finding's headline lever, point-in-time (anchor + lookback
+            # both <= scan_date). NULL for names without a persisted mom_60.
+            "mom_60": _coerce_float(prow["mom_60"]),
+            "mom_anchor_date": _coerce_date(prow["mom_anchor_date"]),
+            "mom_lookback_date": _coerce_date(prow["mom_lookback_date"]),
+            "mom_lookback_days": _coerce_int(prow["mom_lookback_days"]),
+            # ---- REGIME FEATURES (as-of SCAN_DATE close = the decision point) ----
+            # Leakage-fix 2026-07-01 (substrate must-fix #2): SAFE as model inputs.
+            "vix_at_scan": float(scan_vix) if scan_vix is not None else None,
+            "spy_trend_at_scan": scan_spy_trend,
+            "vix_5d_delta_at_scan": float(scan_vix_5d_delta) if scan_vix_5d_delta is not None else None,
+            "vix3m_at_enrich": _coerce_float(prow["vix3m_at_enrich"]),  # scan-time (enrich)
             # ---- OUTCOME (realized labels) ----
             "entry_timestamp": rec["entry_timestamp"],
             "entry_price": rec["entry_price"],
@@ -1531,6 +1984,51 @@ def _write_enriched_outcomes(
             "spy_entry_price": rec["spy_entry_price"],
             "spy_exit_price": rec["spy_exit_price"],
             "spy_return_over_window": rec["spy_return_over_window"],
+            # ---- REGIME TELEMETRY (entry-day CLOSE — NOT a feature) ----
+            # Realized AFTER the same-day trade closes; retained for benchmarking
+            # only. NEVER feed these back as model inputs (use the vix_at_scan/
+            # spy_trend_at_scan/vix_5d_delta_at_scan FEATURES above instead).
+            "oc_vix_at_close": rec["VIX_at_entry"],
+            "oc_spy_trend_at_close": rec["SPY_trend_state"],
+            "oc_vix_5d_delta_at_close": rec["vix_5d_delta_entry"],
+            # ---- OPPORTUNITY SURFACE (must-fix #6e — exit is a FREE VARIABLE) ----
+            # The raw MFE/MAE the contract offered over the multi-day window with NO
+            # exit rule. NOT a tradeable label: an agent derives ANY exit offline.
+            # opp_status=WINDOW_OPEN => the window had not closed at label time
+            # (fresh scan_date); fill via the gated backfill once it closes.
+            "opp_window_days": opp_d.get("opp_window_days", OPP_WINDOW_DAYS),
+            "opp_status": opp_d.get("opp_status")
+                          or ("WINDOW_OPEN" if OPP_SURFACE_ENABLED else "DISABLED"),
+            "opp_entry_timestamp": opp_d.get("opp_entry_timestamp"),
+            "opp_entry_price": opp_d.get("opp_entry_price"),
+            "opp_peak_return": opp_d.get("opp_peak_return"),     # max favorable excursion
+            "opp_trough_return": opp_d.get("opp_trough_return"),  # max adverse excursion
+            "opp_minutes_to_peak": opp_d.get("opp_minutes_to_peak"),
+            "opp_minutes_to_trough": opp_d.get("opp_minutes_to_trough"),
+            "opp_bar_count": opp_d.get("opp_bar_count"),
+            "opp_sim_version": OPP_SIM_VERSION,
+            # ---- 3-DAY BRACKET LABEL (own horizon; NEVER mix with same-day) ------
+            # A parallel -60%/+80%/HOLD=3 bracket via _simulate_contract overrides;
+            # this is the horizon the flagship mom_60 finding lives on. NULL until
+            # the 3-day window closes.
+            "realized_return_pct_3d": rec3_d.get("realized_return_pct"),
+            "exit_reason_3d": rec3_d.get("exit_reason"),
+            "exit_day_3d": (exit_day_3d if d3_closed else None),
+            "exit_timestamp_3d": rec3_d.get("exit_timestamp"),
+            "entry_price_3d": rec3_d.get("entry_price"),
+            "peak_premium_3d": rec3_d.get("peak_premium"),
+            # ---- LABEL-SEMANTICS TAGS (telemetry; must-fix #6f) -----------------
+            # Persist the EXACT mechanics that produced each label group so horizons
+            # never silently mix. Do NOT infer horizon from policy_version (a
+            # hardcoded constant on every row incl. backfill).
+            "label_sim_version": LABEL_SAMEDAY_SIM_VERSION,
+            "label_hold_days": int(HOLD_DAYS),
+            "label_stop_pct": float(STOP_PCT),
+            "label_target_pct": float(TARGET_PCT),
+            "label_3d_sim_version": (LABEL_3D_SIM_VERSION if d3_closed else None),
+            "label_3d_hold_days": (int(LABEL_3D_HOLD_DAYS) if d3_closed else None),
+            "label_3d_stop_pct": (float(LABEL_3D_STOP_PCT) if d3_closed else None),
+            "label_3d_target_pct": (float(LABEL_3D_TARGET_PCT) if d3_closed else None),
             # ---- LINKAGE / META ----
             "was_tournament_pick": (row_ticker == tour_ticker) if tour_ticker else False,
             "was_topscore_pick": (row_ticker == topscore_ticker),
@@ -1539,6 +2037,39 @@ def _write_enriched_outcomes(
             "labeled_at": labeled_at,
         }
         rows.append(out)
+
+    # Decide "degraded" BEFORE writing (BLOCKER-2, 2026-07-01). On a real NYSE
+    # trading day a pool that produced ZERO realized outcomes (every candidate
+    # NULL-labeled — the Polygon minute-bar outage / all-INVALID_LIQUIDITY shape)
+    # must NOT be written: the atomic replace below would overwrite GOOD prior
+    # labels for this scan_date with all-NULL rows and only THEN 500 upstream, so a
+    # deliberate re-label during an outage silently destroyed good data. Skip the
+    # write entirely, leave the table untouched, and report the degraded shape so
+    # run_label_enriched_pool releases the per-scan_date claim and returns the 500.
+    #   - pool_size==0 already returned above (never reaches here).
+    #   - labeled==0 => rows empty => the write no-ops regardless (kept behavior).
+    #   - realized>0 (a healthy day) writes exactly as before, incl. the #5/#6
+    #     mom_60 / opportunity-surface / 3-day-label columns.
+    #   - a non-trading-day backfill (is_trading_day False) is a legitimate pool
+    #     and still writes.
+    realized = wins + losses
+    if is_trading_day(target_date) and realized == 0:
+        logger.error(
+            f"enriched outcomes {target_date}: DEGRADED pool "
+            f"(labeled={len(rows)}/{pool_size}, wins={wins} losses={losses} "
+            f"errors={errors}, realized=0); SKIPPING write to preserve existing "
+            f"rows — NOT touching {ENRICHED_OUTCOMES_TABLE}."
+        )
+        return {"pool_size": pool_size, "labeled": len(rows), "wins": wins,
+                "losses": losses, "errors": errors, "degraded_skip_write": True}
+
+    # BLOCKER A (2026-07-01): create the must-fix #5/#6 research columns with
+    # EXPLICIT types BEFORE the write. These are frequently all-NULL on a batch
+    # (mom_60 for names without a persisted momentum; the whole opp/3d group while
+    # the window is open), so the atomic-write autodetect path can't infer their
+    # type and would drop them or mistype them as STRING (the schema-drift
+    # landmine). Idempotent — a no-op once the columns exist. Runs ONCE per pass.
+    _ensure_enriched_outcomes_columns(client, ENRICHED_OUTCOMES_TABLE)
 
     # Idempotent delete-then-load into the research table ONLY (never LEDGER_TABLE).
     _write_shadow_records(client, ENRICHED_OUTCOMES_TABLE, target_date, rows)
@@ -1549,6 +2080,117 @@ def _write_enriched_outcomes(
     )
     return {"pool_size": pool_size, "labeled": len(rows), "wins": wins,
             "losses": losses, "errors": errors}
+
+
+def claim_label_pool_run(scan_date: date) -> bool:
+    """Atomically claim the right to label ``scan_date``'s enriched pool.
+
+    Prevents a concurrent daily-cron + manual/backfill double-run on the SAME
+    scan_date from racing the atomic write (substrate must-fix #7d). Mirrors
+    signal-notifier's claim_email_send transactional-claim pattern, but keyed on
+    ``scan_date`` (the unit of work here) rather than the ET run-day.
+
+    Returns True if THIS caller acquired the claim (proceed to label), False if a
+    prior/concurrent run already holds it (skip — idempotent no-op). Fail-OPEN: a
+    Firestore outage returns True so labeling still runs (a dup is caught by the
+    atomic replace + the post-write uniqueness guard; a missed label is the worse
+    harm).
+
+    OPERATOR: to force a deliberate re-label, delete label_pool_runs/{scan_date}.
+    """
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        claim_ref = db.collection("label_pool_runs").document(scan_date.isoformat())
+
+        @firestore.transactional
+        def _claim(txn) -> bool:
+            snap = claim_ref.get(transaction=txn)
+            if snap.exists:
+                return False
+            txn.set(claim_ref, {
+                "scan_date": scan_date.isoformat(),
+                "claimed_at": firestore.SERVER_TIMESTAMP,
+                "status": "in_progress",
+            })
+            return True
+
+        return _claim(db.transaction())
+    except Exception as e:
+        logger.error(f"claim_label_pool_run failed for {scan_date} (fail-open, will label): {e}")
+        return True
+
+
+def release_label_pool_run(scan_date: date) -> None:
+    """Delete the label-pool claim doc so a FAILED run can be retried (must-fix #7d).
+
+    Called only on a degraded/empty pool or an exception mid-run — a successful
+    run leaves the claim in place (status=done) so a same-scan_date re-run is an
+    idempotent skip. Best-effort: a leftover claim only blocks re-runs, and the
+    escape hatch (delete label_pool_runs/{scan_date}) still applies.
+    """
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        db.collection("label_pool_runs").document(scan_date.isoformat()).delete()
+        logger.info(f"label pool: released claim label_pool_runs/{scan_date.isoformat()}")
+    except Exception as e:  # noqa: BLE001 — release is best-effort
+        logger.warning(f"release_label_pool_run failed for {scan_date} (non-fatal): {e}")
+
+
+def _mark_label_pool_done(scan_date: date, summary: dict) -> None:
+    """Best-effort: mark the claim doc done so operators can tell a completed run
+    from a stuck in-progress one (substrate must-fix #7d). Telemetry only."""
+    try:
+        db = firestore.Client(project=PROJECT_ID)
+        db.collection("label_pool_runs").document(scan_date.isoformat()).set({
+            "status": "done",
+            "done_at": firestore.SERVER_TIMESTAMP,
+            "pool_size": int(summary.get("pool_size", 0)),
+            "labeled": int(summary.get("labeled", 0)),
+            "wins": int(summary.get("wins", 0)),
+            "losses": int(summary.get("losses", 0)),
+            "dup_groups": int(summary.get("dup_groups", 0)),
+        }, merge=True)
+    except Exception as e:  # noqa: BLE001 — telemetry only
+        logger.warning(f"_mark_label_pool_done failed for {scan_date} (non-fatal): {e}")
+
+
+def _assert_outcomes_unique(client: bigquery.Client, target_date: date) -> int:
+    """Post-write uniqueness guard for enriched_option_outcomes (must-fix #7c).
+
+    Read-only SELECT counting (scan_date, ticker, recommended_contract) groups
+    with COUNT(*) > 1 for this scan_date. The atomic write path replaces the whole
+    scan_date, so THIS run cannot dup — any duplicate here originates UPSTREAM (a
+    doubled overnight_signals_enriched scan_date, e.g. the confirmed 2026-06-10
+    case) that the collector faithfully copied. Logs LOUDLY (error) when dups
+    exist so the condition can never pass silently. Returns the number of
+    duplicated groups (0 == clean). Never raises — a lookup failure logs + returns 0.
+    """
+    sql = f"""
+    SELECT COUNT(*) AS dup_groups FROM (
+        SELECT scan_date, ticker, recommended_contract
+        FROM `{ENRICHED_OUTCOMES_TABLE}`
+        WHERE scan_date = "{target_date.isoformat()}"
+        GROUP BY scan_date, ticker, recommended_contract
+        HAVING COUNT(*) > 1
+    )
+    """
+    try:
+        rows = list(client.query(sql).result())
+        dup_groups = int(rows[0]["dup_groups"]) if rows else 0
+    except Exception as e:  # noqa: BLE001 — guard must not break the label run
+        logger.warning(f"enriched outcomes: uniqueness check failed for {target_date} (non-fatal): {e}")
+        return 0
+    if dup_groups > 0:
+        logger.error(
+            f"enriched outcomes: UNIQUENESS VIOLATION for {target_date} — {dup_groups} "
+            f"(scan_date,ticker,recommended_contract) group(s) with COUNT(*)>1. This is "
+            f"an UPSTREAM duplication (overnight_signals_enriched doubled for this "
+            f"scan_date) faithfully copied by the collector. Dedup source + re-label: "
+            f"scripts/ledger_and_tracking/dedup_enriched_060_source.py."
+        )
+    else:
+        logger.info(f"enriched outcomes: uniqueness OK for {target_date} (0 dup groups)")
+    return dup_groups
 
 
 def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]:
@@ -1572,23 +2214,100 @@ def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]
         return False, (f"Exit day {exit_day} is in the future; hold window not closed, "
                        f"refusing to label.")
 
-    vix_level, spy_trend, vix_5d_delta = get_regime_context(entry_day)
+    # Per-scan_date claim/lock (substrate must-fix #7d) — acquired AFTER the
+    # timing guards (don't claim a window we won't label) but BEFORE the expensive
+    # FRED/Polygon regime fetches + the atomic write. Blocks a concurrent
+    # daily-cron + manual/backfill double-run on the SAME scan_date. Idempotent
+    # skip if already held; escape hatch = delete label_pool_runs/{scan_date}.
+    if not claim_label_pool_run(target_date):
+        logger.info(
+            f"label pool: {target_date} already claimed/labeled; skipping "
+            f"(delete label_pool_runs/{target_date.isoformat()} to force a re-run)."
+        )
+        return True, {"scan_date": target_date.isoformat(), "entry_day": entry_day.isoformat(),
+                      "exit_day": exit_day.isoformat(), "skipped": True,
+                      "skip_reason": "already_claimed",
+                      "pool_size": 0, "labeled": 0, "wins": 0, "losses": 0, "errors": 0}
 
-    # Best-effort lookup of the live tournament pick for linkage (None on any
-    # failure — backfill of old dates still has todays_pick docs dual-written).
-    tournament_ticker = None
     try:
-        _, _, tournament_ticker = _fetch_todays_pick(target_date)
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"enriched outcomes: todays_pick lookup failed for {target_date}: {e}")
+        # Entry-day CLOSE regime — telemetry only (realized AFTER the same-day
+        # trade closes). Feeds _simulate_contract's rec[VIX_at_entry]/... which we
+        # persist to the oc_*_at_close TELEMETRY columns, never as a feature.
+        vix_level, spy_trend, vix_5d_delta = get_regime_context(entry_day)
 
-    client = bigquery.Client(project=PROJECT_ID)
-    summary = _write_enriched_outcomes(
-        client, target_date, entry_day, exit_day,
-        vix_level, spy_trend, vix_5d_delta, tournament_ticker,
-    )
-    return True, {"scan_date": target_date.isoformat(), "entry_day": entry_day.isoformat(),
-                  "exit_day": exit_day.isoformat(), **summary}
+        # SCAN_DATE regime FEATURE — the point-in-time context the model may
+        # CONDITION ON. Selection happens at scan-time (overnight into entry_day),
+        # so the real decision-point regime is as-of scan_date's close, NOT
+        # entry-day close. get_regime_context filters bars `<= target_ts`
+        # internally, so anchoring it to scan_date GUARANTEES the anchor bar is
+        # <= scan_date (the leakage guard, mirroring the technicals window-bound).
+        # This is also deterministic between the daily cron and backfill —
+        # scan_date's close is always published by label time, so cron/backfill
+        # agree (the old entry-day anchor drifted).
+        # See docs/DECISIONS/2026-07-01-regime-scan-date-leakage-fix.md.
+        scan_vix, scan_spy_trend, scan_vix_5d_delta = get_regime_context(target_date)
+
+        # Best-effort lookup of the live tournament pick for linkage (None on any
+        # failure — backfill of old dates still has todays_pick docs dual-written).
+        tournament_ticker = None
+        try:
+            _, _, tournament_ticker = _fetch_todays_pick(target_date)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"enriched outcomes: todays_pick lookup failed for {target_date}: {e}")
+
+        client = bigquery.Client(project=PROJECT_ID)
+        summary = _write_enriched_outcomes(
+            client, target_date, entry_day, exit_day,
+            vix_level, spy_trend, vix_5d_delta,
+            scan_vix, scan_spy_trend, scan_vix_5d_delta,
+            tournament_ticker,
+        )
+
+        # Post-write uniqueness assertion (substrate must-fix #7c) — read-only.
+        # Surfaces any UPSTREAM (scan_date,ticker,contract) duplication the
+        # collector faithfully copied (the atomic write can't dup this run's rows).
+        summary["dup_groups"] = _assert_outcomes_unique(client, target_date)
+
+        # Empty/degraded pool = FAILURE (substrate must-fix #3a). On a real NYSE
+        # trading day, a pool with no candidates (pool_size==0), nothing written
+        # (labeled==0), or ZERO realized outcomes (a Polygon minute-bar outage
+        # that yields all-INVALID_LIQUIDITY / NULL-label rows — the confirmed root
+        # cause of the two permanent holes) is a silent degradation, NOT a
+        # success: return non-2xx so the cron/monitor pages instead of swallowing
+        # it. Release the claim so the next Scheduler retry re-attempts. A
+        # non-trading-day target (backfill of a weekend/holiday) is a legitimate
+        # empty pool and still returns success.
+        #
+        # BLOCKER-2 (2026-07-01): the realized==0 degraded case is now detected
+        # INSIDE _write_enriched_outcomes, which SKIPS the atomic write (leaving
+        # any existing GOOD rows for this scan_date untouched) and returns
+        # degraded_skip_write=True. So by the time we reach here the table has NOT
+        # been overwritten with NULLs; this block only handles the claim-release +
+        # 500 so the failure is surfaced. (pool_size==0 also skips the write via
+        # the early return in _write_enriched_outcomes.)
+        realized = int(summary.get("wins", 0)) + int(summary.get("losses", 0))
+        if is_trading_day(target_date) and (
+            summary.get("pool_size", 0) == 0
+            or summary.get("labeled", 0) == 0
+            or realized == 0
+        ):
+            release_label_pool_run(target_date)
+            msg = (f"enriched outcomes: DEGRADED/EMPTY pool for trading day {target_date} "
+                   f"(pool_size={summary.get('pool_size')}, labeled={summary.get('labeled')}, "
+                   f"realized={realized}); failing so it is not silently swallowed.")
+            logger.error(msg)
+            return False, {"error": msg, "scan_date": target_date.isoformat(),
+                           "entry_day": entry_day.isoformat(),
+                           "exit_day": exit_day.isoformat(), **summary}
+
+        _mark_label_pool_done(target_date, summary)
+        return True, {"scan_date": target_date.isoformat(), "entry_day": entry_day.isoformat(),
+                      "exit_day": exit_day.isoformat(), **summary}
+    except Exception:
+        # A hard failure mid-run must not leave a stuck claim that blocks the next
+        # Scheduler retry. Release the claim, then re-raise (endpoint returns 500).
+        release_label_pool_run(target_date)
+        raise
 
 
 def run_iv_cache_update():
