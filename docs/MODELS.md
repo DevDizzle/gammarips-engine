@@ -2,8 +2,10 @@
 
 > **Last updated:** 2026-06-04 (tournament). V6 "Tournament" launched — the ranker
 > is now a randomized bracket **tournament** (`tournament_v1`, version 7) at the
-> `signal-judge` service; V5.4 retired, ledger truncated, `policy_version='V6_TOURNAMENT'`.
-> No Scorer/Picker stages, no `judge_v6`, no memory/rubric/composite weights.
+> `signal-judge` service; V5.4 retired, ledger truncated. No Scorer/Picker stages,
+> no `judge_v6`, no memory/rubric/composite weights. (The SELECTION picker is unchanged
+> since 2026-06-04; V7 (2026-06-17) and V7.1 (2026-06-19) changed only the trade EXIT and
+> the ledger `policy_version` — now `V7_1_TILTED_GIGO` — **not** the model registry below.)
 > This is the authoritative map of which model powers which function. Keep it in
 > sync whenever a model id changes. Model ids are **env-driven** (see "How to swap" below);
 > the defaults below are what ships in each service's `deploy.sh` / code.
@@ -67,7 +69,8 @@ The general-purpose workhorse for everything that writes prose:
    `JUDGE_MODEL` and both `*_prompt_version` columns hold `7`. Segment EV by the `signal_ranker_runs`
    cohort label and **do not pool across boundaries**: **5 = two-stage Scorer/Picker, 6 = single
    `judge_v6` (2026-06-04 only), 7 = `tournament_v1`** (live). Ledger rows carry
-   `policy_version='V6_TOURNAMENT'`; pre-V6 rows were truncated at launch.
+   `policy_version='V7_1_TILTED_GIGO'` (V7.1 changed the trade EXIT, not the picker — the
+   tournament selection cohort label `7` is unchanged); prior cohorts were truncated at each cutover.
 
 ## How to swap a model (one line, no code edit)
 

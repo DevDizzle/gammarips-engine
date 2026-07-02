@@ -80,7 +80,7 @@ transaction is atomic and schema-drift-safe regardless of partitioning.
 ## 2026-07-02 CORRECTION — `autodetect=True` broke the LIVE enrichment (pick outage)
 
 **What happened.** This design was deployed 2026-07-01 (`enrichment-trigger-00046-stt`).
-The FIRST run under it (2026-07-02 09:38 ET, enriching scan_date 2026-07-01) crashed
+The FIRST run under it (2026-07-02 ~05:38 ET / 09:38 UTC — the 05:30 cron, enriching scan_date 2026-07-01) crashed
 the whole load:
 
 ```

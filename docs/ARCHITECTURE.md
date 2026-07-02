@@ -11,7 +11,7 @@ Core scoring and overnight signal generation.
 Scanner-facing package / service wrapper for market-wide overnight options flow scanning.
 
 ### `enrichment-trigger/`
-Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 1`, `recommended_spread_pct <= 0.30` (loosened from 0.08 on 2026-06-04 once spreads became real), directional UOA > $500K. Writes to `overnight_signals_enriched`. Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~70 tickers/day, ~9 minute runtime.
+Enrichment service for news, technicals, and AI-generated context. Reads from `overnight_signals` with `overnight_score >= 4` and directional UOA > $500K (**spread gate RETIRED 2026-06-05** — this Polygon plan serves no quotes, `recommended_spread_pct` is permanently NULL), then **edge-ranks + grounds only the top-50 BULLISH** names (`thinking_budget=0`). Writes to `overnight_signals_enriched` via an atomic schema-drift-safe path (**never `autodetect`** — that broke every load 2026-07-02). Cloud Scheduler `enrichment-trigger-daily` fires at 05:30 ET Mon-Fri. ~50 tickers/day.
 
 ### `overnight-report-generator/`
 Daily report generation for the overnight signal set.
@@ -28,7 +28,7 @@ Builds the **full** enriched candidate pool from `overnight_signals_enriched` �
 ### `forward-paper-trader/`
 Cloud Run service for forward paper-trading and IV cache maintenance. Single container, two endpoints:
 
-- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V6 Tournament** policy (Target-80 trader mechanics unchanged) (`10:00 ET entry, −60% stop, +80% target, 3-day hold, 15:50 ET exit`; STOP wins on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V6_TOURNAMENT` (ledger truncated 2026-06-04). No trader-side filters — signal-quality lives upstream in `signal-judge` / `signal-notifier`.
+- **`POST /`** — daily paper trading trigger (Cloud Scheduler `forward-paper-trader-trigger`, 16:30 ET Mon-Fri). Reads all enriched signals from `overnight_signals_enriched`, simulates the **V7.1 Tilted GIGO** policy (`10:00 ET entry, +40% target / −30% stop, same-day, flat 15:45 ET`, no trail; TIMEOUT>STOP>TARGET on ambiguous bars) against Polygon minute bars, writes to `forward_paper_ledger` tagged `policy_version = V7_1_TILTED_GIGO` (cohort since 2026-06-26). No trader-side filters — signal-quality lives upstream in `signal-judge` / `signal-notifier`.
 - **`POST /cache_iv`** — daily IV cache refresh (Cloud Scheduler `polygon-iv-cache-daily`, 16:30 ET Mon-Fri). Pulls trailing-30-day watchlist, fetches each underlying's options chain via Polygon, computes ATM ~30-DTE IV, appends to `polygon_iv_history`.
 - **`benchmark_context.py`** — non-blocking helper module. Hosts: FRED VIX CSV fetcher, Polygon options-chain fetcher, ATM IV extractor, HV-20d compute, SPY minute-bar cache, price-at-timestamp locators, and BigQuery IV rank query. Every function returns `None` on failure — benchmarking cannot block a trade.
 
@@ -59,10 +59,10 @@ Shared content lib vendored at deploy time into `x-poster` + `blog-generator` (a
 ## Data flow
 
 1. Overnight scanner produces signal candidates in `overnight_signals`.
-2. `enrichment-trigger` enriches signals with `overnight_score >= 1`, `recommended_spread_pct <= 0.08`, and directional UOA > $500K. Writes to `overnight_signals_enriched`. ~70 tickers/day.
+2. `enrichment-trigger` enriches signals with `overnight_score >= 4` and directional UOA > $500K (spread gate retired 2026-06-05), edge-ranking + grounding the top-50 BULLISH names. Writes to `overnight_signals_enriched`. ~50 tickers/day.
 3. `overnight-report-generator` adds the daily report (regime + narrative context the tournament reads).
 4. `signal-notifier` builds the **full** enriched candidate pool — selection gates removed 2026-06-04, only the no-earnings-during-hold and `VIX <= VIX3M` regime safety rails remain — then calls `signal-judge` (`tournament_v1`), which runs a randomized bracket tournament (3 brackets × batches of ≤10, top-2 advance, ~94 → 20 → 4 → 1 → consensus) and returns **at most one** pick. `signal-notifier` writes `todays_pick` and emails it (or fails closed).
-5. `forward-paper-trader` simulates the **V6 Tournament** policy (Target-80 trader mechanics unchanged) on all enriched signals (no trader-side filters), writes to `forward_paper_ledger` tagged `policy_version = V6_TOURNAMENT` (truncated 2026-06-04).
+5. `forward-paper-trader` simulates the **V7.1 Tilted GIGO** policy (same-day 10:00→15:45 bracket) on all enriched signals (no trader-side filters), writes to `forward_paper_ledger` tagged `policy_version = V7_1_TILTED_GIGO` (cohort since 2026-06-26).
 6. Win tracker measures post-entry stock-level outcomes (3-day peak) into `signal_performance`.
 7. Phase 2 backlog — sweep/block detection, aggressor side, GEX, trailing stops — deferred until the V6 cohort hits 30 closes.
 
