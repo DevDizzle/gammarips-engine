@@ -196,9 +196,19 @@ def _merge(client, computed: list[dict], mod) -> int:
     # paths agree on names/types. Idempotent — a no-op once the columns exist.
     mod._ensure_enriched_outcomes_columns(client, TABLE)
     staging = f"{PROJECT_ID}.{DATASET_ID}._stg_opp_backfill_{uuid.uuid4().hex[:8]}"
+    # Staging carries ONLY the identity keys + the opp/3d SET columns, with the
+    # TARGET's exact types but all NULLABLE (SELECT ... WHERE FALSE). This avoids
+    # `CREATE TABLE LIKE`, which clones the target's REQUIRED columns
+    # (entry_day/scan_date/ticker); a subset-column load into that clone trips
+    # "Field entry_day is missing in new schema". Types come from the target, so
+    # we drop autodetect (which would otherwise mis-type an all-NULL 3d column in
+    # a batch, e.g. infer STRING and break the DATE/FLOAT MERGE).
+    staged_cols = ["scan_date", "ticker", "recommended_contract"] + _OPP_COLS + _D3_COLS
+    staged_col_sql = ", ".join(f"`{c}`" for c in staged_cols)
     client.query(
-        f"CREATE TABLE `{staging}` LIKE `{TABLE}` "
-        f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY))"
+        f"CREATE TABLE `{staging}` "
+        f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS "
+        f"SELECT {staged_col_sql} FROM `{TABLE}` WHERE FALSE"
     ).result()
     try:
         jsonl = "\n".join(json.dumps(r, default=str) for r in computed)
@@ -207,8 +217,6 @@ def _merge(client, computed: list[dict], mod) -> int:
             job_config=bigquery.LoadJobConfig(
                 write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-                schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
-                autodetect=True,
             ),
         ).result()
         set_cols = _OPP_COLS + _D3_COLS

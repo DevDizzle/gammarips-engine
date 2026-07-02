@@ -77,6 +77,48 @@ transaction is atomic and schema-drift-safe regardless of partitioning.
 - Not deployed. `gammarips-review` (lookahead/leakage/unsafe-write audit) required
   before `forward-paper-trader` or `enrichment-trigger` deploy.
 
+## 2026-07-02 CORRECTION — `autodetect=True` broke the LIVE enrichment (pick outage)
+
+**What happened.** This design was deployed 2026-07-01 (`enrichment-trigger-00046-stt`).
+The FIRST run under it (2026-07-02 09:38 ET, enriching scan_date 2026-07-01) crashed
+the whole load:
+
+```
+400 ... Field recommended_spread_pct has changed type from FLOAT to STRING
+```
+
+`recommended_spread_pct` is **permanently NULL** on this Polygon plan (no options
+quotes). `autodetect=True` infers an all-NULL column as STRING, which clashes with
+the `LIKE`-cloned FLOAT64 staging column and fails the load → `write_enriched_signals`
+raised → **zero rows written for scan_date 2026-07-01** → `signal-notifier` returned
+`no_candidates_passed_gates` → **no pick 2026-07-02** (entry window missed). This
+falsified the "Behavior preservation (no new columns)" claim above: autodetect is NOT
+byte-for-byte the old typed load for an all-NULL column.
+
+**Fix (deployed 2026-07-02).** In `enrichment-trigger/main.py write_enriched_signals`,
+bind the staged load to the cloned live schema — `schema = get_table(staging).schema`,
+`autodetect` REMOVED — so an all-NULL FLOAT column keeps its FLOAT type. `ALLOW_FIELD_ADDITION`
+retained (still absorbs a genuinely-new feature column, propagated to the target before
+the swap). Atomic stage→verify→tx-replace ordering UNCHANGED (live table still survives any
+load failure). Proven in isolation (old config reproduces the FLOAT→STRING failure on real
+all-NULL rows; new config loads clean) and `gammarips-review` SHIP.
+
+**DO NOT re-enable `autodetect=True` here.** It re-opens this exact outage.
+
+**Sibling — LATENT (defensive follow-up, NOT deployed):**
+`forward-paper-trader/main.py _write_shadow_records` (the shared writer for
+`enriched_option_outcomes` / `paper_shadow_topscore` / `paper_shadow_intraday`) uses the
+SAME `CREATE TABLE LIKE` + `autodetect=True` staging pattern. It is NOT currently broken:
+the 2026-07-01 17:00 ET label-pool cron ran fine ("labeled 50/50 ... loaded 50 rows"),
+because the autodetect clash only fires when a row includes an all-NULL column as an
+EXPLICIT `null` key (which the enrichment rows do for `recommended_spread_pct`, but the
+label-pool row dicts apparently do not). So this is a latent trap, not an active outage —
+if a future batch ever emits an all-NULL FLOAT/DATE/TIMESTAMP column as an explicit null,
+the same FLOAT→STRING load failure would strike. The explicit-cloned-schema fix (drop
+`autodetect`, pass `schema=get_table(staging).schema`, keep `ALLOW_FIELD_ADDITION`) should
+be applied here too as hardening — review-gated, NOT auto-deployed, since the live trade
+service is currently working.
+
 See also: `docs/DECISIONS/2026-06-17-enriched-option-outcomes.md`,
 `.scratch/substrate_readiness_audit_2026-07-01.md`, memory
 `project_ledger_schema_drift_landmine`.

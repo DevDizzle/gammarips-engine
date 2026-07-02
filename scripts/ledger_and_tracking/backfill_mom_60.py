@@ -138,13 +138,20 @@ def _preview(client, table: str, lb: int) -> None:
 
 
 def _update(client, table: str, lb: int) -> int:
-    sql = _mom_cte(table, lb) + f"""
+    # BigQuery does NOT allow a WITH (CTE) clause directly before UPDATE, so the
+    # mom CTE is nested inside the UPDATE's FROM as a subquery (WITH is legal
+    # there). Identical computation to _preview — the leakage guard (bars <=
+    # scan_date) lives entirely in _mom_cte and is untouched.
+    sql = f"""
     UPDATE `{table}` T
     SET mom_60 = m.mom_60,
         mom_anchor_date = m.anchor_date,
         mom_lookback_date = m.lookback_date,
         mom_lookback_days = {lb}
-    FROM mom m
+    FROM (
+      {_mom_cte(table, lb)}
+      SELECT ticker, scan_date, anchor_date, lookback_date, mom_60 FROM mom
+    ) m
     WHERE T.ticker = m.ticker AND DATE(T.scan_date) = m.scan_date
     """
     job = client.query(sql)

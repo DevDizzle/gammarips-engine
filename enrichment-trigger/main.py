@@ -1691,8 +1691,11 @@ def write_enriched_signals(
     # nothing to reload. It was also the confirmed origin of the 2026-06-10
     # upstream row doubling. Fix: stage the load first, verify it, then replace
     # the scan_date inside one transaction that rolls back on any error so the
-    # original rows survive. autodetect=True stops a new feature column from
-    # 500-ing the load; new columns are propagated onto the target before the swap.
+    # original rows survive. The staged load binds to the cloned live schema
+    # (NOT autodetect — autodetect mis-typed the permanently-NULL FLOAT column
+    # recommended_spread_pct as STRING and broke every load, the 2026-07-02
+    # outage); ALLOW_FIELD_ADDITION still absorbs a genuinely new feature column,
+    # which is then propagated onto the target before the swap.
     import uuid
 
     staging = (
@@ -1708,18 +1711,28 @@ def write_enriched_signals(
         f"CREATE TABLE `{staging}` LIKE `{ENRICHED_SIGNALS_TABLE}` "
         f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY))"
     ).result()
+    # Bind the load to the cloned (live) schema. Do NOT autodetect: autodetect
+    # infers each column's type from the JSONL, and a column that is NULL in EVERY
+    # row — recommended_spread_pct is permanently NULL on this Polygon plan (no
+    # options quotes) — infers as STRING, which clashes with the live FLOAT and
+    # fails the whole load ("Field recommended_spread_pct has changed type from
+    # FLOAT to STRING" — the 2026-07-02 enrichment outage that starved the pick
+    # pipeline). LIKE already gave staging the exact live types, so load against
+    # that schema and an all-NULL FLOAT column stays FLOAT. ALLOW_FIELD_ADDITION
+    # still tolerates a genuinely new data field; known new feature columns are
+    # pre-created by the ADD COLUMN IF NOT EXISTS block above.
+    staging_schema = bq_client.get_table(staging).schema
 
     try:
-        # 2) Load into staging. autodetect=True + ALLOW_FIELD_ADDITION means a
-        #    genuinely NEW field is ADDED to staging instead of 500-ing the load.
+        # 2) Load into staging using the live table's exact types (no autodetect).
         jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
         job = bq_client.load_table_from_file(
             io.BytesIO(jsonl.encode("utf-8")),
             staging,
             job_config=bigquery.LoadJobConfig(
                 write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                schema=staging_schema,
                 schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
-                autodetect=True,
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
             ),
         )
