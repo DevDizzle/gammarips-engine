@@ -53,6 +53,13 @@ VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "global")
 
 # Model Config
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.5-flash")
+# Semantic prompt-version label for the per-ticker thesis prompt (stamped into
+# trace_logger inputs_raw, mirroring overnight-report-generator's PROMPT_VERSION
+# convention). v1 (unlabeled) = trader-briefing voice with entry/target/stop
+# instructions. v2 (2026-07-03) = descriptive data-narrative voice: no trade
+# instructions, no "recommended", no scan-count echo — the public product sells
+# flow DATA, not advice.
+THESIS_PROMPT_VERSION = "thesis_v2_descriptive"
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 TOP_P = float(os.getenv("TOP_P", "0.95"))
 TOP_K = int(os.getenv("TOP_K", "30"))
@@ -449,10 +456,12 @@ CROSS-CUTTING CONTEXT (today's overnight scan, all gate-passing candidates):
 - Top sectors: {sectors_str} (concentration matters — broad rotation vs single-name idiosyncratic)
 - Volatility regime: {vol_line}
 
-Use this frame to assess whether this ticker is part of a sector/regime theme \
-or an isolated idiosyncratic setup. The thesis should explicitly note when \
-the name's flow direction agrees or disagrees with the dominant scan direction \
-or when it sits inside the most-concentrated sector cluster.
+Use this frame ONLY to assess whether this ticker is part of a sector/regime \
+theme or an isolated idiosyncratic setup. The thesis may note QUALITATIVELY \
+that the name's flow agrees or disagrees with the dominant scan direction, or \
+that it sits inside the most-concentrated sector cluster — but NEVER quote the \
+candidate counts above (or any other scan-count number) in the output text. \
+They are internal context only and differ from the published pool size.
 """
 
 
@@ -788,7 +797,7 @@ def fetch_and_analyze_news(
                 _exp_label = str(recommended_expiration)
             _strike_label = f"${recommended_strike:g}{_opt_letter}"
             _contract_block = (
-                f"\nRECOMMENDED CONTRACT (cite these values verbatim — do NOT invent or round):\n"
+                f"\nFOCUS CONTRACT (where the flow concentrated — cite these values verbatim, do NOT invent or round):\n"
                 f"- Strike: {_strike_label}\n"
                 f"- Expiration: {_exp_label}\n"
                 + (f"- Underlying spot: ${underlying_price:.2f}\n" if underlying_price else "")
@@ -805,14 +814,16 @@ CONTEXT:
 - Institutional options flow direction: {direction}
 - Flow volume: ${flow_volume:,.0f}
 {_xcut}{_contract_block}
+VOICE (non-negotiable): You are producing DESCRIPTIVE market data for a research product, not trade advice. Every free-text field (summary, thesis, flow_intent_reasoning) must read as a data narrative — what the flow shows, where it concentrated, what the catalyst is, what the technical context is. NEVER include entry, target, stop, exit, or hold-period instructions. NEVER use the word "recommended" or imperative trade language (buy, sell, enter, take profit, manage risk with a stop). NEVER cite scan-count numbers in the output text.
+
 CRITICAL ANALYSIS: You must assess whether this options flow is DIRECTIONAL (a new bet on future movement) or HEDGING (protecting existing positions after a move already happened). This distinction is everything.
 
-Key signals of HEDGING flow (not tradeable):
+Key signals of HEDGING flow (reactive):
 - Large flow AFTER a big move (>10%) in the same direction
 - Flow is protecting existing equity positions
 - The catalyst is already known/priced in
 
-Key signals of DIRECTIONAL flow (tradeable):
+Key signals of DIRECTIONAL flow (anticipatory):
 - Flow appears BEFORE or independent of a catalyst
 - Flow size is disproportionate to the move
 - New information not yet reflected in price
@@ -829,7 +840,7 @@ Based on what you find, respond in valid JSON only (no markdown, no code fences)
   "flow_intent_reasoning": "<1 sentence explaining why you classified the flow this way>",
   "move_overdone": <boolean, true if the price move appears disproportionate to the catalyst>,
   "reversal_probability": <float 0.0-1.0, probability of a reversal in the next 1-5 trading days based on historical patterns for this type of event>,
-  "thesis": "<2-3 sentence trade thesis synthesizing flow direction, catalyst, and setup. Write as a trader briefing: what's the trade, why now, what's the risk. If RECOMMENDED CONTRACT block is present above, the FIRST sentence MUST open with the exact required lead string from that block — do NOT substitute a different strike, a different expiry month, or a rounded number. Example shape (the strike/expiry come from the contract block, not from you): 'TICKER BULL $XXXC MMM DD ''YY. <catalyst-driven thesis>. Entry near <level> with <target> target. Risk: <risk>.'"
+  "thesis": "<2-3 sentence DESCRIPTIVE data narrative synthesizing what the flow shows, where the premium concentrated, the catalyst, and the technical context. This is a data observation, NOT a trade plan: no entry/target/stop levels, no 'recommended', no hold-period advice, no imperative trade voice. If a FOCUS CONTRACT block is present above, the FIRST sentence MUST open with the exact required lead string from that block — do NOT substitute a different strike, a different expiry month, or a rounded number. Example shape (the strike/expiry come from the contract block, not from you): 'TICKER BULL $XXXC MMM DD ''YY. <what the flow shows and the catalyst behind it>. Risk factor: <the key uncertainty or counter-signal in the data — descriptive, not an instruction>.'"
 }}
 
 If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst_score to 0.1, and provide a summary noting the lack of news coverage."""
@@ -945,7 +956,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
                     output_tokens=_out,
                     latency_ms=int((_time.monotonic() - _t0) * 1000),
                     status="ok",
-                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                    inputs_raw=f"prompt_version={THESIS_PROMPT_VERSION}|{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
                 ))
             except Exception:
                 pass
@@ -970,7 +981,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
                     latency_ms=int((_time.monotonic() - _t0) * 1000),
                     status="parse_error",
                     error=str(e)[:500],
-                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                    inputs_raw=f"prompt_version={THESIS_PROMPT_VERSION}|{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
                 ))
             except Exception:
                 pass
@@ -999,7 +1010,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
                     latency_ms=int((_time.monotonic() - _t0) * 1000),
                     status="api_error",
                     error=error_str[:500],
-                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                    inputs_raw=f"prompt_version={THESIS_PROMPT_VERSION}|{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
                 ))
             except Exception:
                 pass

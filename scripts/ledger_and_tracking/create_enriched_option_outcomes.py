@@ -46,10 +46,13 @@ migrated by scripts/ledger_and_tracking/backfill_regime_scan_date.py (NOT yet ru
 gammarips-review + owner gated). See
 docs/DECISIONS/2026-07-01-regime-scan-date-leakage-fix.md.
 
-HARD ISOLATION: research-only. Walled off from the live Scorecard
-(forward_paper_ledger / current_ledger_stats) and the website (Firestore /
-webapp / blog). Never read or written by any production surface. Pure mechanical
-bracket replay — no LLM. See docs/DECISIONS/2026-06-17-enriched-option-outcomes.md.
+ISOLATION UPDATE (2026-07-03 owner decision): originally research-only, this
+table now feeds two read-only production surfaces — win-tracker /pool_outcomes
+(whole-pool aggregates for the public Track Record page) and the MCP substrate
+tools (leakage-safe views; pick flags NULLed until entry_day passes). Writes
+remain exclusively the fpt label path. Pure mechanical bracket replay — no LLM.
+See docs/DECISIONS/2026-06-17-enriched-option-outcomes.md and
+docs/DECISIONS/2026-07-03-pool-track-record-and-generator-depicking.md.
 
 Partitioned by entry_day (DAY), clustered by ticker.
 

@@ -102,9 +102,12 @@ INTRADAY_EXIT_HHMM = "15:45"  # same-day flat exit for the intraday shadow
 # and supplies the counterfactual ("what would the names we skipped have done?").
 # Written ONLY by _write_enriched_outcomes via the /label_enriched_pool endpoint,
 # reusing _simulate_contract so labels match production mechanics exactly.
-# COMPLETELY walled off from the live Scorecard and the website. Never read or
-# written by any production surface. See
-# docs/DECISIONS/2026-06-17-enriched-option-outcomes.md.
+# Written ONLY here. Read paths (2026-07-03 owner decision): win-tracker's
+# /pool_outcomes publishes whole-pool AGGREGATES to the public Track Record
+# page, and the MCP substrate tools serve leakage-safe views — the pick flags
+# stay private (NULLed until entry_day passes). See
+# docs/DECISIONS/2026-06-17-enriched-option-outcomes.md and
+# docs/DECISIONS/2026-07-03-pool-track-record-and-generator-depicking.md.
 ENRICHED_OUTCOMES_TABLE = f"{PROJECT_ID}.profit_scout.enriched_option_outcomes"
 # Honor the locked scope decision (2026-06-17): label the enriched BULLISH pool
 # only (the live strategy's universe), not the raw all-direction scan pool.
