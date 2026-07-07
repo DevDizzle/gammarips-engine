@@ -163,6 +163,16 @@ Every column belongs to exactly one group. The classification is written into th
 
 **Known data-quality caveats:** ~145 duplicate rows (a real finding, not a build blocker; `stg_enriched_option_outcomes` dedups to latest by `labeled_at`); ~27.7% of rows are `INVALID_LIQUIDITY` NULL-label (non-random illiquid tail — document the exclusion in any screen); pre-2026-06-11 daily counts are uneven.
 
+## Pool-liquidity telemetry — `profitscout-fida8.profit_scout.pool_liquidity_snapshot` (added 2026-07-07)
+
+Interval liquidity re-read of the **current enriched pool** (~50 contracts), one row per `(contract, as_of)`, written every ~10 minutes during RTH (plus one pre-open pass, `is_preopen=true`) by `signal-notifier/pool_liquidity.py` via `POST /refresh_pool_liquidity` (Cloud Scheduler `pool-liquidity-refresh`, `*/10 9-16 * * 1-5` ET). Consumed CACHE-FIRST by the gammarips-mcp `get_contract_snapshot` / `get_pool_liquidity` tools so an agent shortlist refreshes in one call at the ~10:00 ET decision window. See `docs/DECISIONS/2026-07-07-pool-liquidity-snapshot.md`.
+
+**Partition:** `DATE(as_of)` (DAY). **Cluster:** `contract`. Schema source of truth: `scripts/ledger_and_tracking/create_pool_liquidity_snapshot.py`. Write path: `insert_rows_json` against the explicit schema — **never a load job, never autodetect**.
+
+**Classification: TELEMETRY — never a feature.** Every non-identity column is entry-day-live (the 09:15+ tape) keyed by explicit `as_of`. It must NEVER be joined into `overnight_signals_enriched`, `enriched_features_v1`, or any as-of ≤ scan_date surface, and it is never read by the tournament/selection path (which keeps its own C1-walled OI-only fetch, `_fetch_live_oi`).
+
+Key columns: identity (`contract`, `underlying`, `scan_date`, `as_of`, `is_preopen`, `fetch_status` ∈ {ok, polygon_empty, polygon_error}); liquidity read (`open_interest` — refreshes upstream once each morning, `day_volume` — live session, `last_trade_price/_ts`, `day_open/high/low/close`, `day_last_updated`); context (`underlying_price` + `underlying_price_source` ∈ {option_snapshot, day_agg_delayed, prev_close}, `implied_volatility`, `delta/gamma/theta/vega`); provenance (`source`, `is_delayed`). `bid`/`ask`/`mid`/`spread_pct` are **NULL placeholders** pending the RM-001b quote-feed purchase — the MCP omits them from responses while NULL.
+
 ## Firestore — `ledger_trades/{scan_date}_{ticker}` (added 2026-06-03)
 
 Per-trade publish of the closed live cohort (current: V7.1) for the public webapp scorecard table (`/scorecard`). Written by `signal-notifier/main.py:compute_and_write_ledger_trades` alongside `cohort_stats/current`, on the same daily cron and the `/refresh_stats` endpoint. **Uses the identical cohort filter and fixed-dollar sizing as `cohort_stats/current`** (`DATE(entry_timestamp) >= LIVE_COHORT_START_DATE` [= 2026-06-26] AND `policy_version = 'V7_1_TILTED_GIGO'` AND `realized_return_pct IS NOT NULL` AND `entry_price > 0`; `n_contracts = GREATEST(1, ROUND(POSITION_SIZE_USD/(entry_price*100)))`), so the table rows and the aggregate tiles can never disagree. Idempotent upsert (`merge=True`) keyed by `{scan_date}_{ticker}`; non-gating, display-only. Read-only consumer; never feeds any execution gate.

@@ -2376,6 +2376,71 @@ def run_notifier(target_date: date | None = None):
     return False, "Failed to send operator email."
 
 
+@app.route("/refresh_pool_liquidity", methods=["POST"])
+def refresh_pool_liquidity():
+    """Interval pool-liquidity snapshot (MCP Priority-1A, 2026-07-07).
+
+    Cloud Scheduler POSTs this every ~10 min, 09:00-16:50 ET weekdays (job
+    `pool-liquidity-refresh`). The handler self-gates to ~09:15-16:05 ET on
+    NYSE trading days, so cron-edge firings and holidays no-op cleanly; the
+    09:20 firing is the pre-open pass. Fetch + persist logic lives in
+    pool_liquidity.py behind a hard leakage wall — this endpoint is fully
+    independent of the pick path (run_notifier never touches it).
+
+    Body (all optional, TOKEN-GATED): {"force": true} bypasses the window/
+    interval guards (manual/backstop use); {"scan_date": "YYYY-MM-DD"}
+    overrides the pool date. If POOL_LIQ_REFRESH_TOKEN is set on the service
+    (deploy.sh mounts it as a secret), every call must send a matching
+    X-Refresh-Token header; the dangerous knobs (force / scan_date) are
+    REFUSED unless the caller is token-authenticated — fail-closed while the
+    service is still public (review FIX-1 2026-07-07; see
+    docs/DECISIONS/2026-07-02-service-auth-hardening.md).
+    """
+    import hmac
+
+    import pool_liquidity
+
+    expected_token = os.environ.get("POOL_LIQ_REFRESH_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    token_authed = bool(expected_token) and hmac.compare_digest(
+        provided_token, expected_token
+    )
+    if expected_token and not token_authed:
+        return jsonify({"status": "denied"}), 403
+
+    req = request.get_json(silent=True) or {}
+    force = bool(req.get("force"))
+    if (force or req.get("scan_date")) and not token_authed:
+        # force / scan_date can spin the Polygon meter and rewrite which pool
+        # MCP clients see as "latest" — never honor them anonymously.
+        return jsonify(
+            {"status": "denied", "reason": "force/scan_date require X-Refresh-Token"}
+        ), 403
+
+    now_et = datetime.now(est)
+    run_day = now_et.date()
+
+    if not force:
+        if not is_trading_day(run_day):
+            return jsonify({"status": "skipped", "reason": "market holiday/closed"}), 200
+        hm = now_et.hour * 60 + now_et.minute
+        if hm < 9 * 60 + 15 or hm > 16 * 60 + 5:
+            return jsonify({"status": "skipped", "reason": "outside 09:15-16:05 ET window"}), 200
+
+    if req.get("scan_date"):
+        try:
+            scan_date = datetime.strptime(str(req["scan_date"]), "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"status": "error", "reason": "scan_date must be YYYY-MM-DD"}), 400
+    else:
+        scan_date = get_previous_trading_day(run_day)
+
+    is_preopen = (now_et.hour * 60 + now_et.minute) < 9 * 60 + 30
+    summary = pool_liquidity.refresh(scan_date=scan_date, is_preopen=is_preopen, force=force)
+    code = 200 if summary.get("status") in ("success", "skipped") else 500
+    return jsonify(summary), code
+
+
 @app.route("/refresh_stats", methods=["POST"])
 def refresh_stats():
     """Ad-hoc seed / recovery for ``cohort_stats/current``.
