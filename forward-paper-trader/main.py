@@ -1,6 +1,8 @@
+import io
 import os
 import json
 import logging
+import uuid
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, date
@@ -141,6 +143,8 @@ LABEL_3D_EXIT_HHMM = os.getenv("LABEL_3D_EXIT_HHMM", "15:50")
 LABEL_SAMEDAY_SIM_VERSION = "SAMEDAY_V7_1_GIGO"        # same-day: HOLD=1 -30/+40
 LABEL_3D_SIM_VERSION = "HOLD3D_V6_LEGACY_8060"         # 3-day:   HOLD=3 -60/+80
 OPP_SIM_VERSION = "OPP_MFE_MAE_V1"                      # excursion surface
+LIFE_SIM_VERSION = "LIFE_TO_EXPIRY_V1"                  # full-life surface (surfaced -> expiration)
+LIFE_DAILY_LIMIT = int(os.getenv("LIFE_DAILY_LIMIT", "600"))  # per-run cap for /label_life_surface
 
 # ---- ENRICHED_OUTCOMES research columns — EXPLICIT type creation (must-fix #2/#5/#6)
 # The must-fix #2 regime scan-date FEATURE + entry-close TELEMETRY columns, the
@@ -210,6 +214,19 @@ ENRICHED_OUTCOMES_RESEARCH_COLUMNS: list[tuple[str, str]] = [
     ("label_3d_hold_days", "INT64"),
     ("label_3d_stop_pct", "FLOAT64"),
     ("label_3d_target_pct", "FLOAT64"),
+    # -- full-life surface: surfaced -> expiration (scorecard redesign 2026-07-08).
+    #    Anchored to the SAME 10:00 ET fill as opp_* (opp_entry_price); peak/trough
+    #    combine the minute-resolution opp excursion (days 1-3) with daily bars from
+    #    entry_day+1 through expiration; expiry mark = intrinsic at settlement from
+    #    underlying_daily_bars. NULL life_status = not yet expired/labeled. --
+    ("life_status", "STRING"),
+    ("life_peak_return", "FLOAT64"),
+    ("life_trough_return", "FLOAT64"),
+    ("life_expiry_return", "FLOAT64"),
+    ("life_peak_day", "INT64"),
+    ("life_daily_bar_count", "INT64"),
+    ("life_sim_version", "STRING"),
+    ("life_labeled_at", "TIMESTAMP"),
 ]
 
 
@@ -287,6 +304,31 @@ def fetch_minute_bars(ticker: str, start_date: date, end_date: date) -> list:
             logger.warning(f"Polygon API Error: {e}")
             time.sleep(1)
     return []
+
+def fetch_daily_bars(ticker: str, start_date: date, end_date: date) -> list:
+    """Daily OHLCV aggs for a (possibly expired) option ticker — same Polygon
+    endpoint family as fetch_minute_bars at day resolution. Used by the
+    full-life surface, where a contract's life can span weeks and a day's
+    high/low already bounds every intraday print."""
+    if not POLYGON_API_KEY:
+        logger.error("POLYGON_API_KEY is not set.")
+        return []
+
+    url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start_date.isoformat()}/{end_date.isoformat()}"
+    params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": POLYGON_API_KEY}
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            if resp.status_code == 429:
+                time.sleep(2 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            return resp.json().get("results", [])
+        except Exception as e:
+            logger.warning(f"Polygon API Error: {e}")
+            time.sleep(1)
+    return []
+
 
 _VIX_CACHE: dict = {"df": None}
 
@@ -1212,6 +1254,122 @@ def _simulate_opportunity_surface(row, entry_day: date, n_days: int = OPP_WINDOW
     except Exception as e:  # noqa: BLE001 — research surface must never abort a pool row
         logger.warning(f"opportunity surface failed for {row.get('ticker')}: {e}")
         out["opp_status"] = "ERROR"
+        return out
+
+
+def _simulate_life_surface(row, entry_day: date, underlying_close_at_exp: float | None) -> dict:
+    """RESEARCH-ONLY full-life surface: what the option premium did from the
+    10:00 ET surfacing fill to EXPIRATION (scorecard redesign, 2026-07-08).
+    Powers the public pool-level distributions (via win-tracker /pool_outcomes
+    aggregates only — per-contract rows never leave BigQuery on a free surface).
+
+    Anchor = the row's stored opp_entry_price (the opp_* 10:00 ET fill incl.
+    entry slippage), so life_* and opp_* are the same trade at two horizons; a
+    row with no opp entry anchor gets life_status=NO_ENTRY (documented
+    exclusion, mirrors the opp INVALID_LIQUIDITY attrition).
+
+    - life_peak_return / life_trough_return: max/min excursion in return space,
+      combining the minute-resolution opp excursion (entry day .. day 3, already
+      post-entry-anchored) with DAILY bars from entry_day+1 through expiration.
+      The entry day's DAILY bar is deliberately excluded — it contains pre-10:00
+      prints that would fake a peak/trough; day 1 is covered by the opp minute
+      walk instead. Days 2-3 appear in both sources; max/min makes the overlap
+      harmless (and the daily bars patch the opp window's 15:50 cutoff on days
+      2+; the entry day's own 15:50-16:00 prints are in neither source — a
+      known one-sided blind spot that can only UNDERSTATE the ceiling).
+    - life_expiry_return: hold-to-settlement mark — intrinsic at expiration from
+      the underlying's last close on/before expiry, NOT the option's last (often
+      stale) print. (intrinsic - entry) / entry; bounded below at -100%.
+
+    Leakage-safe by construction: only called for expiration < today_et (strict,
+    so the final session is complete), reads only post-entry data, and applies
+    NO exit rule — the exit stays a free variable. Never raises; life_status
+    explains any degenerate case (OK / PARTIAL_NO_EXPIRY / PARTIAL_NO_PATH /
+    NO_ENTRY / ERROR).
+    """
+    out = {
+        "life_status": None,
+        "life_peak_return": None,
+        "life_trough_return": None,
+        "life_expiry_return": None,
+        "life_peak_day": None,
+        "life_daily_bar_count": None,
+        "life_sim_version": LIFE_SIM_VERSION,
+        "life_labeled_at": datetime.now(pytz.utc).isoformat(),
+    }
+    try:
+        entry = row.get("opp_entry_price")
+        if entry is None or float(entry) <= 0:
+            out["life_status"] = "NO_ENTRY"
+            return out
+        entry = float(entry)
+
+        exp = row["recommended_expiration"]
+        exp_date = exp.date() if isinstance(exp, (datetime, pd.Timestamp)) else exp
+        opt_ticker = build_polygon_ticker(
+            row["ticker"], exp_date, row["direction"], float(row["recommended_strike"])
+        )
+
+        daily_start = get_next_trading_day(entry_day)
+        bars = []
+        if daily_start is not None and daily_start <= exp_date:
+            bars = fetch_daily_bars(opt_ticker, daily_start, exp_date)
+            time.sleep(0.15)
+        out["life_daily_bar_count"] = int(len(bars))
+
+        opp_peak = float(row["opp_peak_return"]) if row.get("opp_peak_return") is not None else None
+        peak_candidates = [opp_peak] if opp_peak is not None else []
+        trough_candidates = [float(row["opp_trough_return"])] if row.get("opp_trough_return") is not None else []
+        daily_peak, daily_peak_date = None, None
+        if bars:
+            best = max(bars, key=lambda b: b["h"])
+            daily_peak = (best["h"] - entry) / entry
+            daily_peak_date = datetime.fromtimestamp(best["t"] / 1000, tz=pytz.utc).date()
+            peak_candidates.append(daily_peak)
+            trough_candidates.append((min(b["l"] for b in bars) - entry) / entry)
+        if peak_candidates:
+            out["life_peak_return"] = float(max(peak_candidates))
+            out["life_trough_return"] = float(min(trough_candidates))
+            # life_peak_day = trading day (1 = surfacing morning) the peak
+            # printed. If the minute-window (days 1-3) peak stands, recover its
+            # calendar date from the WALL-CLOCK opp_minutes_to_peak (entry
+            # 10:00 ET + m minutes — peak prints only exist during sessions,
+            # and this stays exact across weekends/holidays, unlike naive
+            # minute binning). A strictly-greater daily peak can only occur
+            # day 3+ (day 2-3 daily highs are inside the minute window's
+            # range). Either way: count NYSE sessions entry_day..peak date.
+            peak_date = None
+            if opp_peak is not None and (daily_peak is None or opp_peak >= daily_peak):
+                m = float(row.get("opp_minutes_to_peak") or 0.0)
+                entry_dt = est.localize(datetime.combine(
+                    entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time()))
+                peak_date = (entry_dt + timedelta(minutes=m)).astimezone(est).date()
+            elif daily_peak_date is not None:
+                peak_date = daily_peak_date
+            if peak_date is not None:
+                out["life_peak_day"] = max(
+                    int(len(nyse.schedule(start_date=entry_day, end_date=peak_date).index)), 1
+                )
+
+        if underlying_close_at_exp is not None:
+            strike = float(row["recommended_strike"])
+            is_call = str(row["direction"]).upper() == "BULLISH"  # mirrors build_polygon_ticker
+            intrinsic = max(0.0, float(underlying_close_at_exp) - strike) if is_call \
+                else max(0.0, strike - float(underlying_close_at_exp))
+            out["life_expiry_return"] = float((intrinsic - entry) / entry)
+
+        if out["life_peak_return"] is not None and out["life_expiry_return"] is not None:
+            out["life_status"] = "OK"
+        elif out["life_peak_return"] is not None:
+            out["life_status"] = "PARTIAL_NO_EXPIRY"
+        elif out["life_expiry_return"] is not None:
+            out["life_status"] = "PARTIAL_NO_PATH"
+        else:
+            out["life_status"] = "ERROR"
+        return out
+    except Exception as e:  # noqa: BLE001 — research surface must never abort a pool row
+        logger.warning(f"life surface failed for {row.get('ticker')}: {e}")
+        out["life_status"] = "ERROR"
         return out
 
 
@@ -2355,6 +2513,187 @@ def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]
         raise
 
 
+_LIFE_COLS = [
+    "life_status", "life_peak_return", "life_trough_return",
+    "life_expiry_return", "life_peak_day", "life_daily_bar_count",
+    "life_sim_version", "life_labeled_at",
+]
+
+
+def _underlying_closes_at_expiry(client: bigquery.Client, rows: list[dict]) -> dict:
+    """Batch lookup of each contract's settlement mark: the underlying's last
+    close on/before its expiration (within 7 calendar days, so a delisted
+    ticker's ancient print can't masquerade as an expiry mark). Returns
+    {(ticker, expiration_iso): close}. Read-only against underlying_daily_bars."""
+    pairs = {}
+    for r in rows:
+        exp = r["recommended_expiration"]
+        exp_date = exp.date() if isinstance(exp, (datetime, pd.Timestamp)) else exp
+        pairs.setdefault(r["ticker"], set()).add(exp_date)
+    if not pairs:
+        return {}
+    all_exps = [e for s in pairs.values() for e in s]
+    min_d, max_d = min(all_exps) - timedelta(days=7), max(all_exps)
+    sql = f"""
+    SELECT ticker, date, close
+    FROM `{PROJECT_ID}.profit_scout.underlying_daily_bars`
+    WHERE ticker IN UNNEST(@tickers) AND date BETWEEN @min_d AND @max_d
+      AND close IS NOT NULL
+    ORDER BY ticker, date
+    """
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ArrayQueryParameter("tickers", "STRING", sorted(pairs.keys())),
+        bigquery.ScalarQueryParameter("min_d", "DATE", min_d),
+        bigquery.ScalarQueryParameter("max_d", "DATE", max_d),
+    ])
+    by_ticker: dict[str, list] = {}
+    for b in client.query(sql, job_config=cfg).result():
+        by_ticker.setdefault(b["ticker"], []).append((b["date"], float(b["close"])))
+    out = {}
+    for tkr, exps in pairs.items():
+        series = by_ticker.get(tkr, [])
+        for exp_date in exps:
+            close = None
+            for d, c in series:  # ascending; keep the last close <= expiry, within 7d
+                if exp_date - timedelta(days=7) <= d <= exp_date:
+                    close = c
+                elif d > exp_date:
+                    break
+            out[(tkr, exp_date.isoformat())] = close
+    return out
+
+
+def _merge_life_rows(client: bigquery.Client, computed: list[dict]) -> int:
+    """Stage + MERGE life_* values onto existing enriched_option_outcomes rows,
+    keyed (scan_date, ticker, recommended_contract) — the identical staging
+    pattern (and reasons) as backfill_opportunity_surface._merge: explicit
+    target-typed staging via SELECT..WHERE FALSE (NEVER autodetect — the
+    all-NULL-column landmine class), schema-ensure before the MERGE. Shared by
+    the daily /label_life_surface pass and the one-shot life backfill so both
+    write paths are byte-identical. Deterministic values -> an unauthenticated
+    re-trigger can only recompute the same numbers, never poison them."""
+    if not computed:
+        return 0
+    _ensure_enriched_outcomes_columns(client)
+    staging = f"{PROJECT_ID}.profit_scout._stg_life_surface_{uuid.uuid4().hex[:8]}"
+    staged_cols = ["scan_date", "ticker", "recommended_contract"] + _LIFE_COLS
+    staged_col_sql = ", ".join(f"`{c}`" for c in staged_cols)
+    client.query(
+        f"CREATE TABLE `{staging}` "
+        f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS "
+        f"SELECT {staged_col_sql} FROM `{ENRICHED_OUTCOMES_TABLE}` WHERE FALSE"
+    ).result()
+    try:
+        jsonl = "\n".join(json.dumps(r, default=str) for r in computed)
+        client.load_table_from_file(
+            io.BytesIO(jsonl.encode("utf-8")), staging,
+            job_config=bigquery.LoadJobConfig(
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            ),
+        ).result()
+        set_clause = ", ".join(f"`{c}` = S.`{c}`" for c in _LIFE_COLS)
+        merge_sql = f"""
+        MERGE `{ENRICHED_OUTCOMES_TABLE}` T
+        USING `{staging}` S
+          ON T.scan_date = S.scan_date
+         AND T.ticker = S.ticker
+         AND T.recommended_contract = S.recommended_contract
+        WHEN MATCHED THEN UPDATE SET {set_clause}
+        """
+        job = client.query(merge_sql)
+        job.result()
+        return job.num_dml_affected_rows or 0
+    finally:
+        try:
+            client.query(f"DROP TABLE IF EXISTS `{staging}`").result()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"life staging cleanup failed for {staging} (non-fatal): {e}")
+
+
+def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
+    """Daily full-life finalizer: label every enriched_option_outcomes row whose
+    contract has EXPIRED (strictly before today ET, so the final session is
+    complete) and that has no life_status yet. NULL life_status = the work
+    queue; NO_ENTRY is stamped for rows with no opp entry anchor so they leave
+    the queue. Idempotent (deterministic MERGE) — no claim/lock needed, a
+    double-run recomputes identical values. Fail-loud: labeling zero of a
+    non-empty queue is a failure, not a quiet success."""
+    limit = int(limit or LIFE_DAILY_LIMIT)
+    client = bigquery.Client(project=PROJECT_ID)
+    today_et = datetime.now(est).date()
+
+    # Schema-ensure BEFORE querying life_status — on the very first run the
+    # column does not exist yet and the SELECT would otherwise 400.
+    _ensure_enriched_outcomes_columns(client)
+
+    # QUALIFY dedup: the table carries ~145 documented duplicate identity keys
+    # (docs/DATA-CONTRACTS.md caveats). Two identical source keys in staging
+    # would abort the whole MERGE batch ("must match at most one source row"),
+    # so keep one source row per key — lossless, values are deterministic.
+    # Multiple TARGET dups matching one source row is legal and updates both.
+    sql = f"""
+    SELECT scan_date, entry_day, ticker, direction, recommended_contract,
+           recommended_strike, recommended_expiration,
+           opp_entry_price, opp_peak_return, opp_trough_return,
+           opp_minutes_to_peak, opp_status
+    FROM `{ENRICHED_OUTCOMES_TABLE}`
+    WHERE recommended_expiration IS NOT NULL
+      AND recommended_strike IS NOT NULL
+      AND recommended_contract IS NOT NULL
+      AND recommended_expiration < @today
+      AND life_status IS NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY scan_date, ticker, recommended_contract
+      ORDER BY labeled_at DESC) = 1
+    ORDER BY recommended_expiration, scan_date, ticker
+    LIMIT {limit}
+    """
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("today", "DATE", today_et),
+    ])
+    rows = [dict(r) for r in client.query(sql, job_config=cfg).result()]
+    if not rows:
+        return True, {"candidates": 0, "labeled": 0, "note": "no expired unlabeled rows"}
+
+    closes = _underlying_closes_at_expiry(client, [r for r in rows if r.get("opp_entry_price") is not None])
+
+    # Merge every 200 rows INSIDE the compute loop (not all-compute-then-merge):
+    # each row costs a Polygon call, so on a big backlog an end-only merge could
+    # lose the entire run to the Cloud Run request timeout with zero rows
+    # committed. Interleaving guarantees forward progress; the NULL-life_status
+    # queue makes a partial run self-healing on the next fire.
+    computed, statuses, merged = [], {}, 0
+    for r in rows:
+        entry_day = r["entry_day"] or get_next_trading_day(r["scan_date"])
+        exp = r["recommended_expiration"]
+        exp_date = exp.date() if isinstance(exp, (datetime, pd.Timestamp)) else exp
+        life = _simulate_life_surface(r, entry_day, closes.get((r["ticker"], exp_date.isoformat())))
+        statuses[life["life_status"]] = statuses.get(life["life_status"], 0) + 1
+        computed.append({
+            "scan_date": r["scan_date"],
+            "ticker": r["ticker"],  # exactly as stored — MERGE key is case-sensitive
+            "recommended_contract": r["recommended_contract"],
+            **life,
+        })
+        if len(computed) >= 200:
+            merged += _merge_life_rows(client, computed)
+            computed = []
+    merged += _merge_life_rows(client, computed)
+
+    summary = {
+        "candidates": len(rows),
+        "labeled": merged,
+        "statuses": statuses,
+        "truncated_at_limit": len(rows) >= limit,  # more backlog remains; next run continues
+    }
+    if merged == 0:
+        logger.error(f"life surface: {len(rows)} candidates but 0 rows merged — failing loud: {summary}")
+        return False, summary
+    logger.info(f"life surface labeled {merged}/{len(rows)} rows: {statuses}")
+    return True, summary
+
+
 def run_iv_cache_update():
     """Daily IV cache refresh — one row per underlying per as_of_date in
     `polygon_iv_history`. Fetches the trailing-30-day signal watchlist from
@@ -2755,6 +3094,42 @@ def trigger_persist_minute_paths():
         return jsonify(summary), code
     except Exception as e:
         logger.error(f"Error in persist_minute_paths endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/label_life_surface", methods=["POST", "GET"])
+def trigger_label_life_surface():
+    """RESEARCH-ONLY full-life finalizer endpoint (scorecard redesign 2026-07-08).
+
+    Labels expired pool contracts with their surfaced-to-expiration surface
+    (life_* columns): peak/trough excursion over the whole life + the
+    hold-to-settlement intrinsic mark. Hit by the daily `label-life-surface`
+    Cloud Scheduler cron at 17:10 ET (after the 17:00 labeler, before the
+    17:20 win-tracker /pool_outcomes aggregate refresh that publishes the
+    public distributions). Writes ONLY to enriched_option_outcomes — never
+    forward_paper_ledger or any live surface.
+
+    Token-gated like /persist_minute_paths (fail-closed when
+    POOL_LIQ_REFRESH_TOKEN is set; see 2026-07-02-service-auth-hardening):
+    the values are deterministic/unpoisonable, but an open endpoint would be
+    a free Polygon-quota burner. Body (optional): {"limit": N}.
+    """
+    import hmac as _hmac
+
+    expected_token = os.environ.get("POOL_LIQ_REFRESH_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    if expected_token and not _hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"status": "denied"}), 403
+
+    try:
+        req = request.get_json(silent=True) or {}
+        limit = req.get("limit")
+        success, result = run_label_life_surface(limit=limit)
+        if success:
+            return jsonify({"status": "success", **result}), 200
+        return jsonify({"status": "error", **result}), 500
+    except Exception as e:
+        logger.error(f"Error in label_life_surface endpoint: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

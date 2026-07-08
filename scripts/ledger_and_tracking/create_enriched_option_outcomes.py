@@ -177,6 +177,20 @@ schema = [
     bigquery.SchemaField("opp_bar_count", "INTEGER", mode="NULLABLE"),
     bigquery.SchemaField("opp_sim_version", "STRING", mode="NULLABLE"),
 
+    # ---- 4b. FULL-LIFE SURFACE (surfaced -> expiration; scorecard redesign
+    # 2026-07-08 — docs/DECISIONS/2026-07-08-scorecard-life-distribution.md).
+    # REFERENCE ONLY: added to the live table by forward-paper-trader's
+    # _ensure_enriched_outcomes_columns (ADD COLUMN IF NOT EXISTS); this script
+    # was NOT re-run. NULL life_status = not yet expired/labeled.
+    bigquery.SchemaField("life_status", "STRING", mode="NULLABLE"),
+    bigquery.SchemaField("life_peak_return", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("life_trough_return", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("life_expiry_return", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("life_peak_day", "INTEGER", mode="NULLABLE"),  # trading day of the peak, 1 = surfacing morning
+    bigquery.SchemaField("life_daily_bar_count", "INTEGER", mode="NULLABLE"),
+    bigquery.SchemaField("life_sim_version", "STRING", mode="NULLABLE"),
+    bigquery.SchemaField("life_labeled_at", "TIMESTAMP", mode="NULLABLE"),
+
     # ---- 5. 3-DAY BRACKET LABEL (own horizon — NEVER mix with same-day) ----
     # Parallel -60%/+80%/HOLD=3 bracket (the horizon the mom_60 finding lives on).
     # NULL until the 3-day window closes; filled by the daily cron for closed
