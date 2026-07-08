@@ -163,6 +163,12 @@ Every column belongs to exactly one group. The classification is written into th
 
 **Known data-quality caveats:** ~145 duplicate rows (a real finding, not a build blocker; `stg_enriched_option_outcomes` dedups to latest by `labeled_at`); ~27.7% of rows are `INVALID_LIQUIDITY` NULL-label (non-random illiquid tail — document the exclusion in any screen); pre-2026-06-11 daily counts are uneven.
 
+## Minute paths — `profitscout-fida8.profit_scout.option_minute_paths` (added 2026-07-07)
+
+Per-minute option-premium OHLCV bars over each enriched-pool candidate's **3-trading-day excursion window** (`[entry_day .. exit_day_3d]`), one row per `(contract, entry_day, ts)` with `bar_date` (ET session) and `day_index` (1–3). This is the first-crossing substrate behind the MCP's `replay_contract` and `estimate_exit_rule`'s exact-resolution + trailing-rule scoring (must-fix #6g / RM-002 / TF-14). Writers: one-shot backfill (`scripts/ledger_and_tracking/backfill_option_minute_paths.py`, executed 2026-07-07) + `forward-paper-trader/minute_paths.py` via `POST /persist_minute_paths` (daily evening cron, reconciles the last 3 scan_dates DELETE-then-LOAD). **LOAD JOBS ONLY with the explicit schema — no streaming (the reconcile DELETE would hit buffers), no autodetect.** Partition `entry_day`, cluster `contract`. Schema source of truth: `scripts/ledger_and_tracking/create_option_minute_paths.py`.
+
+**Classification: REALIZED TAPE — never a feature.** Same class as `opp_*`: research/label substrate for CLOSED windows only. Never joined into `enriched_features_v1` or any as-of ≤ scan_date surface; never read by selection or the live trader. See `docs/DECISIONS/2026-07-07-option-minute-paths.md`.
+
 ## Pool-liquidity telemetry — `profitscout-fida8.profit_scout.pool_liquidity_snapshot` (added 2026-07-07)
 
 Interval liquidity re-read of the **current enriched pool** (~50 contracts), one row per `(contract, as_of)`, written every ~10 minutes during RTH (plus one pre-open pass, `is_preopen=true`) by `signal-notifier/pool_liquidity.py` via `POST /refresh_pool_liquidity` (Cloud Scheduler `pool-liquidity-refresh`, `*/10 9-16 * * 1-5` ET). Consumed CACHE-FIRST by the gammarips-mcp `get_contract_snapshot` / `get_pool_liquidity` tools so an agent shortlist refreshes in one call at the ~10:00 ET decision window. See `docs/DECISIONS/2026-07-07-pool-liquidity-snapshot.md`.

@@ -1584,10 +1584,15 @@ def _write_shadow_records(
     committed — silently wiping that scan_date's rows with nothing to reload. New
     rows are now STAGED first, verified, then the target scan_date is replaced
     inside a single transaction that rolls back on any error, so the original rows
-    always survive a failure. autodetect=True keeps a newly-added feature column
-    from 500-ing the load; any new column is propagated onto the target BEFORE the
-    swap. When no new columns are present this is byte-for-byte equivalent to the
-    old delete-then-overwrite (scan_date fully replaced, no dups).
+    always survive a failure. Schema drift is handled WITHOUT autodetect
+    (2026-07-07 — autodetect inferred the all-NULL recommended_spread_pct as
+    STRING and 500'd every load, labeler down 07-02..07-06): new row keys are
+    diffed against the staging schema and ADDed as columns typed from the
+    Python values, then the load binds the staging table's explicit schema;
+    any new column is propagated onto the target BEFORE the swap. When no new
+    columns are present this is byte-for-byte equivalent to the old
+    delete-then-overwrite (scan_date fully replaced, no dups). NEVER re-add
+    autodetect here — see docs/DECISIONS/2026-07-07-labeler-staging-autodetect-outage.md.
 
     Mirrors _write_ledger_records' streaming-avoiding load-job pattern but takes
     an explicit ``table`` — deliberately NOT reusing _write_ledger_records (which
@@ -1631,8 +1636,46 @@ def _write_shadow_records(
     ).result()
 
     try:
-        # 2) Load new rows into staging. autodetect=True + ALLOW_FIELD_ADDITION
-        #    means a genuinely NEW field is ADDED to staging instead of 500-ing.
+        # 2) Load new rows into staging with the staging table's EXPLICIT
+        #    schema — NEVER autodetect (2026-07-07 fix): with autodetect=True,
+        #    an all-NULL column (recommended_spread_pct went permanently NULL
+        #    with the 2026-07-02 enrichment fix) is inferred as STRING, which
+        #    conflicts with the staging table's FLOAT and 500s EVERY load —
+        #    the labeler was down 07-02..07-06 on exactly this (the same
+        #    landmine class as the 07-02 enrichment outage, second location).
+        #    Schema-drift tolerance (the reason autodetect was added 07-01) is
+        #    preserved by diffing row keys against the staging schema and
+        #    ADDing columns typed from the PYTHON values before the load —
+        #    deterministic typing from code we control, not BQ inference over
+        #    serialized JSON.
+        staging_schema = client.get_table(staging).schema
+        known_names = {f.name for f in staging_schema}
+        new_keys = sorted({k for r in rows for k in r} - known_names)
+        if new_keys:
+
+            def _bq_type_of(key: str) -> str:
+                for r in rows:
+                    v = r.get(key)
+                    if v is None:
+                        continue
+                    if isinstance(v, bool):
+                        return "BOOL"
+                    if isinstance(v, int):
+                        return "INT64"
+                    if isinstance(v, float):
+                        return "FLOAT64"
+                    return "STRING"  # str/date/datetime/etc — safe default
+                return "STRING"
+
+            adds = ", ".join(
+                f"ADD COLUMN IF NOT EXISTS `{k}` {_bq_type_of(k)}" for k in new_keys
+            )
+            client.query(f"ALTER TABLE `{staging}` {adds}").result()
+            staging_schema = client.get_table(staging).schema
+            logger.info(
+                f"shadow: staged {len(new_keys)} new drift column(s): {new_keys}"
+            )
+
         jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
         load_job = client.load_table_from_file(
             io.BytesIO(jsonl.encode("utf-8")),
@@ -1640,8 +1683,7 @@ def _write_shadow_records(
             job_config=bigquery.LoadJobConfig(
                 write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
                 source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-                schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
-                autodetect=True,
+                schema=staging_schema,
             ),
         )
         load_job.result()  # raises on load failure -> target still untouched
@@ -2637,6 +2679,82 @@ def trigger_paper_trading():
             return jsonify({"status": "error", "message": msg}), 500
     except Exception as e:
         logger.error(f"Error in paper trading endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/persist_minute_paths", methods=["POST"])
+def trigger_persist_minute_paths():
+    """RESEARCH-ONLY minute-path top-up (MCP Priority-4 / must-fix #6g).
+
+    Reconciles `option_minute_paths` for the last 3 scan_dates' enriched
+    pools (each window [entry_day .. min(exit_day_3d, today)]); by a window's
+    third session it is complete and drops out of the set. Hit by the daily
+    `option-minute-paths-refresh` Cloud Scheduler cron in the evening, after
+    the labeler. Fully independent of the trader/labeler paths — fetch +
+    write logic lives in minute_paths.py behind a hard leakage wall (realized
+    tape; never a feature; never read by selection or the live trader).
+
+    Token-gated like the notifier's pool-liquidity endpoint: when
+    POOL_LIQ_REFRESH_TOKEN is set, every call must send X-Refresh-Token, and
+    the scan_dates override is refused without it (fail-closed while services
+    are public; see docs/DECISIONS/2026-07-02-service-auth-hardening.md).
+    Body (optional, token-gated): {"scan_dates": ["YYYY-MM-DD", ...]}.
+    """
+    import hmac as _hmac
+
+    import minute_paths
+
+    expected_token = os.environ.get("POOL_LIQ_REFRESH_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    token_authed = bool(expected_token) and _hmac.compare_digest(
+        provided_token, expected_token
+    )
+    if expected_token and not token_authed:
+        return jsonify({"status": "denied"}), 403
+
+    req = request.get_json(silent=True) or {}
+    if req.get("scan_dates") and not token_authed:
+        return jsonify(
+            {"status": "denied", "reason": "scan_dates override requires X-Refresh-Token"}
+        ), 403
+
+    try:
+        today_et = datetime.now(est).date()
+        if req.get("scan_dates"):
+            try:
+                scan_dates = [
+                    datetime.strptime(str(sd), "%Y-%m-%d").date()
+                    for sd in req["scan_dates"]
+                ][:10]
+            except ValueError:
+                return jsonify({"status": "error", "reason": "scan_dates must be YYYY-MM-DD"}), 400
+        else:
+            # the last 3 trading days strictly before today — the scan_dates
+            # whose 3-session excursion windows are still accreting bars
+            scan_dates = []
+            d = today_et - timedelta(days=1)
+            while len(scan_dates) < 3 and d > today_et - timedelta(days=15):
+                if is_trading_day(d):
+                    scan_dates.append(d)
+                d -= timedelta(days=1)
+
+        windows = []
+        for sd in scan_dates:
+            entry_day = get_next_trading_day(sd)
+            if entry_day > today_et:
+                continue
+            window_end = min(get_nth_next_trading_day(entry_day, 2), today_et)
+            windows.append(
+                {"scan_date": sd, "entry_day": entry_day, "window_end": window_end}
+            )
+        if not windows:
+            return jsonify({"status": "skipped", "reason": "no closed windows to persist"}), 200
+
+        summary = minute_paths.persist_minute_paths(windows)
+        code = 200 if summary.get("status") in ("success", "partial") else 500
+        return jsonify(summary), code
+    except Exception as e:
+        logger.error(f"Error in persist_minute_paths endpoint: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
