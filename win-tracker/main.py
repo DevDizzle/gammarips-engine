@@ -698,8 +698,48 @@ def compute_pool_outcomes():
         sameday_match = f"(label_sim_version = '{sameday_sim}' OR label_sim_version IS NULL)"
         threeday_sim = "HOLD3D_V6_LEGACY_8060"
         opp_sim = "OPP_MFE_MAE_V1"
+        # Full-life (surfaced -> expiration) surface — the scorecard-redesign
+        # centerpiece (owner-approved 2026-07-08). DEPENDS on the life_* columns
+        # existing in enriched_option_outcomes (created by forward-paper-trader's
+        # schema-ensure / the life backfill) — deploy order: substrate first.
+        # Fixed bucket edges are part of the public contract: the webapp renders
+        # these bucket labels verbatim from the doc.
+        life_sim = "LIFE_TO_EXPIRY_V1"
+        life_match = f"life_sim_version = '{life_sim}'"
+        peak_edges = [(None, 0.05), (0.05, 0.20), (0.20, 0.40), (0.40, 0.70),
+                      (0.70, 1.00), (1.00, 2.00), (2.00, None)]
+        expiry_edges = [(None, -0.90), (-0.90, -0.50), (-0.50, 0.0), (0.0, 0.50),
+                        (0.50, 1.00), (1.00, 2.00), (2.00, None)]
+
+        def _bucket_countifs(col: str, edges, prefix: str) -> str:
+            parts = []
+            for i, (lo, hi) in enumerate(edges):
+                cond = f"{life_match} AND {col} IS NOT NULL"
+                if lo is not None:
+                    cond += f" AND {col} >= {lo}"
+                if hi is not None:
+                    cond += f" AND {col} < {hi}"
+                parts.append(f"COUNTIF({cond}) AS {prefix}_{i}")
+            return ",\n          ".join(parts)
+
         query = f"""
         SELECT
+          COUNTIF({life_match} AND life_status IS NOT NULL) AS life_processed,
+          COUNTIF({life_match} AND life_status = 'NO_ENTRY') AS life_no_entry,
+          COUNTIF({life_match} AND life_peak_return IS NOT NULL) AS life_n_peak,
+          COUNTIF({life_match} AND life_expiry_return IS NOT NULL) AS life_n_expiry,
+          CAST(MIN(IF({life_match} AND life_peak_return IS NOT NULL, scan_date, NULL)) AS STRING) AS life_first_scan_date,
+          CAST(MAX(IF({life_match} AND life_peak_return IS NOT NULL, scan_date, NULL)) AS STRING) AS life_last_scan_date,
+          ROUND(APPROX_QUANTILES(IF({life_match}, life_peak_return, NULL), 100)[OFFSET(50)], 4) AS life_peak_median,
+          ROUND(APPROX_QUANTILES(IF({life_match}, life_peak_return, NULL), 100)[OFFSET(75)], 4) AS life_peak_p75,
+          ROUND(APPROX_QUANTILES(IF({life_match}, life_peak_return, NULL), 100)[OFFSET(90)], 4) AS life_peak_p90,
+          ROUND(APPROX_QUANTILES(IF({life_match}, life_trough_return, NULL), 100)[OFFSET(50)], 4) AS life_trough_median,
+          ROUND(APPROX_QUANTILES(IF({life_match}, life_trough_return, NULL), 100)[OFFSET(10)], 4) AS life_trough_p10,
+          ROUND(APPROX_QUANTILES(IF({life_match}, life_expiry_return, NULL), 100)[OFFSET(50)], 4) AS life_expiry_median,
+          COUNTIF({life_match} AND life_peak_return >= 0.40) AS life_peak_ge_40,
+          COUNTIF({life_match} AND life_peak_return >= 1.00) AS life_peak_ge_100,
+          {_bucket_countifs("life_peak_return", peak_edges, "lpb")},
+          {_bucket_countifs("life_expiry_return", expiry_edges, "leb")},
           COUNT(*) AS contracts_total,
           COUNT(DISTINCT scan_date) AS scan_days,
           CAST(MIN(scan_date) AS STRING) AS first_scan_date,
@@ -732,8 +772,48 @@ def compute_pool_outcomes():
             # instead of letting the public doc go silently stale.
             return jsonify({"status": "refused", "reason": "degraded substrate", "row": str(row)}), 503
 
+        # Fold the flat life_*/lpb_*/leb_* query fields into ONE nested map so
+        # the webapp reads doc.life.* and the legacy top-level fields stay
+        # byte-compatible for any existing reader.
+        life_raw = {k: row.pop(k) for k in list(row.keys())
+                    if k.startswith(("life_", "lpb_", "leb_"))}
+        peak_bucket_labels = ["<+5%", "+5–20%", "+20–40%", "+40–70%",
+                              "+70–100%", "+100–200%", "+200%+"]
+        expiry_bucket_labels = ["<−90%", "−90–−50%", "−50–0%",
+                                "0–+50%", "+50–100%", "+100–200%", "+200%+"]
+        life = {
+            "sim_version": life_sim,
+            "label": ("Full-life surface: what each pool contract's premium did from "
+                      "the 10:00 ET surfacing fill to expiration — peak/trough "
+                      "excursion with NO exit rule, plus the hold-to-settlement "
+                      "intrinsic mark. Pool-level aggregates only."),
+            "processed": life_raw.get("life_processed"),
+            "no_entry_excluded": life_raw.get("life_no_entry"),
+            "n_peak": life_raw.get("life_n_peak"),
+            "n_expiry": life_raw.get("life_n_expiry"),
+            "first_scan_date": life_raw.get("life_first_scan_date"),
+            "last_scan_date": life_raw.get("life_last_scan_date"),
+            "peak_median": life_raw.get("life_peak_median"),
+            "peak_p75": life_raw.get("life_peak_p75"),
+            "peak_p90": life_raw.get("life_peak_p90"),
+            "trough_median": life_raw.get("life_trough_median"),
+            "trough_p10": life_raw.get("life_trough_p10"),
+            "expiry_median": life_raw.get("life_expiry_median"),
+            "peak_ge_40": life_raw.get("life_peak_ge_40"),
+            "peak_ge_100": life_raw.get("life_peak_ge_100"),
+            "peak_buckets": [
+                {"label": lbl, "n": life_raw.get(f"lpb_{i}")}
+                for i, lbl in enumerate(peak_bucket_labels)
+            ],
+            "expiry_buckets": [
+                {"label": lbl, "n": life_raw.get(f"leb_{i}")}
+                for i, lbl in enumerate(expiry_bucket_labels)
+            ],
+        }
+
         doc = {
             **row,
+            "life": life,
             "units": "fractions (0.21 = +21%)",
             "bracket_label": "Blind buy of EVERY pool contract under the fixed same-day +40%/-30% bracket (10:00 entry, flat 15:45 ET)",
             "bracket_sim_version": f"{sameday_sim} (incl. legacy pre-tagging rows, verified same-day)",

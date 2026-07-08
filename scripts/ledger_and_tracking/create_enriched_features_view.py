@@ -187,6 +187,11 @@ _EXCLUDED_OPP = [
     "opp_peak_return", "opp_trough_return", "opp_minutes_to_peak",
     "opp_minutes_to_trough", "opp_bar_count", "opp_sim_version",
 ]
+_EXCLUDED_LIFE = [
+    "life_status", "life_peak_return", "life_trough_return",
+    "life_expiry_return", "life_daily_bar_count", "life_sim_version",
+    "life_labeled_at",
+]
 _EXCLUDED_LABEL = [
     "realized_return_pct_3d", "exit_reason_3d", "exit_day_3d",
     "exit_timestamp_3d", "entry_price_3d", "peak_premium_3d",
