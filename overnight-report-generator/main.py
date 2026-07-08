@@ -17,7 +17,12 @@ import market_context  # deterministic, non-blocking macro + sector context
 # pre-computed sector concentration, 14d sentiment shift (Tetlock), divergence
 # flags, change-vs-yesterday diff (Lazy Prices), forced per-candidate binary
 # directional calls (Lopez-Lira), structured theme tags (Bybee), seoMetadata.
-PROMPT_VERSION = "report_v2.1"
+# v3 (2026-07-03) = data-vendor descriptive voice: no trade instructions or
+# premium-buying advice on any horizon, no pick language, "Pool Snapshot"
+# replaces the directional-calls table, bullish-only-by-construction handling
+# (bullish-share/z-score commentary forbidden), one pool-size number
+# (total_signals) only, no internal field/table names echoed into prose.
+PROMPT_VERSION = "report_v3_descriptive"
 
 # Independent version label for the per-signal SEO call (writes seoMetadata onto
 # the public /signals/{ticker} pages). Deliberately ISOLATED from PROMPT_VERSION:
@@ -309,19 +314,19 @@ from typing import List, Dict, Any
 
 class CandidateCall(BaseModel):
     ticker: str
-    direction: str = Field(description='Forced binary call: "BULLISH", "BEARISH", or "UNCLEAR".')
-    rationale: str = Field(description='Single sentence explaining the call. Cite a specific load-bearing fact (flow datum, catalyst, divergence flag).')
+    direction: str = Field(description='Forced binary flow-read: "BULLISH", "BEARISH", or "UNCLEAR". A descriptive classification of what the flow shows — not a trade recommendation.')
+    rationale: str = Field(description='Single sentence explaining the flow-read. Cite a specific load-bearing fact (flow datum, catalyst, divergence flag). Descriptive only — no trade instructions.')
 
 class SeoMetadata(BaseModel):
     seoTitle: str = Field(description='SEO-optimized page title, ≤60 chars. Include a charged keyword + the date.')
-    seoDescription: str = Field(description='SEO meta description, 140-160 chars. Lead with the day\'s thematic bias and the bull/bear split.')
+    seoDescription: str = Field(description='SEO meta description, 140-160 chars. Lead with the day\'s thematic bias and the curated pool size.')
     keywords: List[str] = Field(description='5-8 search-relevant keywords. Mix evergreen ("options flow", "unusual options activity") with day-specific themes.')
 
 class ReportResponse(BaseModel):
     title: str = Field(description='A punchy, thematic title (e.g., "The Tariff Shakeout"). Quotable on X.')
-    headline: str = Field(description='A 2-3 sentence summary of the market split and key directional plays.')
+    headline: str = Field(description='A 2-3 sentence summary of the curated pool size, dominant theme, and regime context. Descriptive — no trade calls.')
     content: str = Field(description='The full markdown body of the report.')
-    per_candidate_calls: List[CandidateCall] = Field(description='One forced directional call per top candidate (bull and bear lists combined). Lopez-Lira & Tang 2023 binary forcing.')
+    per_candidate_calls: List[CandidateCall] = Field(description='One forced flow-read classification per top candidate (bull and bear lists combined). Lopez-Lira & Tang 2023 binary forcing — descriptive data classification, not advice.')
     seoMetadata: SeoMetadata = Field(description='Structured metadata for the public webapp /reports/{date} surface (schema.org Article + OG tags).')
 
 class PerSignalSeo(BaseModel):
@@ -361,7 +366,7 @@ def _fallback_signal_seo(sig: dict, report_date: str) -> dict:
         strike = sig.get("recommended_strike")
         exp = sig.get("recommended_expiration")
         lead = f"{ticker} flagged for unusual options activity with {dir_word.lower() or 'directional'} institutional flow."
-        tail = f" Recommended contract: strike {strike}, exp {exp}." if strike else ""
+        tail = f" Flow concentrated at strike {strike}, exp {exp}." if strike else ""
         desc = lead + tail
     desc = _truncate(desc, 160)
 
@@ -514,9 +519,10 @@ def generate_report_content(payload, report_date: str | None = None):
 You are GammaMolt, the AI CEO and quantitative editor for GammaRips. You are
 writing the 'Overnight Edge' daily report. The report has DOUBLE DUTY:
 
-1. INTERNAL: it is consumed verbatim by our V5.4 Scorer + Picker LLM ranker as
-   `report_md` to corroborate or contradict each candidate's narrative. The
-   Picker reads it for regime fit, divergence cross-checks, and theme overlay.
+1. INTERNAL: it is consumed verbatim by our candidate-ranking LLM as market
+   context, to corroborate or contradict each candidate's narrative — regime
+   fit, divergence cross-checks, theme overlay. NEVER mention this internal
+   consumer, any ranking process, or any "pick" in the text itself.
 2. PUBLIC: the same markdown is rendered on gammarips.com/reports/{{scan_date}}
    for SEO + human readers, and the title/headline are quoted on X by the
    x-poster service.
@@ -524,24 +530,48 @@ writing the 'Overnight Edge' daily report. The report has DOUBLE DUTY:
 Tone: intelligent, market-structure aware, concise but rich. NO hedging
 language ("may", "could potentially"). Evidence-led. Quotable.
 
+VOICE & POSITIONING (non-negotiable — this is a public data product):
+
+- GammaRips sells options-flow DATA. It does not publish trade recommendations
+  and there is NO public daily pick. NEVER use "pick", "our pick", "today's
+  pick", or frame any candidate as a selected or recommended trade.
+- NEVER give trade instructions on ANY horizon: no entry/target/stop levels,
+  no position sizing, no hold-period advice, and no advice to buy premium or
+  options (phrasing like "supportive of buying premium" is forbidden).
+  Characterize the tape and the flow; leave conclusions to the reader.
+- The curated pool is BULLISH-ONLY BY CONSTRUCTION (a hard pipeline gate), so
+  bullish share, bull/bear splits, and bullish-share z-scores are structurally
+  degenerate and carry NO information. NEVER present bullish-share
+  percentages, baselines, or z-score commentary anywhere in the output.
+- ONE pool-size number: `total_signals` is the ONLY candidate count you may
+  cite; call it the curated pool. Never invent or cite any other scan count.
+- NEVER echo internal field, table, or pipeline names into prose (e.g.
+  "premium_signals", "premium signal DB", "overnight_score", "report_md",
+  "per_candidate_calls", "shift_z"). Translate everything into plain market
+  English.
+
 LITERATURE-GROUNDED CONTENT RULES (do not violate):
 
 - SESTM 2021: use specific institutional-flow vocabulary verbatim — do NOT
   paraphrase. Whitelist of charged tokens to lean on: {charged_tokens}.
   Synonyms ("buyers showed up in size", "bulls pushed through") dilute signal.
-- Lopez-Lira & Tang 2023: each top candidate gets a forced binary direction
+- Lopez-Lira & Tang 2023: each top candidate gets a forced binary flow-read
   (BULLISH / BEARISH / UNCLEAR) with a one-sentence rationale citing a specific
   load-bearing datum (flow, catalyst, or divergence flag). UNCLEAR is allowed
-  but only when the divergence flags actively contradict the flow.
-- Tetlock 2007 / Lazy Prices 2020: the bullish-share delta vs the 14-day
-  baseline is in the payload. Surface it explicitly with the z-score; do NOT
-  re-compute or restate it as vibes.
+  but only when the divergence flags actively contradict the flow. These are
+  descriptive classifications of what the DATA shows — never trade calls.
+- Lazy Prices (Cohen et al. 2020): the *fact of change* is the signal —
+  surface the change_vs_yesterday ticker diff plainly. Do NOT apply the old
+  Tetlock bullish-share/z-score framing: the pool's direction mix is fixed by
+  construction, not by the market.
 - Bybee et al. 2023: the `themes` list (catalyst_type counts) is the regime
   overlay. Use it for the Key Themes section. Do not invent themes the data
   does not support.
 
 PRE-COMPUTED PAYLOAD (counts and flags here are authoritative — do not
-recompute, do not contradict, do not omit):
+recompute, do not contradict. Surface everything the section contracts below
+call for; OMIT anything the VOICE rules forbid — in particular the
+sentiment_shift block and bullish/bearish counts stay out of the output):
 
 {json.dumps(payload, indent=2, default=str)}
 
@@ -561,51 +591,63 @@ OUTPUT — produce a single JSON object with these keys:
        (e.g. if a previous title was "The Infrastructure Re-Rating", you
        cannot ship "AI Infrastructure Re-Rating", "The Infrastructure Pivot",
        or "Infrastructure Re-Pricing"). Pick a different theme angle.
-    c) Tie the title to today's sentiment_shift direction when the z-score
-       is outside [-1, 1] — e.g. an outlier_bearish day should read as a
-       cooling/de-risking title, not a euphoric one.
-- "headline": 2-3 sentence summary leading with the bull/bear split + the
-  shift_z direction (today vs trailing 14d), then the dominant theme.
+    c) Tie the title to the day's dominant theme and the macro_regime
+       risk_state — a risk-off tape should read as a cooling/de-risking
+       title, not a euphoric one.
+- "headline": 2-3 sentence summary leading with the curated pool size
+  (total_signals) + the dominant theme, then the macro/regime context. No
+  bull/bear splits, no z-scores, no trade calls.
 - "content": full markdown body. REQUIRED sections in this order:
     # {{title}} — Overnight Edge, {{report_date}}
     ## Market Pulse
-       Total signals + bull/bear split + bullish_share_today and shift_z vs
-       baseline (cite the numbers from sentiment_shift in the payload).
+       The curated pool size (total_signals — cite this number and NO other
+       count) + the dominant catalyst themes + one line of macro context. No
+       bull/bear split or bullish-share stats — the pool is bullish-only by
+       construction.
     ## Cross-Sectional Concentration
        Top 3 sectors from sector_concentration. Note single-name vs broad. If
        sector_concentration is empty, write a single line: "Sector tags
        unavailable for this scan; concentration check skipped." Do NOT
        fabricate sectors.
-    ## Sentiment Shift vs 14-Day Baseline
-       One paragraph framing today's bullish share against trailing mean +
-       std. Tetlock-shift framing: is today an outlier (|z| > 1) or in band?
+    ## Pool Character
+       One paragraph characterizing today's curated pool: theme + sector
+       concentration, idiosyncratic vs thematic flow, and where the premium
+       clustered. NO bullish-share or z-score commentary — the pool's
+       direction mix is fixed by the pipeline, not by the market.
     ## Macro & Regime Backdrop
        From `macro_regime` (authoritative, deterministic, point-in-time): the VIX
        level + 1d/5d trend (vix, vix_level_state, vix_trend), term structure
        (term_state), rates (ust10y, rate_state, rate_trend), and the composite
        risk_state with its risk_state_reasons. State plainly whether this is a
-       risk-on or risk-off tape and what it implies for buying 3-day premium. If a
-       field is UNKNOWN, say "macro data unavailable for this scan" for that field —
-       do NOT fabricate or infer it. Cite the numbers; no vibes.
+       risk-on or risk-off tape as context for reading the day's flow — do NOT
+       advise buying premium or any trade on any horizon. If a field is UNKNOWN,
+       say "macro data unavailable for this scan" for that field — do NOT
+       fabricate or infer it. Cite the numbers; no vibes.
     ## Sector Tape
        From `sector_panel` (authoritative; may be null): rank the sectors by ret_ytd
        with ret_5d and drawdown_5d_sigma beside each, and call out any sector tagged
        in rotation_flags (crowded_rotating = a YTD leader now in a sharp multi-sigma
        5-day drawdown; oversold_lagging = a laggard turning up). One line on which
-       sectors are tailwinds vs which are falling knives for a 3-day long. If
-       sector_panel is null, write a single line: "Sector tape unavailable for this
-       scan." Do NOT fabricate sector moves.
+       sectors show tailwinds in the data vs which look like falling knives —
+       descriptive only, no positioning advice. If sector_panel is null, write a
+       single line: "Sector tape unavailable for this scan." Do NOT fabricate
+       sector moves.
     ## Key Themes
        Top 3-5 catalysts from `themes`. Tie to the candidates that carry them.
     ## Top Bullish Signals
        Brief table or bullets, 2-3 sentence color per top_bullish entry. Use
        charged tokens.
     ## Top Bearish Signals
-       Same structure for top_bearish.
-    ## Per-Candidate Directional Calls
+       Same structure for top_bearish. If top_bearish is empty, write a single
+       line: "No bearish names — the curated pool is bullish-only by
+       construction."
+    ## Pool Snapshot
        Render the per_candidate_calls list as a markdown table with columns
-       Ticker | Call | Rationale. Calls must match what you also output in
-       the structured `per_candidate_calls` field.
+       Ticker | Flow Read | Basis. The Flow Read is a descriptive
+       classification of what the flow shows (BULLISH / BEARISH / UNCLEAR),
+       NOT a trade call; the Basis cites the load-bearing datum. Rows must
+       match what you also output in the structured `per_candidate_calls`
+       field.
     ## Divergence Watch
        For each entry in `divergences`: ticker + flag list + 1-line
        interpretation. If `divergences` is empty, write a single line saying so.
@@ -613,14 +655,15 @@ OUTPUT — produce a single JSON object with these keys:
        From change_vs_yesterday: list tickers_added and tickers_dropped vs
        prior_report_date. If no prior report, say so in one line.
     ## Summary / Bias
-       2-3 sentences synthesizing the day's bias for the Picker. End with one
-       declarative sentence — no hedge language.
-- "per_candidate_calls": forced binary direction + rationale per top candidate
+       2-3 sentences synthesizing the day's flow character and regime context.
+       End with one declarative sentence — no hedge language, and no trade
+       instruction.
+- "per_candidate_calls": forced binary flow-read + rationale per top candidate
   (top_bullish + top_bearish, deduped). UNCLEAR allowed only when divergence
-  flags contradict the flow.
+  flags contradict the flow. Descriptive classifications, not trade calls.
 - "seoMetadata": seoTitle (≤60 chars, includes a charged keyword + date),
-  seoDescription (140-160 chars, leads with bias + split), keywords (5-8
-  mixing evergreen + day-specific themes).
+  seoDescription (140-160 chars, leads with the day's theme + curated pool
+  size), keywords (5-8 mixing evergreen + day-specific themes).
 
 CRITICAL FORMATTING:
 - Preserve newlines in "content" using explicit `\\n` escaping. Use `\\n\\n`

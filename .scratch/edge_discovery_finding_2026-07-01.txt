@@ -1,0 +1,135 @@
+================================================================================
+EDGE-DISCOVERY FINDING — enriched pool selection features x exit policy
+Date: 2026-07-01
+Provenance: dynamic Workflow "edge-discovery-enriched-pool" (run wf_0515a9c9-d1a,
+            27 agents, leakage-safe screen + walk-forward + bootstrap + 3-skeptic
+            adversarial refute panel per survivor).
+Purpose of this file: self-contained handoff for a PARALLEL SESSION to follow
+            through on. Owner wants EDGE — features that select contracts with
+            real profit potential, for personal trading AND for the MCP feed.
+================================================================================
+
+--------------------------------------------------------------------------------
+TL;DR (two lines)
+--------------------------------------------------------------------------------
+1. The pool is NOT edgeless — the LIVE EXIT was hiding the edge. GIGO same-day
+   (+40/-30/flat 15:45) is a CONFIRMED structural loser; on a 3-DAY hold the pool
+   is ~flat and ONE lever survived the adversarial gauntlet.
+2. The survivor = the momentum x delta CONJUNCTION, held 3-day: real-but-FRAGILE,
+   PROPOSER-ONLY (not lockable). Next step = accrue live 3-day closes to confirm.
+
+--------------------------------------------------------------------------------
+THE RESULT (measured on enriched_option_outcomes + the frozen 3-day label set)
+--------------------------------------------------------------------------------
+                          GIGO same-day (LIVE exit)     3-day hold (+80/-60)
+  Whole-pool composite    -2.14%/day                    +2.9%/day
+    bootstrap 90% CI      [-3.50%, -0.97%] ALL NEGATIVE [-0.98%, +6.53%] brackets 0
+  Levers surviving        0 of ~16                      1
+  Win rate                29.7%                         47.0%
+
+GIGO same-day is dead for this pool: CI entirely below zero, NOTHING rescues it
+(77% of trades time out before they can work). This is why every prior read looked
+edgeless — we were measuring under the one exit that guarantees a loss.
+
+THE ONE SURVIVING EDGE:
+  Rule:  BULLISH & mom_60 >= +0.35 & |recommended_delta| in [0.20, 0.46], HELD 3 DAYS
+  Stats: day-mean +14.2% | bootstrap CI [+4.3%, +24.3%] (clears zero) | win 60.5%
+         | positive in BOTH walk-forward halves.
+  Both features are point-in-time / leakage-safe:
+    - mom_60 = trailing 60-trading-day underlying return from adjusted closes
+      on-or-before scan_date (cache: backtesting_and_research/cache/poly_daily_underlying/{TICKER}.parquet)
+    - recommended_delta = contract greek fixed at selection.
+  NOTE: only the INTERACTION survived. mom_60>=0.35 alone and |delta| band alone
+  BOTH failed the refute panel this pass.
+
+--------------------------------------------------------------------------------
+WHY IT IS NOT YET DEPLOYABLE (honest caveats — do NOT oversell)
+--------------------------------------------------------------------------------
+- Single survivor of ~16 hypotheses tested => selection-inflation / deflated-Sharpe
+  territory.
+- Only the INTERACTION passed while both components failed alone — interactions are
+  exactly where overfit hides.
+- Adversarial panel: 2 of 3 skeptics cleared it; 1 refuted at HIGH confidence
+  (=> medium consensus only).
+- DECAY: first-half +16% -> newest-third +1.7% (near the +2.9% 3-day pool baseline).
+  Forward return may already be far below the historical +14%.
+- Substrate ends 2026-05-28 (3-day-era). The live engine trades GIGO same-day since
+  June => ZERO live 3-day closes of this rule currently exist.
+VERDICT: promising PROPOSER to forward-test, NOT a confirmed edge to deploy. Not
+live-lockable until N>=15 forward 3-day closes in the CURRENT regime.
+
+--------------------------------------------------------------------------------
+WHAT IT MEANS
+--------------------------------------------------------------------------------
+FOR PERSONAL TRADING (actionable now, with the caveats above):
+  - Hold ~3 days. Do NOT scalp same-day (GIGO destroys the edge).
+  - Prioritize names that are BOTH ripping (60-day underlying return >= +35%) AND
+    in the 0.20-0.46 delta band. That conjunction is the strongest read.
+
+FOR THE MCP / PAID FEED:
+  - The "subscribers get contracts with profit potential" claim is NOT supported
+    under GIGO same-day and only PROVISIONALLY under a 3-day hold for this narrow
+    subpool. Do not make the profit claim until N>=15 forward confirmation.
+  - Ship the flow-intelligence feed (full tilted BULLISH pool as DATA-not-advice)
+    as the revenue floor. Expose the rule as a user-RUN pattern with explicit
+    disclosure: unconfirmed live, held 3-day, decaying, GIGO same-day destroys it.
+
+--------------------------------------------------------------------------------
+RECOMMENDED NEXT STEP (the follow-through) — FORWARD 3-DAY LABEL ARM
+--------------------------------------------------------------------------------
+Problem: the live engine trades GIGO same-day, so we accrue ZERO evidence on the
+rule that actually works. We cannot confirm or kill the edge without 3-day closes.
+
+Build: add a forward 3-DAY bracket label arm to the existing pool replay, so every
+pool name is ALSO labeled under a 3-day (+80/-60) hold in parallel with the current
+GIGO label. Append-only RESEARCH table (or a new column-set), NEVER touches
+forward_paper_ledger / Scorecard / website. This mirrors the existing keystone
+pattern (enriched_option_outcomes is already a forward-only pool replay).
+
+Why it works fast: the rule fires ~4.6 qualifiers/day across the pool, so at pool
+width you reach N>=15 conjunction 3-day closes in the CURRENT regime in ~3-4 weeks
+(vs months on the 1-pick-a-day cohort). Then re-run the same walk-forward + refute
+test to see if the decay (+16% -> +1.7%) is noise or death. MEASURE, then lock.
+
+Scope notes for whoever builds it:
+  - The pool replay lives in forward-paper-trader/main.py: _simulate_contract
+    (~L571-935, fetches 1-min option bars via fetch_minute_bars ~L662),
+    _write_enriched_outcomes (~L1381-1551), run_label_enriched_pool (~L1554-1591),
+    endpoint POST /label_enriched_pool (~L1921-1946), GIGO constants ~L54-111.
+    A 3-day arm needs multi-day bars (entry_day..entry_day+3), not one session.
+  - Existing daily cron: Cloud Scheduler job forward-paper-trader-label-pool,
+    0 17 * * 1-5 America/New_York.
+  - Table: profitscout-fida8.profit_scout.enriched_option_outcomes (64 cols).
+  - CONSTRAINTS (from CLAUDE.md): NEVER add execution gates to forward-paper-trader;
+    signal-quality changes live in enrichment-trigger / signal-notifier. This is a
+    RESEARCH label arm, not an execution change. LEAKAGE is the one non-negotiable.
+    gammarips-review MUST audit before anything ships. G-Stack DoD: no live strategy
+    change without 30-day OOS + review (owner may waive ceremony EXCEPT leakage).
+
+OPTIONAL (secondary): enrichment-trigger _edge_select_top_n (~main.py:596) ALREADY
+tilts toward the conjunction (BULLISH +2.0 / delta-band +1.5 / mom_60 +1.25). Could
+add a small SUPER-ADDITIVE bonus when BOTH mom + delta conditions hold (demote
+single-lever names), kept SOFT (never a hard gate). But this only converts to PnL
+under a 3-day exit, so the 3-day arm is the priority, not tuning the ranker.
+
+--------------------------------------------------------------------------------
+SOURCE PATHS / REPRODUCE
+--------------------------------------------------------------------------------
+- Workflow script: .claude/.../workflows/scripts/edge-discovery-enriched-pool-wf_0515a9c9-d1a.js
+- GIGO label table: profitscout-fida8.profit_scout.enriched_option_outcomes (BQ;
+  query with: bq query --use_legacy_sql=false --project_id=profitscout-fida8 ...)
+- 3-day label set (frozen, 04-13..05-29, 1375 filled):
+  backtesting_and_research/realized_label.pkl + analysis_option_pnl.parquet
+- Underlying daily-bar cache (for mom_60): backtesting_and_research/cache/poly_daily_underlying/{TICKER}.parquet
+- Companion finding (feasibility + the negative GIGO composite):
+  .scratch/gigo_flow_index_feasibility_2026-07-01.md
+
+--------------------------------------------------------------------------------
+MEMORY POINTERS (for the parallel session's recall)
+--------------------------------------------------------------------------------
+- project_momentum_60d_lever      (UPDATED 07-01: now exit-conditional + interaction-only)
+- project_gigo_pool_composite_negative (UPDATED 07-01: negativity is exit-conditional)
+- project_exploit_winners_falsified, project_agent_data_readiness,
+  project_v7_gigo_live, project_edge_rank_cap_and_bullish_only,
+  project_monetization_pivot_decouple_pick, project_agent_mode_mcp_byoa
+================================================================================

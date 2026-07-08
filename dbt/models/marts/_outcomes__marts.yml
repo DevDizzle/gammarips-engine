@@ -16,7 +16,10 @@ models:
       Counterfactual option-PnL labels over the full enriched pool. option_return_pct
       is the canonical PnL; regime_name attached by date range. Grain uniqueness is
       WARN — the source has ~145 known duplicate rows (a real finding to clean, not
-      a build blocker).
+      a build blocker). LABEL-CARRYING kitchen sink (`select o.*`) — for HUMAN
+      label analysis / supervised training only. Headless agents / the MCP must
+      query `features_enriched_option_outcomes` (leakage-safe features-only)
+      instead, and join back here on outcome_id only when labels are needed.
     tests:
       # error-level: staging dedups to this grain, so the mart must be unique
       - dbt_utils.unique_combination_of_columns:
@@ -42,6 +45,55 @@ models:
         tests: [not_null]
       - name: is_winner
         tests: [not_null]
+
+  - name: features_enriched_option_outcomes
+    description: >
+      LEAKAGE-SAFE FEATURES-ONLY projection of the counterfactual option-PnL set
+      (substrate must-fix #4) — the dbt mirror of the BigQuery view
+      `enriched_features_v1`. Exposes ONLY point-in-time features (as-of <=
+      scan_date), identity/join keys, and cohort metadata; every
+      outcome/label/opportunity/regime-telemetry column is excluded by an
+      explicit allowlist. THIS is the agent/MCP-facing surface — point headless
+      data-science agents here, NOT at fct_enriched_option_outcomes (which is a
+      `select *` kitchen sink that carries the realized labels). Join back to the
+      fct on outcome_id only when a human needs labels for supervised training.
+    columns:
+      - name: outcome_id
+        description: Surrogate join key back to fct_enriched_option_outcomes.
+        tests: [not_null]
+      - name: scan_date
+        description: "[identity | as-of <= scan_date] Selection/decision date."
+        tests: [not_null]
+      - name: entry_day
+        description: "[identity] First trading day after scan_date (partition key)."
+        tests: [not_null]
+      - name: ticker
+        description: "[identity | as-of <= scan_date] Underlying symbol."
+        tests: [not_null]
+      - name: direction
+        description: "[identity | as-of <= scan_date] Contract direction fixed at selection."
+      - name: recommended_contract
+        description: "[identity | as-of <= scan_date] Selected OCC option symbol."
+      - name: recommended_delta
+        description: "[feature | as-of <= scan_date] Option delta at selection (study lever)."
+      - name: risk_reward_ratio
+        description: "[feature | as-of <= scan_date] Setup risk/reward at selection (study lever)."
+      - name: atr_normalized_move
+        description: "[feature | as-of <= scan_date] ATR-normalized expected move (study lever)."
+      - name: moneyness_pct
+        description: "[feature | as-of <= scan_date] |strike-underlying|/underlying at selection."
+      - name: recommended_iv
+        description: "[feature | as-of <= scan_date] Contract implied vol at selection."
+      - name: overnight_score
+        description: "[feature | as-of <= scan_date] Overnight conviction score at scan."
+      - name: premium_score
+        description: "[feature | as-of <= scan_date] Deterministic premium-flag count at scan."
+      - name: vix3m_at_enrich
+        description: "[feature | as-of <= scan_date] VXVCLS close at/<= scan_date (regime feature)."
+      - name: was_tournament_pick
+        description: "[identity] Cohort meta: was this row the live tournament pick."
+      - name: policy_version
+        description: "[identity] Cohort meta: policy version label."
 
   - name: fct_signal_performance
     description: Underlying-based post-trade tracking (context only, not option PnL).

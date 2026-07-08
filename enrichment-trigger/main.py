@@ -53,6 +53,13 @@ VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "global")
 
 # Model Config
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.5-flash")
+# Semantic prompt-version label for the per-ticker thesis prompt (stamped into
+# trace_logger inputs_raw, mirroring overnight-report-generator's PROMPT_VERSION
+# convention). v1 (unlabeled) = trader-briefing voice with entry/target/stop
+# instructions. v2 (2026-07-03) = descriptive data-narrative voice: no trade
+# instructions, no "recommended", no scan-count echo — the public product sells
+# flow DATA, not advice.
+THESIS_PROMPT_VERSION = "thesis_v2_descriptive"
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 TOP_P = float(os.getenv("TOP_P", "0.95"))
 TOP_K = int(os.getenv("TOP_K", "30"))
@@ -89,6 +96,18 @@ EDGE_DELTA_HI = float(os.getenv("EDGE_DELTA_HI", "0.46"))
 MOMENTUM_TILT = os.getenv("MOMENTUM_TILT", "true").strip().lower() in ("1", "true", "yes")
 MOM_LOOKBACK_DAYS = int(os.getenv("MOM_LOOKBACK_DAYS", "60"))
 MOM_THRESHOLD = float(os.getenv("MOM_THRESHOLD", "0.35"))
+
+# Persist mom_60 (+ anchor/lookback dates) onto overnight_signals_enriched as a
+# point-in-time BQ FEATURE (substrate must-fix #5;
+# docs/DECISIONS/2026-07-01-momentum-persist-and-opportunity-surface.md). This is
+# INDEPENDENT of MOMENTUM_TILT (the ranking kill-switch): the flagship finding
+# (BULLISH & mom_60>=+0.35 & delta-band, 3-day hold) must be reproducible from BQ,
+# so the column is written even when the tilt is off. Reuses the SAME leakage-
+# guarded _compute_momentum_map / _resolve_momentum_dates (anchor + lookback both
+# <= scan_date) — no re-implementation of the momentum math. Fails SOFT: on any
+# fetch failure the columns are NULL and enrichment proceeds. PERSIST_MOM_60=false
+# disables the (at most 2 grouped-daily calls) fetch entirely.
+PERSIST_MOM_60 = os.getenv("PERSIST_MOM_60", "true").strip().lower() in ("1", "true", "yes")
 
 # Output prefixes in GCS
 NEWS_OUTPUT_PREFIX = "overnight-enrichment/news/"
@@ -437,10 +456,12 @@ CROSS-CUTTING CONTEXT (today's overnight scan, all gate-passing candidates):
 - Top sectors: {sectors_str} (concentration matters — broad rotation vs single-name idiosyncratic)
 - Volatility regime: {vol_line}
 
-Use this frame to assess whether this ticker is part of a sector/regime theme \
-or an isolated idiosyncratic setup. The thesis should explicitly note when \
-the name's flow direction agrees or disagrees with the dominant scan direction \
-or when it sits inside the most-concentrated sector cluster.
+Use this frame ONLY to assess whether this ticker is part of a sector/regime \
+theme or an isolated idiosyncratic setup. The thesis may note QUALITATIVELY \
+that the name's flow agrees or disagrees with the dominant scan direction, or \
+that it sits inside the most-concentrated sector cluster — but NEVER quote the \
+candidate counts above (or any other scan-count number) in the output text. \
+They are internal context only and differ from the published pool size.
 """
 
 
@@ -450,6 +471,20 @@ or when it sits inside the most-concentrated sector cluster.
 
 def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> list[dict]:
     """Fetch tickers with score >= MIN_SCORE from today's overnight scan."""
+    # Defense-in-depth (2026-07-01, BLOCKER-1): scan_date reaches here from the
+    # request-controlled override in enrichment_trigger. It is validated at the
+    # entrypoint, but hard-assert the YYYY-MM-DD shape here too so NO caller can
+    # ever pass an unvalidated value. The query below binds scan_date as a DATE
+    # query PARAMETER (not string interpolation), so this is belt-and-suspenders.
+    if scan_date is not None:
+        try:
+            datetime.strptime(str(scan_date), "%Y-%m-%d")
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"get_signal_tickers: invalid scan_date {scan_date!r} "
+                f"(expected YYYY-MM-DD): {e}"
+            )
+
     if not scan_date:
         # Get latest scan date
         q = f"SELECT MAX(scan_date) as latest FROM `{SIGNALS_TABLE}`"
@@ -466,7 +501,7 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
            call_active_strikes, put_active_strikes, call_vol_oi_ratio, put_vol_oi_ratio,
            sector, industry
     FROM `{SIGNALS_TABLE}`
-    WHERE scan_date = '{scan_date}'
+    WHERE scan_date = @scan_date
       AND overnight_score >= {MIN_SCORE}
       -- 2026-06-05: this Polygon plan serves no options quotes, so
       -- recommended_spread_pct is ~always NULL. The old `IS NOT NULL` fail-closed
@@ -487,7 +522,15 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
     # options market is the less-liquid venue (>10% spread is the canonical
     # marker). 8% is the literature-supported retail-execution defensible band
     # for 5-15% OTM 9-DTE single-name contracts.
-    rows = list(bq_client.query(query).result())
+    #
+    # scan_date bound as a DATE query PARAMETER (2026-07-01, BLOCKER-1) — the
+    # overnight_signals.scan_date column is DATE, and the client accepts an ISO
+    # 'YYYY-MM-DD' string for a DATE ScalarQueryParameter, so this is semantically
+    # identical to the prior `'{scan_date}'` literal but injection-proof.
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
+    )
+    rows = list(bq_client.query(query, job_config=job_config).result())
     logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, UOA>$500K, all directions; spread gate retired) for {scan_date}")
     return [dict(r) for r in rows], scan_date
 
@@ -591,6 +634,24 @@ def _compute_momentum_map(scan_date: str, polygon_key: str) -> dict[str, float]:
     )
     _MOM_CACHE[scan_date] = {"mom": mom, "anchor": anchor, "lookback": lookback}
     return mom
+
+
+def _get_momentum_context(scan_date: str, polygon_key: str) -> dict:
+    """Return the full momentum context {"mom": {ticker: mom_60}, "anchor", "lookback"}
+    for ``scan_date``, populating the per-run cache if needed.
+
+    Thin accessor over _compute_momentum_map so the enriched-signal WRITER can
+    persist mom_60 + the audit dates WITHOUT re-implementing the momentum math or
+    the leakage guard. When _edge_select_top_n already ran with the tilt ON this is
+    a cache hit (zero extra fetches); otherwise it triggers the same (at most 2)
+    grouped-daily calls once. Never raises: returns {"mom": {}, "anchor": None,
+    "lookback": None} on any soft failure so persistence degrades to NULL columns.
+    """
+    try:
+        _compute_momentum_map(scan_date, polygon_key)  # populates _MOM_CACHE[scan_date]
+    except Exception as e:  # noqa: BLE001 — persistence must never break enrichment
+        logger.warning(f"momentum persist: context fetch failed for {scan_date}: {e}")
+    return _MOM_CACHE.get(scan_date) or {"mom": {}, "anchor": None, "lookback": None}
 
 
 def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None,
@@ -736,7 +797,7 @@ def fetch_and_analyze_news(
                 _exp_label = str(recommended_expiration)
             _strike_label = f"${recommended_strike:g}{_opt_letter}"
             _contract_block = (
-                f"\nRECOMMENDED CONTRACT (cite these values verbatim — do NOT invent or round):\n"
+                f"\nFOCUS CONTRACT (where the flow concentrated — cite these values verbatim, do NOT invent or round):\n"
                 f"- Strike: {_strike_label}\n"
                 f"- Expiration: {_exp_label}\n"
                 + (f"- Underlying spot: ${underlying_price:.2f}\n" if underlying_price else "")
@@ -753,14 +814,16 @@ CONTEXT:
 - Institutional options flow direction: {direction}
 - Flow volume: ${flow_volume:,.0f}
 {_xcut}{_contract_block}
+VOICE (non-negotiable): You are producing DESCRIPTIVE market data for a research product, not trade advice. Every free-text field (summary, thesis, flow_intent_reasoning) must read as a data narrative — what the flow shows, where it concentrated, what the catalyst is, what the technical context is. NEVER include entry, target, stop, exit, or hold-period instructions. NEVER use the word "recommended" or imperative trade language (buy, sell, enter, take profit, manage risk with a stop). NEVER cite scan-count numbers in the output text.
+
 CRITICAL ANALYSIS: You must assess whether this options flow is DIRECTIONAL (a new bet on future movement) or HEDGING (protecting existing positions after a move already happened). This distinction is everything.
 
-Key signals of HEDGING flow (not tradeable):
+Key signals of HEDGING flow (reactive):
 - Large flow AFTER a big move (>10%) in the same direction
 - Flow is protecting existing equity positions
 - The catalyst is already known/priced in
 
-Key signals of DIRECTIONAL flow (tradeable):
+Key signals of DIRECTIONAL flow (anticipatory):
 - Flow appears BEFORE or independent of a catalyst
 - Flow size is disproportionate to the move
 - New information not yet reflected in price
@@ -777,7 +840,7 @@ Based on what you find, respond in valid JSON only (no markdown, no code fences)
   "flow_intent_reasoning": "<1 sentence explaining why you classified the flow this way>",
   "move_overdone": <boolean, true if the price move appears disproportionate to the catalyst>,
   "reversal_probability": <float 0.0-1.0, probability of a reversal in the next 1-5 trading days based on historical patterns for this type of event>,
-  "thesis": "<2-3 sentence trade thesis synthesizing flow direction, catalyst, and setup. Write as a trader briefing: what's the trade, why now, what's the risk. If RECOMMENDED CONTRACT block is present above, the FIRST sentence MUST open with the exact required lead string from that block — do NOT substitute a different strike, a different expiry month, or a rounded number. Example shape (the strike/expiry come from the contract block, not from you): 'TICKER BULL $XXXC MMM DD ''YY. <catalyst-driven thesis>. Entry near <level> with <target> target. Risk: <risk>.'"
+  "thesis": "<2-3 sentence DESCRIPTIVE data narrative synthesizing what the flow shows, where the premium concentrated, the catalyst, and the technical context. This is a data observation, NOT a trade plan: no entry/target/stop levels, no 'recommended', no hold-period advice, no imperative trade voice. If a FOCUS CONTRACT block is present above, the FIRST sentence MUST open with the exact required lead string from that block — do NOT substitute a different strike, a different expiry month, or a rounded number. Example shape (the strike/expiry come from the contract block, not from you): 'TICKER BULL $XXXC MMM DD ''YY. <what the flow shows and the catalyst behind it>. Risk factor: <the key uncertainty or counter-signal in the data — descriptive, not an instruction>.'"
 }}
 
 If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst_score to 0.1, and provide a summary noting the lack of news coverage."""
@@ -893,7 +956,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
                     output_tokens=_out,
                     latency_ms=int((_time.monotonic() - _t0) * 1000),
                     status="ok",
-                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                    inputs_raw=f"prompt_version={THESIS_PROMPT_VERSION}|{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
                 ))
             except Exception:
                 pass
@@ -918,7 +981,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
                     latency_ms=int((_time.monotonic() - _t0) * 1000),
                     status="parse_error",
                     error=str(e)[:500],
-                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                    inputs_raw=f"prompt_version={THESIS_PROMPT_VERSION}|{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
                 ))
             except Exception:
                 pass
@@ -947,7 +1010,7 @@ If you find no relevant news, set catalyst_type to "No Clear Catalyst", catalyst
                     latency_ms=int((_time.monotonic() - _t0) * 1000),
                     status="api_error",
                     error=error_str[:500],
-                    inputs_raw=f"{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
+                    inputs_raw=f"prompt_version={THESIS_PROMPT_VERSION}|{ticker}|{direction}|{price_change_pct:.4f}|{flow_volume:.0f}",
                 ))
             except Exception:
                 pass
@@ -1419,9 +1482,38 @@ def write_enriched_signals(
     scan_date: str
 ):
     """Merge signals + technicals + news into enriched table."""
+    # Hardening 2026-07-01 (from must-fix #1's review): scan_date is
+    # request-controlled (enrichment_trigger reads it from req_body/query args)
+    # and is string-interpolated below into BOTH the staging table NAME (an
+    # identifier — cannot be parameterized) and the multi-statement replace
+    # transaction's DELETE literal. Hard-validate it as YYYY-MM-DD BEFORE any
+    # interpolation so a malformed / injected value raises here rather than
+    # reaching SQL. Closes the override injection surface the reviewer flagged.
+    try:
+        datetime.strptime(scan_date, "%Y-%m-%d")
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"write_enriched_signals: invalid scan_date {scan_date!r} "
+            f"(expected YYYY-MM-DD): {e}"
+        )
+
     rows = []
     # V5.2: fetch VIX3M once per invocation, applied to every row this run.
     vix3m_val = fetch_vix3m_for_scan_date(scan_date)
+
+    # Substrate must-fix #5: persist mom_60 (+ anchor/lookback audit dates) as a
+    # point-in-time FEATURE. Fetched once per run (cache hit if the tilt already
+    # ran), leakage-guarded (_resolve_momentum_dates: anchor + lookback <=
+    # scan_date). Independent of MOMENTUM_TILT so the finding is BQ-reproducible.
+    mom_ctx = (
+        _get_momentum_context(scan_date, POLYGON_API_KEY)
+        if (PERSIST_MOM_60 and POLYGON_API_KEY)
+        else {"mom": {}, "anchor": None, "lookback": None}
+    )
+    mom_map = mom_ctx.get("mom") or {}
+    mom_anchor_date = mom_ctx.get("anchor")
+    mom_lookback_date = mom_ctx.get("lookback")
+
     for sig in signals:
         ticker = sig["ticker"]
         tech = technicals.get(ticker, {}) or {}
@@ -1517,6 +1609,19 @@ def write_enriched_signals(
             "volume_oi_ratio": v5_2["volume_oi_ratio"],
             "moneyness_pct": v5_2["moneyness_pct"],
             "vix3m_at_enrich": float(vix3m_val) if vix3m_val is not None else None,
+            # Point-in-time 60-day underlying momentum FEATURE (substrate must-fix
+            # #5). mom_60 = adj_close(anchor)/adj_close(lookback)-1 with both
+            # sessions <= scan_date (leakage-guarded in _resolve_momentum_dates).
+            # NULL for names absent from the grouped-daily map (recent IPO / no
+            # 60-session history) or when the fetch failed. The anchor/lookback
+            # dates are persisted for auditability/reproducibility.
+            "mom_60": (
+                float(mom_map[ticker.upper()])
+                if mom_map.get(ticker.upper()) is not None else None
+            ),
+            "mom_anchor_date": mom_anchor_date,     # last session <= scan_date
+            "mom_lookback_date": mom_lookback_date,  # MOM_LOOKBACK_DAYS sessions earlier
+            "mom_lookback_days": int(MOM_LOOKBACK_DAYS),
         }
 
         # Premium signal scoring
@@ -1552,13 +1657,6 @@ def write_enriched_signals(
         logger.warning("No enriched rows to write")
         return
 
-    # Write to BigQuery — delete existing rows for this scan_date first (dedup)
-    delete_query = f"DELETE FROM `{ENRICHED_SIGNALS_TABLE}` WHERE scan_date = '{scan_date}'"
-    bq_client.query(delete_query).result()
-    logger.info(f"Deleted existing rows for {scan_date} (dedup)")
-
-    table_ref = bq_client.dataset(DATASET).table("overnight_signals_enriched")
-
     # Force numeric fields to proper types before writing
     for row in rows:
         for float_field in ["catalyst_score", "ema_21", "rsi_14", "macd", "macd_hist", "sma_50", "sma_200", "atr_14",
@@ -1568,7 +1666,9 @@ def write_enriched_signals(
                             "recommended_vega", "recommended_iv", "recommended_strike",
                             "close_loc", "dist_from_low", "dist_from_high", "stochd_14_3_3",
                             # V5.2 additions
-                            "volume_oi_ratio", "moneyness_pct", "vix3m_at_enrich"]:
+                            "volume_oi_ratio", "moneyness_pct", "vix3m_at_enrich",
+                            # Momentum FEATURE (must-fix #5); dates coerced separately below.
+                            "mom_60"]:
             if row.get(float_field) is not None:
                 try:
                     row[float_field] = float(row[float_field])
@@ -1584,26 +1684,114 @@ def write_enriched_signals(
             ADD COLUMN IF NOT EXISTS moneyness_pct FLOAT64,
             ADD COLUMN IF NOT EXISTS vix3m_at_enrich FLOAT64,
             ADD COLUMN IF NOT EXISTS sector STRING,
-            ADD COLUMN IF NOT EXISTS industry STRING
+            ADD COLUMN IF NOT EXISTS industry STRING,
+            ADD COLUMN IF NOT EXISTS mom_60 FLOAT64,
+            ADD COLUMN IF NOT EXISTS mom_anchor_date DATE,
+            ADD COLUMN IF NOT EXISTS mom_lookback_date DATE,
+            ADD COLUMN IF NOT EXISTS mom_lookback_days INT64
         """).result()
     except Exception as e:
         logger.warning(f"V5.2 schema ensure failed (will still attempt load): {e}")
 
-    job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
-        autodetect=False,
-        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-    )
+    # ATOMIC, schema-drift-safe replace of this scan_date (atomic-write fix —
+    # schema-drift landmine; see
+    # docs/DECISIONS/2026-07-01-atomic-schema-drift-safe-substrate-write.md).
+    # The prior pattern DELETE'd this scan_date and THEN loaded; a load failure
+    # (a new dict key with no matching column under ALLOW_FIELD_ADDITION +
+    # autodetect=False 500'd, or a mid-run timeout) left the rows deleted with
+    # nothing to reload. It was also the confirmed origin of the 2026-06-10
+    # upstream row doubling. Fix: stage the load first, verify it, then replace
+    # the scan_date inside one transaction that rolls back on any error so the
+    # original rows survive. The staged load binds to the cloned live schema
+    # (NOT autodetect — autodetect mis-typed the permanently-NULL FLOAT column
+    # recommended_spread_pct as STRING and broke every load, the 2026-07-02
+    # outage); ALLOW_FIELD_ADDITION still absorbs a genuinely new feature column,
+    # which is then propagated onto the target before the swap.
+    import uuid
 
-    jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
-    job = bq_client.load_table_from_file(
-        io.BytesIO(jsonl.encode("utf-8")),
-        table_ref,
-        job_config=job_config,
+    staging = (
+        f"{ENRICHED_SIGNALS_TABLE}"
+        f"__stg_{scan_date.replace('-', '')}_{uuid.uuid4().hex[:8]}"
     )
-    job.result()
-    logger.info(f"Wrote {len(rows)} enriched signals to {ENRICHED_SIGNALS_TABLE}")
+    # BQ API returns legacy type names (INTEGER/FLOAT/BOOLEAN); DDL wants GoogleSQL.
+    _ddl_type = {"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL"}
+
+    # 1) Clone the live table's schema/types into a fresh 1-day-TTL staging table
+    #    so the staged load is typed EXACTLY as the live table (behavior-preserving).
+    bq_client.query(
+        f"CREATE TABLE `{staging}` LIKE `{ENRICHED_SIGNALS_TABLE}` "
+        f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY))"
+    ).result()
+    # Bind the load to the cloned (live) schema. Do NOT autodetect: autodetect
+    # infers each column's type from the JSONL, and a column that is NULL in EVERY
+    # row — recommended_spread_pct is permanently NULL on this Polygon plan (no
+    # options quotes) — infers as STRING, which clashes with the live FLOAT and
+    # fails the whole load ("Field recommended_spread_pct has changed type from
+    # FLOAT to STRING" — the 2026-07-02 enrichment outage that starved the pick
+    # pipeline). LIKE already gave staging the exact live types, so load against
+    # that schema and an all-NULL FLOAT column stays FLOAT. ALLOW_FIELD_ADDITION
+    # still tolerates a genuinely new data field; known new feature columns are
+    # pre-created by the ADD COLUMN IF NOT EXISTS block above.
+    staging_schema = bq_client.get_table(staging).schema
+
+    try:
+        # 2) Load into staging using the live table's exact types (no autodetect).
+        jsonl = "\n".join(json.dumps(r, default=str) for r in rows)
+        job = bq_client.load_table_from_file(
+            io.BytesIO(jsonl.encode("utf-8")),
+            staging,
+            job_config=bigquery.LoadJobConfig(
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                schema=staging_schema,
+                schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            ),
+        )
+        job.result()  # raises on load failure -> live table still untouched
+
+        # 3) Verify the staged load BEFORE we touch the live table at all.
+        if job.output_rows != len(rows):
+            raise RuntimeError(
+                f"enriched staging row-count mismatch for {scan_date}: "
+                f"staged {job.output_rows} != built {len(rows)}"
+            )
+
+        # 4) Propagate any newly-added columns onto the live table BEFORE the swap
+        #    so the INSERT column lists line up (schema-drift safety).
+        staging_fields = bq_client.get_table(staging).schema
+        target_names = {f.name for f in bq_client.get_table(ENRICHED_SIGNALS_TABLE).schema}
+        add_cols = [f for f in staging_fields if f.name not in target_names]
+        if add_cols:
+            adds = ", ".join(
+                f"ADD COLUMN IF NOT EXISTS `{f.name}` "
+                f"{_ddl_type.get(f.field_type, f.field_type)}"
+                for f in add_cols
+            )
+            bq_client.query(f"ALTER TABLE `{ENRICHED_SIGNALS_TABLE}` {adds}").result()
+            logger.info(
+                f"Added {len(add_cols)} new column(s) to {ENRICHED_SIGNALS_TABLE}: "
+                + ", ".join(f.name for f in add_cols)
+            )
+
+        # 5) Atomic replace: DELETE this scan_date then INSERT from staging in one
+        #    transaction (dedup). Any failure rolls back the DELETE -> rows survive.
+        cols = ", ".join(f"`{f.name}`" for f in staging_fields)
+        bq_client.query(
+            "BEGIN TRANSACTION;\n"
+            f"DELETE FROM `{ENRICHED_SIGNALS_TABLE}` WHERE scan_date = '{scan_date}';\n"
+            f"INSERT INTO `{ENRICHED_SIGNALS_TABLE}` ({cols}) SELECT {cols} FROM `{staging}`;\n"
+            "COMMIT TRANSACTION;"
+        ).result()
+        logger.info(
+            f"Atomically replaced scan_date={scan_date} in {ENRICHED_SIGNALS_TABLE} "
+            f"with {len(rows)} enriched signals"
+        )
+    finally:
+        # 6) Best-effort staging drop (the OPTIONS expiration is the safety net).
+        try:
+            bq_client.query(f"DROP TABLE IF EXISTS `{staging}`").result()
+        except Exception as e:  # noqa: BLE001 — cleanup must never mask the real result
+            logger.warning(f"Enriched staging cleanup failed for {staging} (non-fatal): {e}")
 
 
 # =====================================================================
@@ -1791,6 +1979,25 @@ def enrichment_trigger():
         req_body = request.get_json(silent=True) or {}
     override_scan_date = req_body.get("scan_date") or request.args.get("scan_date")
     force = req_body.get("force", False) or bool(request.args.get("force"))
+
+    # Security (2026-07-01, BLOCKER-1): override_scan_date is request-controlled
+    # (this endpoint is --allow-unauthenticated) and flows into get_signal_tickers
+    # and downstream write_enriched_signals, which interpolate it into SQL (the
+    # WHERE literal, the staging-table identifier, and the multi-statement replace
+    # DELETE literal). Validate the YYYY-MM-DD shape ONCE here — the single
+    # entrypoint — BEFORE any query and on BOTH the force and non-force paths, so a
+    # malformed/injected value is rejected with a 400 rather than reaching SQL. The
+    # strptime guards in get_signal_tickers and write_enriched_signals remain as
+    # defense-in-depth.
+    if override_scan_date:
+        try:
+            datetime.strptime(override_scan_date, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            logger.warning(f"Rejected invalid scan_date override: {override_scan_date!r}")
+            return jsonify({
+                "status": "invalid_scan_date",
+                "error": "scan_date must be a YYYY-MM-DD string",
+            }), 400
 
     # Step 1: Get high-score signals (for override date or latest)
     signals, scan_date = get_signal_tickers(bq_client, scan_date=override_scan_date)

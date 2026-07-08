@@ -63,7 +63,7 @@ class VoiceRules:
 
     do: tuple[str, ...] = (
         "Write for a working professional with a full-time job and a $2K-$20K options account.",
-        "Use specific dollar amounts and specific times. $500/trade, 10:00 AM ET, -60%/+80%, 3 trading days.",
+        "Use specific numbers and specific times. ~50 curated names a day, $39/mo Agent Access, 9:30 AM ET. Never use trade parameters (entry/target/stop/hold) as your specifics.",
         "Prefer short, declarative sentences. One idea per sentence.",
         "Show the routine, not the dashboard. GammaRips is a morning habit.",
         "Use cashtags ($AAPL) for ticker references — standard FinTwit, drives discovery.",
@@ -75,7 +75,7 @@ class VoiceRules:
         "Never use individualized recommendation language (buy this, act now, for you).",
         "Never include URLs in post bodies — X downranks link-bearing posts. Link lives in pinned tweet + bio.",
         "Never use hashtags — near-dead on X in 2026 and slightly suppressive.",
-        "Never claim real-money P&L before the V6 cohort has >= 30 closed trades. Paper-trade framing only.",
+        "Never claim real-money P&L before the live validation cohort has >= 30 closed trades. Paper-trade framing only.",
         "Never cherry-pick wins. Loss callbacks ship. Ledger-backed credibility beats hype.",
     )
 

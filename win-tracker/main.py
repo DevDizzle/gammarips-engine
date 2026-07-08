@@ -669,6 +669,93 @@ def run_backfill_performance():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/pool_outcomes", methods=["GET", "POST"])
+def compute_pool_outcomes():
+    """Aggregate the labeled pool substrate into Firestore pool_outcomes/current.
+
+    Feeds the public Track Record page (pool outcomes replaced the pick-cohort
+    scorecard, owner call 2026-07-03). Read-only against BigQuery; writes ONE
+    idempotent Firestore doc recomputed from BQ truth, so an unauthenticated
+    re-trigger can only refresh it, never poison it. Return values are
+    FRACTIONS (0.21 = +21%) despite the legacy *_pct column names.
+    """
+    outcomes_table = f"{PROJECT_ID}.{DATASET}.enriched_option_outcomes"
+    try:
+        bq_client = bigquery.Client(project=PROJECT_ID)
+        fs_client = firestore.Client(project=PROJECT_ID)
+
+        # Per-row sim-version tags are the source of truth for label mechanics
+        # (never inferred from policy_version) — aggregate ONLY matching rows so
+        # a future mechanics change can't silently blend into the public number.
+        # HISTORY CAVEAT: same-day rows written before 07-01 predate tagging and
+        # carry NULL label_sim_version. Verified 2026-07-03: the NULL cohort's
+        # distribution (avg -4.4%/day, WR 29.8%) matches the documented GIGO
+        # same-day composite and is distinct from the tagged V6 3-day arm
+        # (avg -3.6%, WR 41%) — so NULL is treated as legacy same-day. New rows
+        # are stamped by the fpt label pass; any FUTURE mechanics change gets a
+        # new tag and stays excluded here by construction.
+        sameday_sim = "SAMEDAY_V7_1_GIGO"
+        sameday_match = f"(label_sim_version = '{sameday_sim}' OR label_sim_version IS NULL)"
+        threeday_sim = "HOLD3D_V6_LEGACY_8060"
+        opp_sim = "OPP_MFE_MAE_V1"
+        query = f"""
+        SELECT
+          COUNT(*) AS contracts_total,
+          COUNT(DISTINCT scan_date) AS scan_days,
+          CAST(MIN(scan_date) AS STRING) AS first_scan_date,
+          CAST(MAX(scan_date) AS STRING) AS last_scan_date,
+          COUNTIF(realized_return_pct IS NOT NULL
+            AND {sameday_match}) AS labeled_sameday,
+          COUNTIF(realized_return_pct_3d IS NOT NULL
+            AND label_3d_sim_version = '{threeday_sim}') AS labeled_3d,
+          COUNTIF(opp_peak_return IS NOT NULL
+            AND opp_sim_version = '{opp_sim}') AS with_opp_surface,
+          ROUND(AVG(IF({sameday_match}, realized_return_pct, NULL)), 4) AS bracket_avg_return,
+          ROUND(COUNTIF({sameday_match} AND realized_return_pct > 0)
+            / NULLIF(COUNTIF({sameday_match} AND realized_return_pct IS NOT NULL), 0), 4) AS bracket_win_rate,
+          ROUND(AVG(IF(label_3d_sim_version = '{threeday_sim}', realized_return_pct_3d, NULL)), 4) AS bracket_3d_avg_return,
+          ROUND(COUNTIF(label_3d_sim_version = '{threeday_sim}' AND realized_return_pct_3d > 0)
+            / NULLIF(COUNTIF(label_3d_sim_version = '{threeday_sim}' AND realized_return_pct_3d IS NOT NULL), 0), 4) AS bracket_3d_win_rate,
+          ROUND(APPROX_QUANTILES(IF(opp_sim_version = '{opp_sim}', opp_peak_return, NULL), 100)[OFFSET(50)], 4) AS opp_peak_median,
+          ROUND(APPROX_QUANTILES(IF(opp_sim_version = '{opp_sim}', opp_peak_return, NULL), 100)[OFFSET(75)], 4) AS opp_peak_p75,
+          ROUND(APPROX_QUANTILES(IF(opp_sim_version = '{opp_sim}', opp_peak_return, NULL), 100)[OFFSET(90)], 4) AS opp_peak_p90,
+          ROUND(APPROX_QUANTILES(IF(opp_sim_version = '{opp_sim}', opp_trough_return, NULL), 100)[OFFSET(50)], 4) AS opp_trough_median,
+          ROUND(APPROX_QUANTILES(IF(opp_sim_version = '{opp_sim}', opp_trough_return, NULL), 100)[OFFSET(10)], 4) AS opp_trough_p10
+        FROM `{outcomes_table}`
+        """
+        row = dict(next(iter(bq_client.query(query).result())))
+
+        # Fail loud on an empty/degraded substrate instead of publishing zeros.
+        if not row.get("contracts_total") or not row.get("labeled_sameday"):
+            logger.error(f"pool_outcomes: degraded substrate, refusing write: {row}")
+            # 503 so Cloud Scheduler records a FAILURE (retry + alerting)
+            # instead of letting the public doc go silently stale.
+            return jsonify({"status": "refused", "reason": "degraded substrate", "row": str(row)}), 503
+
+        doc = {
+            **row,
+            "units": "fractions (0.21 = +21%)",
+            "bracket_label": "Blind buy of EVERY pool contract under the fixed same-day +40%/-30% bracket (10:00 entry, flat 15:45 ET)",
+            "bracket_sim_version": f"{sameday_sim} (incl. legacy pre-tagging rows, verified same-day)",
+            "bracket_3d_label": "Legacy comparison arm: blind buy under the V6-era -60%/+80% bracket over a 3-trading-day hold — DIFFERENT stop/target than the same-day baseline, not just a longer hold",
+            "bracket_3d_sim_version": threeday_sim,
+            "opp_label": "Opportunity surface: realized peak/trough excursion per contract over its labeled window",
+            "opp_sim_version": opp_sim,
+            "source_table": "enriched_option_outcomes",
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+        fs_client.collection("pool_outcomes").document("current").set(doc)
+        logger.info(
+            f"pool_outcomes/current updated: {row['contracts_total']} contracts, "
+            f"{row['scan_days']} days, sameday WR {row['bracket_win_rate']}"
+        )
+        return jsonify({"status": "success", **{k: str(v) for k, v in row.items()}}), 200
+
+    except Exception as e:
+        logger.error(f"pool_outcomes failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)

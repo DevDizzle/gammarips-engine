@@ -54,7 +54,7 @@ Each tool is a Python function the agents call. No external SDK secrets (Vertex 
 | `read_schedule_slot(slug_or_latest: str = "next") -> dict` | planner | Returns next-pending schedule row from `blog_schedule/current` (or a specific slug). Fields: `slug`, `week_num`, `title_candidate`, `persona`, `keywords`, `cta`, `type`, `cross_channel[]`. |
 | `read_voice_rules() -> dict` | writer | Returns a dict of voice rules extracted from `docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md` §2 (or from Firestore `blog_config/voice_rules`, seeded by a one-shot script). |
 | `read_prior_posts(limit: int = 5) -> list[dict]` | planner, reviewer | Returns last N published posts from Firestore `blog_posts` for reference + internal-link targets. |
-| `read_live_context() -> dict` | writer | Reads today's signal (`todays_pick`), last-week closed trades (BQ `forward_paper_ledger`), current V5.3 policy flags. Used when the post needs live data (e.g. weekly engine recap). Gated by post `type` — evergreen posts skip. |
+| `read_live_context() -> dict` | writer | Reads closed-trade stats for the live validation cohort (BQ `forward_paper_ledger`, `policy_version='V7_1_TILTED_GIGO'`). Does NOT read `todays_pick` — there is no public pick. Used when the post needs live data (e.g. weekly engine recap). Gated by post `type` — evergreen posts skip. |
 | `score_against_rubric(markdown: str, keywords: list[str]) -> dict` | reviewer | Deterministic checks: word count, H2/H3 count, disclaimer present, retired-alias scan, internal-link density, keyword density. Returns structured scores. |
 | `publish_to_firestore(post: dict) -> str` | root | Writes to `blog_posts/{slug}` with status `published`, timestamp, reviewer score. Also updates `blog_schedule/current.rows[i].status = "published"`. Only called after reviewer APPROVE. |
 | `log_failure_to_firestore(slug: str, notes: str) -> None` | root | Writes to `blog_posts/{slug}` with status `rejected` + notes. Called on iteration-limit fail. |
@@ -71,14 +71,14 @@ All three use `gemini-3-flash-preview` (scaffold default). Orchestration: `LoopA
 ### Writer
 - **Input:** `post_outline` + voice rules.
 - **Output state key:** `post_markdown` — full markdown body. Front matter YAML block with `title`, `slug`, `description`, `keywords`, `cta`, `reading_time`.
-- **Instruction contract:** Write in Evan-brand voice (§2 of copy plan). Specific dollar amounts + specific times. Publisher framing only. Must end with the standard disclaimer + a tier-matched CTA from the schedule row. Never use retired aliases ("Ripper", "Daily Playbook", "Overnight Edge" as product name, "@mention" for chat tag).
+- **Instruction contract:** Write in Evan-brand voice (§2 of copy plan). Specific numbers + specific times (never trade parameters). Publisher framing only — no trade instructions, no reference to the retired −60/+80 3-day bracket (the live −30/+40 same-day validation bracket is a measurement instrument, not a strategy). Must end with the standard disclaimer + the schedule row's CTA (`webapp_visit` → the free site; legacy `starter_trial`/`pro_trial` tokens → the $39/mo "Agent Access" MCP product). Never use retired aliases ("Ripper", "Daily Playbook", "Overnight Edge" as product name, "@mention" for chat tag, "$19 Starter tier", "WhatsApp", "today's pick").
 - **Revision behavior:** If session state has `reviewer_notes`, Writer reads them and produces a revised `post_markdown`.
 
 ### Reviewer
 - **Input:** `post_markdown` + structured `score_against_rubric()` results.
 - **Output state key:** `review_status` = `"APPROVE"` | `"REVISE"`, and `reviewer_notes` with specific fixes if REVISE.
 - **Rubric (binary pass/fail + free-text notes):**
-  1. **One Promise alignment** — Does the post ladder to "one trade a day, scored before you wake up, pushed to your phone at 9 AM"?
+  1. **Positioning alignment (updated 2026-07-03)** — Does the post ladder to the current business: a 100% free human website surfacing the curated bullish options-flow pool (~50 names/day), monetized only via "Agent Access" ($39/mo MCP access for AI agents — Claude/ChatGPT/custom), with an education mission of teaching traders to use AI agents to analyze options-flow data? The old One Promise ("one trade a day, pushed to your phone at 9 AM") is RETIRED and must not appear.
   2. **Publisher framing (SEC v. Lowe)** — No individualized recommendation language. "Buy this", "act now", second-person timing imperatives = FAIL. Policy/methodology framing = PASS.
   3. **Disclosure** — Disclaimer block present and unmodified.
   4. **Internal-link density** — ≥1 link to another blog post + ≥1 link to a methodology page (`/how-it-works`, `/signals`, `/about`).
@@ -92,8 +92,8 @@ Loop exits APPROVE only if rubric passes + reviewer agrees holistically.
 ## Constraints & Safety Rules
 
 - **No human-review gate.** The reviewer agent is the only gate. This is intentional per Evan 2026-04-24. If reviewer can't APPROVE in 3 iterations, the post is marked `rejected` and Evan is emailed — it does NOT ship.
-- **Never fabricate trade outcomes or ticker examples.** When `read_live_context()` is called, all numerics must come from the tool output, not the model. Reviewer rubric rule: numeric claims must be traceable to `live_context` or flagged as structural (e.g. "max per-trade loss is $300 on a $500 position").
-- **No real-money P&L** until V5.3 has ≥30 closed trades (per `docs/EXEC-PLANS/2026-04-20-v5-3-surface-and-monetization.md` §6). Reviewer blocks posts that claim win rates before the track record unlock date. Enforce via `read_live_context().closed_trade_count >= 30` as a precondition for any performance-claiming post type.
+- **Never fabricate trade outcomes or ticker examples.** When `read_live_context()` is called, all numerics must come from the tool output, not the model. Reviewer rubric rule: numeric claims must be traceable to `live_context` or flagged as structural (e.g. "every candidate clears a hard bullish gate and an earnings-window exclusion").
+- **No real-money P&L** until the live validation cohort has ≥30 closed trades. Reviewer blocks posts that claim win rates before the track record unlock date. Enforce via `read_live_context().closed_trade_count >= 30` as a precondition for any performance-claiming post type.
 - **Disclaimer is literal.** Writer must use the exact string: "Paper-trading performance, educational content only. Not investment advice. Past performance is not a guarantee of future results." No paraphrasing.
 - **Keyword targets come from the schedule, not the writer.** Writer cannot invent new keywords; that's SEO drift.
 - **NEVER change the model** in `app/agent.py` unless explicitly asked. Current: `gemini-3-flash-preview`.
@@ -187,3 +187,5 @@ Seeded one-shot from `docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md` �
 ---
 
 *Spec locked 2026-04-24. Implementation proceeds only after Evan confirms the 5 open questions above. Changes to this spec require a dated decision note in `docs/DECISIONS/`.*
+
+*Positioning sections updated 2026-07-03 (owner-locked free-UI/paid-MCP model): free human website + $39/mo "Agent Access" MCP product; pushed pick / WhatsApp / $19 tier retired; no trade instructions in execution content; −30/+40 same-day validation bracket is a measurement instrument, not a strategy. Agent pipeline unchanged — copy/context only.*

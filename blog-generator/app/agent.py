@@ -186,6 +186,22 @@ or status='blocked' when closed_trade_count < 30). Read both from
 Voice rules:
 {voice_rules}
 
+Current positioning (2026-07 — every post must be consistent with this):
+- The human website is 100% FREE. It shows the curated bullish options-flow
+  pool (~50 names/day) and the daily flow report. It is the top-of-funnel.
+- The paid product is "Agent Access" — $39/mo MCP access for AI agents
+  (Claude, ChatGPT, or custom). We sell DATA + TOOLS an agent reasons over —
+  never a pick, never a promised return.
+- There is NO pushed daily pick, NO WhatsApp group, NO $19 Starter tier — all
+  retired. Never reference them.
+- Education mission: teach traders to use AI agents to analyze options-flow
+  data.
+- Execution content NEVER gives trade instructions (no entry/target/stop or
+  hold-period advice) and NEVER references the retired -60%/+80% 3-day
+  bracket. The internal validation cohort uses a -30%/+40% same-day bracket
+  purely as a MEASUREMENT INSTRUMENT for signal quality — if mentioned, frame
+  it as measurement, never as a strategy to follow.
+
 Prior reviewer notes (if this is a revision pass): {review?}
 
 Requirements:
@@ -210,15 +226,20 @@ Requirements:
 - CTA contract — NON-NEGOTIABLE: the front-matter `cta` field MUST equal
   `post_outline.schedule_slot.cta` verbatim. Do NOT substitute. The closing
   paragraph must invite the action implied by THAT exact CTA value:
-    * `webapp_visit` → "See today's pick at gammarips.com" tone. NEVER mention
-      "Pro Trial", "Starter Trial", "Founder pricing", or any paid tier.
-    * `starter_trial` → invite the $19/mo Starter tier specifically. Do NOT
-      upsell to Pro.
-    * `pro_trial` → invite the Pro tier specifically.
+    * `webapp_visit` → drive to the FREE site ("Explore today's curated flow
+      pool at gammarips.com" tone). The human website is 100% free — NEVER
+      mention any paid tier, trial, or pricing here.
+    * `starter_trial` / `pro_trial` → legacy schedule tokens that BOTH now
+      mean the single paid product: "Agent Access" — $39/mo MCP access that
+      lets an AI agent (Claude, ChatGPT, or custom) analyze the same
+      options-flow data. Invite the reader to connect their agent. NEVER
+      mention a $19 tier, a Starter/Pro tier split, "Founder pricing", a
+      WhatsApp group, or a pushed daily pick — all retired.
   If the schedule slot says `webapp_visit`, this is a top-of-funnel post —
-  drive to the site, NOT to a paid tier.
-- Specific dollar amounts and specific times. "$500 per trade", "10:00 AM ET",
-  "3 trading days", "-60% / +80%" — not "a lot" or "about $500".
+  drive to the site, NOT to the paid product.
+- Specific numbers and specific times. "~50 curated names a day", "$39/mo",
+  "9:30 AM ET" — not "a lot" or "many names". Never use trade parameters
+  (entry/target/stop/hold) as your specifics.
 - Publisher framing only. NO "buy this", "act now", "for you", second-person
   imperatives tied to trade timing. Describe the routine, not the reader.
 
@@ -232,12 +253,20 @@ Forbidden (retired aliases — hard-fail if present):
 - "Agent Arena" / "Scorer" / "Picker" / "gate stack" / "5-13% OTM moneyness"
   (all retired — V6 is a randomized bracket tournament with NO selection gates)
 - "$49 / $149" (old pricing)
+- "$19" / "Starter tier" / "Pro tier" (retired pricing — the only paid product
+  is $39/mo Agent Access)
+- "WhatsApp" (retired channel)
+- "today's pick" / "daily pick" / any pushed-pick framing (retired product —
+  there is no public pick)
+- "-60%" / "+80%" / "3-day hold" / "3 trading days" (retired V6 exit policy —
+  never present any bracket as a strategy)
 - "premium signal"
 - "interactive dashboard"
 
 If `post_outline.live_context.status == "blocked"`, DO NOT include any
 win-rate, closed trades, or P&L numbers. Pivot to structural claims only
-(e.g. "max per-trade loss is $300 on a $500 position").
+(e.g. "every candidate clears a hard bullish gate and an earnings-window
+exclusion before it reaches the pool").
 
 Revision behavior: if `review.notes` is present, treat those notes as hard
 constraints and regenerate the full markdown, fixing each specific item.
@@ -272,15 +301,23 @@ Decision rules — walk them in order:
      Stop here. Do not approve.
 
 2. If rubric_check.passed is True, do a holistic read of the markdown:
-     - Does the post ladder to the One Promise: "one options trade a day,
-       scored before you wake up, pushed to your phone at 9 AM"?
+     - Does the post ladder to the current positioning: a 100% FREE site
+       surfacing the curated bullish options-flow pool (~50 names/day), and
+       "Agent Access" — $39/mo MCP access so an AI agent (Claude, ChatGPT,
+       or custom) can analyze the same data? The old promise ("one trade a
+       day, pushed to your phone") is RETIRED — REVISE if the post uses it.
      - Publisher framing (SEC v. Lowe): no individualized recommendation
        language, no "buy this / act now / for you".
+     - Trade-instruction scan: no entry/target/stop levels or hold-period
+       advice anywhere. The -30%/+40% same-day validation bracket may only
+       appear framed as a measurement instrument, never as a strategy to
+       follow. Any reference to the retired -60%/+80% 3-day bracket = REVISE.
      - Keyword density: primary keyword appears in H1 + first paragraph
        + at least 2 H2s. Not stuffed (< 1.5% density).
      - Retired-alias scan: zero matches for Ripper, Daily Playbook,
        Overnight Edge (as product name), "@mention", "score >= 6",
-       "8:30 AM", "$49/$149", "premium signal", "interactive dashboard".
+       "8:30 AM", "$49/$149", "$19"/"Starter tier"/"Pro tier", "WhatsApp",
+       "today's pick"/"daily pick", "premium signal", "interactive dashboard".
      - Tone: disciplined, numbers-first, short declarative sentences.
      - Disclaimer block present AND unmodified (exact wording from voice_rules).
      - If schedule_slot.type requires live data and live_context is blocked,

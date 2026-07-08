@@ -2,7 +2,7 @@
 
 Reads `overnight_signals_enriched`, builds the FULL candidate pool (selection
 gates removed 2026-06-04), calls the signal-judge bracket tournament to pick one
-ticker, and sends ONE email with that pick to operator + paid subscribers (same
+ticker, and sends ONE email with that pick to the OPERATOR ONLY (subscriber
 content). On any judge error (timeout, 5xx, out-of-set), fails CLOSED — no email.
 
 What the STRICT path filters (2026-06-04 bracket-tournament):
@@ -842,8 +842,8 @@ def claim_email_send(scan_date: date) -> bool:
 def send_email(subject: str, html_content: str, to: str | None = None) -> bool:
     """Send a single Mailgun email. Defaults to operator (RECIPIENT_EMAIL).
 
-    Pass ``to`` to fan out to a paid subscriber. One recipient per call so
-    failures are isolated and Mailgun logs are clean per-recipient.
+    ``to`` is legacy (the retired subscriber fan-out); the live path always
+    uses the operator default. RETIRED 2026-07-03 — do not add recipients.
     """
     if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
         logger.error("Mailgun credentials not set. Cannot send email.")
@@ -871,7 +871,10 @@ def send_email(subject: str, html_content: str, to: str | None = None) -> bool:
 
 
 def fetch_paid_subscriber_emails() -> list[str]:
-    """Query Firestore ``users`` for active paid subscribers.
+    """RETIRED 2026-07-03 — do not call. The pick is the operator's private
+    signal; paying customers get MCP data access, never a pick.
+
+    Query Firestore ``users`` for active paid subscribers.
 
     Strict-tuple filter: ``plan == 'pro'`` AND ``subscriptionStatus == 'active'``
     AND ``stripeSubscriptionId`` non-null AND ``email`` non-null. Defense in
@@ -903,7 +906,10 @@ def fetch_paid_subscriber_emails() -> list[str]:
 
 
 def fan_out_to_paid_subscribers(subject: str, html_content: str) -> int:
-    """Send the daily V5.4 signal email to every active paid subscriber.
+    """RETIRED 2026-07-03 — do not call (see the retirement note at the old
+    call site in run_notifier). Kept for history only.
+
+    Send the daily V5.4 signal email to every active paid subscriber.
 
     Per-recipient send so one failure doesn't block the batch. Never raises —
     a fan-out blow-up must not affect the operator notification or return
@@ -1046,12 +1052,20 @@ def format_whatsapp_message(
 
 
 def post_to_openclaw(message: str) -> None:
-    """Fire-and-forget WhatsApp push to OpenClaw. NEVER raises.
+    """RETIRED 2026-07-03 — the WhatsApp/OpenClaw channel is deprecated.
 
-    Activates when ``OPENCLAW_GATEWAY_URL``, ``OPENCLAW_HOOKS_TOKEN``, and
-    ``OPENCLAW_GROUP_JID`` are all set. If any are missing or the POST fails,
-    we log and move on — the email path is the fallback.
+    The WhatsApp group product was retired with the free-UI/paid-MCP
+    repositioning, and the ``OPENCLAW_*`` env vars had already been absent
+    from the live service (the push was silently fail-soft skipping). This
+    hard no-op makes that intentional: the channel cannot be revived by
+    re-adding env vars — operator delivery is the email path. Kept as a
+    never-raises no-op so the ten call sites need no changes. See
+    docs/DECISIONS/2026-07-03-pool-track-record-and-generator-depicking.md.
     """
+    logger.debug("WhatsApp/OpenClaw push retired 2026-07-03; skipping.")
+    return
+
+    # --- retired implementation below (unreachable, kept for history) ---
     if not (OPENCLAW_GATEWAY_URL and OPENCLAW_HOOKS_TOKEN and OPENCLAW_GROUP_JID):
         logger.info("OpenClaw not configured (missing env); skipping WhatsApp push.")
         return
@@ -1643,7 +1657,7 @@ def format_email_html(
 
     Mirrors CHEAT-SHEET.md trader mechanics. v5_4_meta carries the Picker's
     justification + confidence (rendered as a 'Why we picked it' block). One
-    template for operator + paid subscribers — no separate operator-only
+    template for the operator email (subscriber fan-out retired 2026-07-03) — no separate operator-only
     shadow block post-promotion (2026-05-08).
     """
     ticker = row["ticker"]
@@ -2313,9 +2327,9 @@ def run_notifier(target_date: date | None = None):
         policy_gate=gate_mode,
     )
 
-    # Single email path — operator + paid subscribers see the SAME html with
-    # V5.4 justification embedded under the contract card. No operator-only
-    # shadow block (retired with V5.3 promotion 2026-05-08). Fallback picks are
+    # Single email path — OPERATOR ONLY (subscriber fan-out retired
+    # 2026-07-03; the pick is the operator's private signal). V5.4
+    # justification embedded under the contract card. Fallback picks are
     # marked in the subject so the recipient knows it's a low-conviction day.
     html_content = format_email_html(top, target_date, entry_day, v5_4_meta=v5_4_meta, entry_disp=entry_disp)
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
@@ -2344,22 +2358,87 @@ def run_notifier(target_date: date | None = None):
         entry_disp=entry_disp,
     ))
 
-    # Paid subscriber fan-out — additive, non-blocking. Subscribers receive
-    # the same html_content as operator post-promotion (V5.4 is the product).
-    try:
-        fan_out_count = fan_out_to_paid_subscribers(subject, html_content)
-    except Exception as e:
-        logger.error(f"Subscriber fan-out blew up (non-fatal): {e}")
-        fan_out_count = 0
+    # Subscriber fan-out RETIRED (2026-07-03 repositioning): the pick is the
+    # operator's PRIVATE signal; paying customers get MCP data access, never a
+    # pick. Under the old code any plan=='pro'/active user (i.e. every new
+    # Agent Access subscriber) would silently start receiving the pick by
+    # email — re-creating the pick-selling product. Helpers above are kept for
+    # history but must not be called. See
+    # docs/DECISIONS/2026-07-03-pool-track-record-and-generator-depicking.md.
 
     if success:
         return True, (
             f"Emailed V5.4 pick: {top['ticker']} {top['direction']} "
             f"(confidence={v5_4_meta.get('confidence')}, "
             f"runner_up={v5_4_meta.get('runner_up')}; "
-            f"operator + {fan_out_count} subscribers)."
+            f"operator only — subscriber fan-out retired)."
         )
     return False, "Failed to send operator email."
+
+
+@app.route("/refresh_pool_liquidity", methods=["POST"])
+def refresh_pool_liquidity():
+    """Interval pool-liquidity snapshot (MCP Priority-1A, 2026-07-07).
+
+    Cloud Scheduler POSTs this every ~10 min, 09:00-16:50 ET weekdays (job
+    `pool-liquidity-refresh`). The handler self-gates to ~09:15-16:05 ET on
+    NYSE trading days, so cron-edge firings and holidays no-op cleanly; the
+    09:20 firing is the pre-open pass. Fetch + persist logic lives in
+    pool_liquidity.py behind a hard leakage wall — this endpoint is fully
+    independent of the pick path (run_notifier never touches it).
+
+    Body (all optional, TOKEN-GATED): {"force": true} bypasses the window/
+    interval guards (manual/backstop use); {"scan_date": "YYYY-MM-DD"}
+    overrides the pool date. If POOL_LIQ_REFRESH_TOKEN is set on the service
+    (deploy.sh mounts it as a secret), every call must send a matching
+    X-Refresh-Token header; the dangerous knobs (force / scan_date) are
+    REFUSED unless the caller is token-authenticated — fail-closed while the
+    service is still public (review FIX-1 2026-07-07; see
+    docs/DECISIONS/2026-07-02-service-auth-hardening.md).
+    """
+    import hmac
+
+    import pool_liquidity
+
+    expected_token = os.environ.get("POOL_LIQ_REFRESH_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    token_authed = bool(expected_token) and hmac.compare_digest(
+        provided_token, expected_token
+    )
+    if expected_token and not token_authed:
+        return jsonify({"status": "denied"}), 403
+
+    req = request.get_json(silent=True) or {}
+    force = bool(req.get("force"))
+    if (force or req.get("scan_date")) and not token_authed:
+        # force / scan_date can spin the Polygon meter and rewrite which pool
+        # MCP clients see as "latest" — never honor them anonymously.
+        return jsonify(
+            {"status": "denied", "reason": "force/scan_date require X-Refresh-Token"}
+        ), 403
+
+    now_et = datetime.now(est)
+    run_day = now_et.date()
+
+    if not force:
+        if not is_trading_day(run_day):
+            return jsonify({"status": "skipped", "reason": "market holiday/closed"}), 200
+        hm = now_et.hour * 60 + now_et.minute
+        if hm < 9 * 60 + 15 or hm > 16 * 60 + 5:
+            return jsonify({"status": "skipped", "reason": "outside 09:15-16:05 ET window"}), 200
+
+    if req.get("scan_date"):
+        try:
+            scan_date = datetime.strptime(str(req["scan_date"]), "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"status": "error", "reason": "scan_date must be YYYY-MM-DD"}), 400
+    else:
+        scan_date = get_previous_trading_day(run_day)
+
+    is_preopen = (now_et.hour * 60 + now_et.minute) < 9 * 60 + 30
+    summary = pool_liquidity.refresh(scan_date=scan_date, is_preopen=is_preopen, force=force)
+    code = 200 if summary.get("status") in ("success", "skipped") else 500
+    return jsonify(summary), code
 
 
 @app.route("/refresh_stats", methods=["POST"])

@@ -384,7 +384,7 @@ def score_blog_rubric(markdown: str, expected_cta: str | None = None) -> dict:
         # If schedule says webapp_visit, the body must NOT pitch a paid tier.
         if expected_cta == "webapp_visit":
             paid_pitch = re.search(
-                r"\b(pro\s+trial|starter\s+trial|founder\s+pricing|paid\s+tier)\b",
+                r"\b(pro\s+trial|starter\s+trial|founder\s+pricing|paid\s+tier|agent\s+access)\b|\$39",
                 markdown,
                 flags=re.IGNORECASE,
             )
