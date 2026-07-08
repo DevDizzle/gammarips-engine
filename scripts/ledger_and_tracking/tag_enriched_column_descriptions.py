@@ -159,6 +159,7 @@ CLASSIFICATION = {
     "life_peak_return":       ("opportunity", "realized post-entry", "life_ prefix: max FAVORABLE excursion, entry -> expiration. Exit-free."),
     "life_trough_return":     ("opportunity", "realized post-entry", "life_ prefix: max ADVERSE excursion, entry -> expiration. Exit-free."),
     "life_expiry_return":     ("opportunity", "realized post-entry", "life_ prefix: hold-to-settlement mark (intrinsic at expiration vs entry)."),
+    "life_peak_day":          ("opportunity", "realized post-entry", "life_ prefix: trading day the peak printed (1 = surfacing morning)."),
     "life_daily_bar_count":   ("opportunity", "realized post-entry", "life_ prefix: daily bars used beyond the opp minute window."),
     "life_sim_version":       ("opportunity", "n/a", "life_ prefix: full-life surface sim version tag."),
     "life_labeled_at":        ("opportunity", "n/a", "life_ prefix: when the full-life label was computed."),

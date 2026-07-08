@@ -186,6 +186,7 @@ schema = [
     bigquery.SchemaField("life_peak_return", "FLOAT", mode="NULLABLE"),
     bigquery.SchemaField("life_trough_return", "FLOAT", mode="NULLABLE"),
     bigquery.SchemaField("life_expiry_return", "FLOAT", mode="NULLABLE"),
+    bigquery.SchemaField("life_peak_day", "INTEGER", mode="NULLABLE"),  # trading day of the peak, 1 = surfacing morning
     bigquery.SchemaField("life_daily_bar_count", "INTEGER", mode="NULLABLE"),
     bigquery.SchemaField("life_sim_version", "STRING", mode="NULLABLE"),
     bigquery.SchemaField("life_labeled_at", "TIMESTAMP", mode="NULLABLE"),

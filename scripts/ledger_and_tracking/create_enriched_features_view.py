@@ -189,8 +189,8 @@ _EXCLUDED_OPP = [
 ]
 _EXCLUDED_LIFE = [
     "life_status", "life_peak_return", "life_trough_return",
-    "life_expiry_return", "life_daily_bar_count", "life_sim_version",
-    "life_labeled_at",
+    "life_expiry_return", "life_peak_day", "life_daily_bar_count",
+    "life_sim_version", "life_labeled_at",
 ]
 _EXCLUDED_LABEL = [
     "realized_return_pct_3d", "exit_reason_3d", "exit_day_3d",

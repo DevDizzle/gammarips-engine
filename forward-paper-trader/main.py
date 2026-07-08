@@ -223,6 +223,7 @@ ENRICHED_OUTCOMES_RESEARCH_COLUMNS: list[tuple[str, str]] = [
     ("life_peak_return", "FLOAT64"),
     ("life_trough_return", "FLOAT64"),
     ("life_expiry_return", "FLOAT64"),
+    ("life_peak_day", "INT64"),
     ("life_daily_bar_count", "INT64"),
     ("life_sim_version", "STRING"),
     ("life_labeled_at", "TIMESTAMP"),
@@ -1291,6 +1292,7 @@ def _simulate_life_surface(row, entry_day: date, underlying_close_at_exp: float 
         "life_peak_return": None,
         "life_trough_return": None,
         "life_expiry_return": None,
+        "life_peak_day": None,
         "life_daily_bar_count": None,
         "life_sim_version": LIFE_SIM_VERSION,
         "life_labeled_at": datetime.now(pytz.utc).isoformat(),
@@ -1315,14 +1317,39 @@ def _simulate_life_surface(row, entry_day: date, underlying_close_at_exp: float 
             time.sleep(0.15)
         out["life_daily_bar_count"] = int(len(bars))
 
-        peak_candidates = [float(row["opp_peak_return"])] if row.get("opp_peak_return") is not None else []
+        opp_peak = float(row["opp_peak_return"]) if row.get("opp_peak_return") is not None else None
+        peak_candidates = [opp_peak] if opp_peak is not None else []
         trough_candidates = [float(row["opp_trough_return"])] if row.get("opp_trough_return") is not None else []
+        daily_peak, daily_peak_date = None, None
         if bars:
-            peak_candidates.append((max(b["h"] for b in bars) - entry) / entry)
+            best = max(bars, key=lambda b: b["h"])
+            daily_peak = (best["h"] - entry) / entry
+            daily_peak_date = datetime.fromtimestamp(best["t"] / 1000, tz=pytz.utc).date()
+            peak_candidates.append(daily_peak)
             trough_candidates.append((min(b["l"] for b in bars) - entry) / entry)
         if peak_candidates:
             out["life_peak_return"] = float(max(peak_candidates))
             out["life_trough_return"] = float(min(trough_candidates))
+            # life_peak_day = trading day (1 = surfacing morning) the peak
+            # printed. If the minute-window (days 1-3) peak stands, recover its
+            # calendar date from the WALL-CLOCK opp_minutes_to_peak (entry
+            # 10:00 ET + m minutes — peak prints only exist during sessions,
+            # and this stays exact across weekends/holidays, unlike naive
+            # minute binning). A strictly-greater daily peak can only occur
+            # day 3+ (day 2-3 daily highs are inside the minute window's
+            # range). Either way: count NYSE sessions entry_day..peak date.
+            peak_date = None
+            if opp_peak is not None and (daily_peak is None or opp_peak >= daily_peak):
+                m = float(row.get("opp_minutes_to_peak") or 0.0)
+                entry_dt = est.localize(datetime.combine(
+                    entry_day, datetime.strptime(ENTRY_HHMM, "%H:%M").time()))
+                peak_date = (entry_dt + timedelta(minutes=m)).astimezone(est).date()
+            elif daily_peak_date is not None:
+                peak_date = daily_peak_date
+            if peak_date is not None:
+                out["life_peak_day"] = max(
+                    int(len(nyse.schedule(start_date=entry_day, end_date=peak_date).index)), 1
+                )
 
         if underlying_close_at_exp is not None:
             strike = float(row["recommended_strike"])
@@ -2488,8 +2515,8 @@ def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]
 
 _LIFE_COLS = [
     "life_status", "life_peak_return", "life_trough_return",
-    "life_expiry_return", "life_daily_bar_count", "life_sim_version",
-    "life_labeled_at",
+    "life_expiry_return", "life_peak_day", "life_daily_bar_count",
+    "life_sim_version", "life_labeled_at",
 ]
 
 
@@ -2608,7 +2635,8 @@ def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
     sql = f"""
     SELECT scan_date, entry_day, ticker, direction, recommended_contract,
            recommended_strike, recommended_expiration,
-           opp_entry_price, opp_peak_return, opp_trough_return, opp_status
+           opp_entry_price, opp_peak_return, opp_trough_return,
+           opp_minutes_to_peak, opp_status
     FROM `{ENRICHED_OUTCOMES_TABLE}`
     WHERE recommended_expiration IS NOT NULL
       AND recommended_strike IS NOT NULL

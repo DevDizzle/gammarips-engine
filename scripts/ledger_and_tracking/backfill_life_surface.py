@@ -72,7 +72,8 @@ def _rows_to_process(client, today_et: date, force: bool, limit: int | None):
     sql = f"""
     SELECT scan_date, entry_day, ticker, direction, recommended_contract,
            recommended_strike, recommended_expiration,
-           opp_entry_price, opp_peak_return, opp_trough_return, opp_status
+           opp_entry_price, opp_peak_return, opp_trough_return,
+           opp_minutes_to_peak, opp_status
     FROM `{TABLE}`
     WHERE recommended_expiration IS NOT NULL
       AND recommended_strike IS NOT NULL

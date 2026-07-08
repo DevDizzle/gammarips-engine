@@ -738,6 +738,10 @@ def compute_pool_outcomes():
           ROUND(APPROX_QUANTILES(IF({life_match}, life_expiry_return, NULL), 100)[OFFSET(50)], 4) AS life_expiry_median,
           COUNTIF({life_match} AND life_peak_return >= 0.40) AS life_peak_ge_40,
           COUNTIF({life_match} AND life_peak_return >= 1.00) AS life_peak_ge_100,
+          COUNTIF({life_match} AND life_peak_day IS NOT NULL) AS life_n_peak_day,
+          COUNTIF({life_match} AND life_peak_day BETWEEN 1 AND 3) AS life_peak_d1_3,
+          COUNTIF({life_match} AND life_peak_day BETWEEN 4 AND 12) AS life_peak_d4_12,
+          COUNTIF({life_match} AND life_peak_day >= 13) AS life_peak_d13_plus,
           {_bucket_countifs("life_peak_return", peak_edges, "lpb")},
           {_bucket_countifs("life_expiry_return", expiry_edges, "leb")},
           COUNT(*) AS contracts_total,
@@ -801,6 +805,13 @@ def compute_pool_outcomes():
             "expiry_median": life_raw.get("life_expiry_median"),
             "peak_ge_40": life_raw.get("life_peak_ge_40"),
             "peak_ge_100": life_raw.get("life_peak_ge_100"),
+            # Peak-timing buckets (trading day the peak printed; 1 = the
+            # surfacing morning) — powers the "when do the wins show up?"
+            # story block on the Track Record.
+            "n_peak_day": life_raw.get("life_n_peak_day"),
+            "peak_day_1_3": life_raw.get("life_peak_d1_3"),
+            "peak_day_4_12": life_raw.get("life_peak_d4_12"),
+            "peak_day_13_plus": life_raw.get("life_peak_d13_plus"),
             "peak_buckets": [
                 {"label": lbl, "n": life_raw.get(f"lpb_{i}")}
                 for i, lbl in enumerate(peak_bucket_labels)
