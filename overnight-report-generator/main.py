@@ -22,7 +22,10 @@ import market_context  # deterministic, non-blocking macro + sector context
 # replaces the directional-calls table, bullish-only-by-construction handling
 # (bullish-share/z-score commentary forbidden), one pool-size number
 # (total_signals) only, no internal field/table names echoed into prose.
-PROMPT_VERSION = "report_v3_descriptive"
+# v4 (2026-07-07, TF-05) = TL;DR-first structure: a new 3-bullet "TL;DR"
+# section leads, "Pool Snapshot" moves to second position, prose sections
+# demoted below — reorder + summarize only, no new data surface.
+PROMPT_VERSION = "report_v4_tldr_first"
 
 # Independent version label for the per-signal SEO call (writes seoMetadata onto
 # the public /signals/{ticker} pages). Deliberately ISOLATED from PROMPT_VERSION:
@@ -597,8 +600,28 @@ OUTPUT — produce a single JSON object with these keys:
 - "headline": 2-3 sentence summary leading with the curated pool size
   (total_signals) + the dominant theme, then the macro/regime context. No
   bull/bear splits, no z-scores, no trade calls.
-- "content": full markdown body. REQUIRED sections in this order:
+- "content": full markdown body. STRUCTURE PRINCIPLE: a reader — human
+  or agent — must get the day's takeaway in the first screen. Lead with the
+  TL;DR and the pool table; the prose sections are supporting depth below.
+  REQUIRED sections in this order:
     # {{title}} — Overnight Edge, {{report_date}}
+    ## TL;DR
+       EXACTLY three bullets, one line each, no hedging:
+       1. The curated pool size (total_signals) + the dominant catalyst theme.
+       2. The regime read: risk_state + the single most load-bearing macro
+          datum behind it (VIX level/trend or term structure).
+       3. The one thing a returning reader most needs to know today: the most
+          significant change_vs_yesterday, divergence, or sector rotation
+          flag — whichever the data says matters most.
+       No trade calls, no bullish-share stats, no new claims that the body
+       does not also cover.
+    ## Pool Snapshot
+       Render the per_candidate_calls list as a markdown table with columns
+       Ticker | Flow Read | Basis. The Flow Read is a descriptive
+       classification of what the flow shows (BULLISH / BEARISH / UNCLEAR),
+       NOT a trade call; the Basis cites the load-bearing datum. Rows must
+       match what you also output in the structured `per_candidate_calls`
+       field.
     ## Market Pulse
        The curated pool size (total_signals — cite this number and NO other
        count) + the dominant catalyst themes + one line of macro context. No
@@ -641,13 +664,6 @@ OUTPUT — produce a single JSON object with these keys:
        Same structure for top_bearish. If top_bearish is empty, write a single
        line: "No bearish names — the curated pool is bullish-only by
        construction."
-    ## Pool Snapshot
-       Render the per_candidate_calls list as a markdown table with columns
-       Ticker | Flow Read | Basis. The Flow Read is a descriptive
-       classification of what the flow shows (BULLISH / BEARISH / UNCLEAR),
-       NOT a trade call; the Basis cites the load-bearing datum. Rows must
-       match what you also output in the structured `per_candidate_calls`
-       field.
     ## Divergence Watch
        For each entry in `divergences`: ticker + flag list + 1-line
        interpretation. If `divergences` is empty, write a single line saying so.
