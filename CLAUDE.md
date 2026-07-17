@@ -54,7 +54,7 @@ Before making meaningful changes, read:
 Deeper context (read when relevant): `docs/DECISIONS/` (decision trail), `docs/EVAL-SYSTEM.md`, `docs/TESTING.md`, `docs/research_reports/INTELLIGENCE_BRIEF.md`, `docs/research_reports/FINDINGS_LEDGER.md`.
 
 ## Current policy (summary)
-**V7.1 "Tilted GIGO" is the live policy** (`policy_version='V7_1_TILTED_GIGO'`, `LIVE_COHORT_START_DATE='2026-06-26'`) = V6 bracket-tournament SELECTION + V7 same-day EXIT + the ".1" 60-day-momentum enrichment tilt. **The full policy is distilled into one-claim notes in [`docs/wiki/`](docs/wiki/)** — start at [`docs/wiki/_index/REGISTRY.md`](docs/wiki/_index/REGISTRY.md); each claim below is its own note so a fresh session can answer "what runs and why" from the wiki alone:
+**V7.1 "Tilted GIGO" is the live policy** ([[v7-1-tilted-gigo-live-policy]]: `policy_version='V7_1_TILTED_GIGO'`, `LIVE_COHORT_START_DATE='2026-06-26'`) = V6 bracket-tournament SELECTION + V7 same-day EXIT + the ".1" 60-day-momentum enrichment tilt. **The full policy is distilled into one-claim notes in [`docs/wiki/`](docs/wiki/)** — start at [`docs/wiki/_index/REGISTRY.md`](docs/wiki/_index/REGISTRY.md); each claim below is its own note so a fresh session can answer "what runs and why" from the wiki alone:
 - Selection: [[bracket-tournament-selection]] · [[bullish-only-hard-gate]] · [[tourney-pool-cap-edge-rank]] · [[live-oi-floor]] · [[selection-gates-removed]]
 - Exit: [[v7-gigo-same-day-exit]] (entry 10:00 ET / +40% TP / −30% stop / flat 15:45 ET, no trail, no overnight; V6 −60/+80/3-day is DEAD)
 - Upstream funnel + rails: [[enrichment-definition]] · [[spread-gate-retired]] · [[earnings-exclusion-rail]] · [[regime-rail-vix-term]] · [[assert-no-leakage-gate]] · [[enrichment-cost-fix-topn-thinking-cap]]
