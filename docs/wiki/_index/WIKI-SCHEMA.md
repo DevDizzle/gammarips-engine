@@ -21,7 +21,7 @@ one-claim distilled version; it CITES the source doc, it does not replace it.
 
 ## Required header block (every note)
 ```
-Status: active | superseded
+Status: active | superseded | retired
 Type: policy | architecture | finding | literature
 Tag: policy-adopted | architecture-fact | proven-on-cohort | falsified-on-cohort |
      fragile-conditional | literature-established | untested-hypothesis

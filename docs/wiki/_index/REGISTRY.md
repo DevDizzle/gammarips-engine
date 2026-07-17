@@ -19,6 +19,8 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[market-holiday-standdown]] — policy-adopted — fail closed (no email/trade/tournament) on any non-trading day
 - [[quant-md-final-round-priors]] — policy-adopted — macro/sector report context + quant.md priors injected only at the tournament championship round
 - [[trailing-stop-retired-v7]] — policy-adopted (SUPERSEDED) — the 25%-off-peak trailing stop is DEAD under V7 no-trail
+- [[content-receipts-not-claims]] — policy-adopted — public content posts RECEIPTS (timestamped, quote-tweeted on close), not picks or claims
+- [[v5-3-target-80-retired]] — policy-adopted (RETIRED) — the V5.3 +80/−60/3-day exit is history; live exit is same-day GIGO
 
 ## Architecture (`architecture/`) — pipeline / data-contract facts
 - [[selection-gates-removed]] — architecture-fact — all selection gates removed 2026-06-04; all enriched signals reach the tournament
@@ -53,6 +55,33 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[daily-cadence-fallback-removed]] — architecture-fact (SUPERSEDED) — the relax-gates-on-empty-days fallback was removed 2026-06-04
 - [[active-days-liquidity-gate-removed]] — architecture-fact (SUPERSEDED) — the active_days_20d trailing-liquidity gate was removed 2026-06-04
 
+### Architecture — services, data-contract details, prior-era markers
+- [[eval-system-monitoring-only]] — architecture-fact — the LLM eval system is monitoring-first and never gates a pick/report/deploy
+- [[content-services-x-poster-blog]] — architecture-fact — x-poster + blog-generator ADK services + shared content lib are the distribution layer
+- [[mcp-sole-attack-surface]] — architecture-fact — gammarips-mcp is the sole (sandboxed) attack surface for paid-agent interactions; never a pick endpoint
+- [[content-machine-weekly-cadence]] — architecture-fact — the 4-surface content machine (X/blog/reddit/email) runs weekly autonomous cadence off real ledger+report data
+- [[todays-pick-dual-write]] — architecture-fact — signal-notifier dual-writes todays_pick under {scan_date} AND {entry_day}
+- [[pipeline-cron-schedule]] — architecture-fact — daily cron order is enrichment → report → notifier; the report must be written before the pick runs
+- [[cohort-reset-on-filter-change]] — architecture-fact — truncate the ledger + start a fresh cohort whenever the selection filter materially changes
+- [[cohort-reset-live-oi]] — architecture-fact — the 2026-06-25 reset that set LIVE_COHORT_START_DATE=2026-06-26 for the live-OI regime
+- [[moneyness-sign-direction-aware]] — architecture-fact — moneyness_pct is direction-aware (positive = OTM) for both calls and puts
+- [[scanner-sector-detail-fetch]] — architecture-fact — the scanner fetches per-ticker SIC sector detail for movers only (fixed the NULL-sector bug)
+- [[sector-persisted-on-signals]] — architecture-fact — sector/industry is persisted onto signal docs for SEO internal-linking + related-signals
+- [[overnight-synthesis-v2-grounded]] — architecture-fact — the daily report is literature-grounded report_v2 with a stamped prompt_version
+- [[trader-simulates-todays-pick-only]] — architecture-fact — the trader simulates ONLY todays_pick; one ledger row per day
+- [[trader-eod-mark-to-market]] — architecture-fact — EOD mark-to-market; skip-row columns (ticker/contract/direction) must be NULLABLE
+- [[deferred-alpaca-agent]] — untested-hypothesis — real-money Alpaca execution is DEFERRED until EV is proven (worst case = real money on an unmeasured edge)
+- [[deferred-few-shot-exemplars]] — untested-hypothesis — few-shot picker exemplars deferred until ≥15 closed trades (≥5W/≥5L)
+- [[intraday-hold-shadow-retired]] — architecture-fact (RETIRED) — the day-trade shadow collapsed once V7 made the live exit intraday
+- [[x-poster-revamp-agentic]] — architecture-fact — @gammarips revamp: dead paid-pick CTAs killed, pool-level receipts, pick hard-private
+- [[signal-notifier-oi-vol-floor-removed]] — architecture-fact (SUPERSEDED) — the OI≥20/vol≥100 scan-time floor was added 04-30, later removed 06-04
+- [[enrichment-funnel-baseline]] — architecture-fact (SUPERSEDED) — the V5.3-era funnel baseline (~2,264 raw → ~75/day); superseded by top-50 grounding
+- [[ranker-voi-first-retired]] — architecture-fact (RETIRED) — the V/OI-first deterministic ranker; the whole ranker era ended at the tournament
+- [[v5-3-monetization-retired]] — architecture-fact (RETIRED) — the V5.3-era WhatsApp/tiered-pricing plan; now free-UI / paid-MCP
+- [[webapp-launch-cleanup-ssr]] — architecture-fact (RETIRED) — webapp-only V5.3 launch cleanup + SSR crawlability (engine untouched)
+- [[v5-4-promotion-retired]] — architecture-fact (RETIRED) — V5.4 promoted to canonical 2026-05-08; later collapsed to V6/V7
+- [[v5-4-scorer-picker-retired]] — architecture-fact (RETIRED) — the V5.4 Scorer→Picker pair; collapsed to a single judge, then the tournament
+
 ## Findings (`findings/`) — tested on our cohorts
 - [[bullish-direction-asymmetry]] — proven-on-cohort — bullish EV +4.11% vs bearish −7.71% (3-day era); the one robust direction lever
 - [[option-pnl-not-underlying]] — proven-on-cohort — evaluate on OPTION PnL, never underlying (54% vs 41% on the same pool)
@@ -74,6 +103,7 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[bracket-optimization-dead]] — falsified-on-cohort — 0/840 bracket variants profitable; it is not a bracket-tuning problem
 - [[trailing-liquidity-floor-dead]] — falsified-on-cohort — trailing-volume floors do not separate fillable from unfillable; dead approach
 - [[open-untested-exit-hypotheses]] — untested-hypothesis — H19 (DTE 21–45) and H21 (exit-by-D2) remain untested; proposer color only
+- [[lit-audit-h11-h12-spread-moneyness]] — literature-established (SUPERSEDED) — H11 spread 10→8% and H12 moneyness 15→10%; both later superseded
 
 ## Literature (`literature/`) — external, not tested on our data
 - [[earnings-iv-crush]] — literature-established — never hold long single-leg options through the print (IV crush)
