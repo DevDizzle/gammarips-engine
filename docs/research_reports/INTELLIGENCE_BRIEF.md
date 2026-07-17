@@ -1,6 +1,21 @@
 # Intelligence Brief — GammaRips Signal Research
 
+> **Distilled to the wiki (2026-07-17).** The H-numbered claims and retros in this brief are
+> now one-claim notes in [`docs/wiki/`](../wiki/_index/REGISTRY.md) (findings/, literature/,
+> architecture/). For "is lever X live and under what exit-context," read the wiki registry;
+> this brief remains the **canonical narrative + hypothesis trail** those notes cite.
+>
 > **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`. Operator cheat: `../../CHEAT-SHEET.md`.
+
+## 2026-07-06 update — ITM-vs-delta retro (N=2,146 expired): the pool is DELTA-CALIBRATED — no directional edge at expiration; the hold-to-exp "floor" mean is a lottery-tail artifact
+
+**Pre-committed H1 (realized ITM% at expiration > pool mean scan-time |delta|, i.e. "the scanner finds direction the market underprices") was REJECTED.** On every expired `enriched_option_outcomes` contract with an expiry bar (N=2,146 per-signal / 1,896 unique; scans 04-10→06-30, expiries ≤07-01; all BULLISH calls by construction): **ITM 41.3% vs mean δ 42.1%** (Wilson [39.2,43.4]); cleaned of a 41-row delta≈0.0 data bug it's **40.9% vs 42.9% (−1.9pp, p(≤obs)=0.031)**. Per-bucket calibration is near-perfect (0.2–0.46 band: ITM 35.2% vs δ .365). Since δ=N(d1) overstates P(ITM)=N(d2) by ~3–5pp here, the honest read is **exactly zero directional edge, not negative** — and this in a violently bullish Apr–Jun tape that should have flattered a long-call pool. The scanner surfaces *fairly-priced* contracts; ALL realized ROI lives in selection-within-pool + entry/exit craft (consistent with the owner's surfacing-vs-trading principle and the negative fixed-exit composites).
+
+**Zero-discretion floor (enter 10:00, hold to expiry, collect intrinsic; N=1,316 entry-priced):** mean **+15.6%** but **median −100%**, 60% expire worthless, WR 28.0%, beyond-breakeven 28.0% (ITM→profitable haircut ~12pp). The positive mean is NOT robust: excluding the top 10 of 1,316 trades flips it negative; by month Apr +57.5% / May −1.3% / Jun −0.1% (walk-forward halves +39.5% → −8.3%) — April-melt-up fuel, not selection alpha. **Never publish ITM% or the floor mean as marketing** — both would backfire on inspection.
+
+**Retro #2 same day (excursion path vs entry-IV null, N=1,303):** the pool is **PATH-calibrated too** — realized intrinsic-bound peaks sit at the 50.95th percentile of their own IV-implied distributions (CI straddles 0.5; KS p=0.50), and peak TIMING matches the null (median day 7 of a 10-day life — peaks arrive LATE on the bound; P(peak≤3td)=19.5%≈implied; true option-price timing needs the follow collector). **The durable finding is the GIVEBACK:** P(peak≥+100%)=36%, but conditional on peak≥+50% the median contract retains only **31% of its peak** at expiry and 37.8% round-trip to a loss; 48.5% of ever-profitable contracts die at a loss. The verified product story = high-excursion fairly-priced surface + exit craft; NO IV-beating anomaly to claim. `FINDINGS_LEDGER.md` §2026-07-06 (retro #2).
+
+**Follow-ups filed:** (a) substrate bug — 41 rows carry `recommended_delta`=0.0 on ITM-at-scan contracts (missing-delta-as-zero; May–Jun scans) — engineer ticket; (b) the post-06-12 top-50 era reads ITM−δ = −21pp but on N=68 structurally-biased short-DTE rows — **re-run ~mid-Aug when ≥200 era rows have expired** (V7.1 cohort: zero expired yet); (c) the through-expiry MFE ceiling is NOT computable from stored data (`opp_window_days`=3) — needs the multi-day/to-expiration follow collector. Full numbers: `FINDINGS_LEDGER.md` §2026-07-06; scripts `.scratch/retro_itm_*.py` (read-only).
 
 ## 2026-06-19 update — MOMENTUM is a real selection lever (the brief's first surviving edge); "ride recent winners" falsified; pool can shrink to 25
 

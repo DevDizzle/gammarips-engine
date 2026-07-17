@@ -61,11 +61,17 @@ app.description = (
 # --- Scheduler-triggered pipeline endpoint --------------------------------
 class PostRequest(BaseModel):
     post_type: Literal[
-        "signal", "watchlist", "standby", "report", "teaser", "callback", "scorecard"
+        "signal", "watchlist", "standby", "report", "teaser", "callback",
+        "scorecard", "pool_outcomes", "life_stats", "agent_angle"
     ] = Field(description="Which post-type handler to invoke.")
     scan_date: Optional[str] = Field(
         default=None,
         description="YYYY-MM-DD (Eastern time). Defaults to today ET if omitted.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Run the full pipeline but skip the actual X publish. "
+        "For validating post types end-to-end on the live service.",
     )
 
 
@@ -78,6 +84,15 @@ class PostResponse(BaseModel):
     error: Optional[str] = None
 
 
+# Post types that can reveal the PRIVATE daily tournament pick (or recap it
+# per-ticker). Paused at the scheduler 2026-07-03, and hard-blocked here since
+# the 2026-07-09 revamp: the service is deployed --allow-unauthenticated with
+# DRY_RUN=false, so "paused" must be enforced in code, not just cron config
+# (scalping-optics constraint — see docs/DECISIONS/2026-07-09-x-poster-revamp.md).
+_PICK_REVEALING_POST_TYPES: frozenset[str] = frozenset({"signal", "callback", "scorecard"})
+_PAUSED_TYPES_ENABLED = os.getenv("ENABLE_PAUSED_POST_TYPES", "false").lower() == "true"
+
+
 @app.post("/post", response_model=PostResponse)
 async def trigger_post(request: PostRequest) -> PostResponse:
     """Trigger the x-poster pipeline for one scheduled post.
@@ -86,13 +101,27 @@ async def trigger_post(request: PostRequest) -> PostResponse:
     Seed a fresh session with post_type + scan_date, drain the agent loop,
     return the final publish_result from session state.
     """
+    if request.post_type in _PICK_REVEALING_POST_TYPES and not _PAUSED_TYPES_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"post_type '{request.post_type}' is paused: the daily pick is "
+                "private (free-UI/paid-MCP model). Set ENABLE_PAUSED_POST_TYPES=true "
+                "to re-enable deliberately."
+            ),
+        )
+
     scan_date = request.scan_date or tools.today_et_iso()
 
     session_service = InMemorySessionService()
     session = await session_service.create_session(
         app_name="x-poster",
         user_id="scheduler",
-        state={"post_type": request.post_type, "scan_date": scan_date},
+        state={
+            "post_type": request.post_type,
+            "scan_date": scan_date,
+            "dry_run": request.dry_run,
+        },
     )
     runner = Runner(
         agent=root_agent,
@@ -142,6 +171,24 @@ async def trigger_post(request: PostRequest) -> PostResponse:
     )
     logger.log_struct({"event": "pipeline_complete", **resp.model_dump()}, severity="INFO")
     return resp
+
+
+# --- Post-metrics collection (nightly cron; no LLM involved) ---------------
+class MetricsRequest(BaseModel):
+    lookback_days: int = Field(default=10, ge=1, le=30)
+
+
+@app.post("/collect_metrics")
+def collect_metrics(request: MetricsRequest) -> dict[str, Any]:
+    """Snapshot public metrics for recent tweets into BQ `x_post_metrics`.
+
+    Deterministic tool call — deliberately bypasses the agent pipeline.
+    Fail-soft: returns the tool's status dict; never 500s on X quota errors
+    so Cloud Scheduler doesn't retry-storm a rate-limited API.
+    """
+    result = tools.collect_x_metrics(lookback_days=request.lookback_days)
+    logger.log_struct({"event": "collect_metrics", **result}, severity="INFO")
+    return result
 
 
 # --- Health + feedback -----------------------------------------------------

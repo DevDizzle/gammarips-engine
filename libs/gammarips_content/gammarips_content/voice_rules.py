@@ -25,6 +25,11 @@ RETIRED_ALIASES: tuple[str, ...] = (
     "premium signal",
     "interactive dashboard",
     "#TheOvernightEdge",
+    # Retired 2026-07-03 (free-UI/paid-MCP pivot): the paid email pick is dead.
+    # The web UI is 100% free; the paid product is MCP Agent Access.
+    "email subscribers only",
+    "curated daily pick",
+    "WhatsApp",
 )
 
 
@@ -68,6 +73,8 @@ class VoiceRules:
         "Show the routine, not the dashboard. GammaRips is a morning habit.",
         "Use cashtags ($AAPL) for ticker references — standard FinTwit, drives discovery.",
         "Put the cashtag in the first 80 characters for above-the-fold visibility.",
+        "When a call-to-action fits: the site and full pool are FREE ('free on the site, link in bio'); the paid tier is MCP Agent Access for trading agents. Never reference email delivery — that channel is retired.",
+        "Use a plain hyphen '-' as a separator. Never use an em dash or en dash in post bodies (owner rule 2026-07-08).",
     )
 
     do_not: tuple[str, ...] = (
@@ -101,8 +108,8 @@ def render_for_prompt() -> str:
     lines += [f"- {p}" for p in BANNED_RECOMMENDATION_PHRASES]
     lines += [
         "",
-        "## Disclaimer (only on trade-performance posts)",
-        f"- Short form (win/loss/callback/scorecard only): {DISCLAIMER_SHORT}",
-        "- Forward-looking posts (signal/standby/teaser/report) ship WITHOUT a disclaimer.",
+        "## Disclaimer (only on realized-performance posts)",
+        f"- Short form (win/loss/callback/scorecard/pool_outcomes/life_stats only): {DISCLAIMER_SHORT}",
+        "- Forward-looking / education posts (signal/standby/teaser/report/watchlist/agent_angle) ship WITHOUT a disclaimer.",
     ]
     return "\n".join(lines)

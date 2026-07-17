@@ -22,6 +22,8 @@ PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
 DATASET = os.getenv("DATASET", "profit_scout")
 LEDGER_TABLE = f"{PROJECT_ID}.{DATASET}.forward_paper_ledger"
 ENRICHED_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals_enriched"
+OUTCOMES_TABLE = f"{PROJECT_ID}.{DATASET}.enriched_option_outcomes"
+METRICS_TABLE = f"{PROJECT_ID}.{DATASET}.x_post_metrics"
 GCS_BUCKET = os.getenv("GCS_BUCKET", "gammarips-x-media")
 BRAND_REF_GCS = os.getenv("BRAND_REF_GCS", f"gs://{GCS_BUCKET}/brand_ref_card.png")
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gemini-3-pro-image-preview")
@@ -513,6 +515,214 @@ def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
     }
 
 
+def fetch_pool_outcomes(entry_day: str) -> dict:
+    """Pool-level same-day bracket outcomes for every name that entered today.
+
+    Reads `enriched_option_outcomes` — the daily full-pool bracket replay
+    (identical GIGO mechanics on ALL ~50 surfaced names, not just the pick).
+    All fields are REALIZED same-day results, published after the 15:45 ET
+    close + the 17:00 ET labeler — no leakage possible.
+
+    POOL-LEVEL ONLY by design: never selects `was_tournament_pick` and never
+    identifies which name the tournament chose. The daily pick is private.
+
+    Args:
+        entry_day: The ET trade day (YYYY-MM-DD) — today for the 17:45 post.
+            (Note: the table's `scan_date` is the prior evening's scan; the
+            trade-day key is `entry_day`.)
+
+    Returns:
+        dict: {"status": "success", "data": {n, targets, stops, timeouts,
+              wins, touched_25, median_ret_pct, best_peak_pct,
+              best_peak_ticker}} or {"status": "empty"} if the labeler
+              hasn't run / market holiday.
+    """
+    query = f"""
+        WITH pool AS (
+            SELECT
+                ticker,
+                realized_return_pct,
+                exit_reason,
+                SAFE_DIVIDE(peak_premium, entry_price) - 1 AS peak_return
+            FROM `{OUTCOMES_TABLE}`
+            WHERE entry_day = @entry_day
+              AND realized_return_pct IS NOT NULL
+              AND exit_reason IN ('TARGET', 'STOP', 'TIMEOUT')
+        )
+        SELECT
+            COUNT(*) AS n,
+            COUNTIF(exit_reason = 'TARGET') AS targets,
+            COUNTIF(exit_reason = 'STOP') AS stops,
+            COUNTIF(exit_reason = 'TIMEOUT') AS timeouts,
+            COUNTIF(realized_return_pct > 0) AS wins,
+            COUNTIF(peak_return >= 0.25) AS touched_25,
+            ROUND(APPROX_QUANTILES(realized_return_pct, 100)[OFFSET(50)] * 100, 1) AS median_ret_pct,
+            CAST(ROUND(MAX(peak_return) * 100) AS INT64) AS best_peak_pct,
+            ARRAY_AGG(ticker ORDER BY peak_return DESC LIMIT 1)[OFFSET(0)] AS best_peak_ticker
+        FROM pool
+    """
+    try:
+        job = _bq().query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("entry_day", "DATE", entry_day),
+                ]
+            ),
+        )
+        rows = [dict(r) for r in job.result()]
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"fetch_pool_outcomes failed: {exc}")
+        return {"status": "error", "message": str(exc)}
+
+    if not rows or not rows[0].get("n"):
+        return {"status": "empty", "message": f"No labeled pool outcomes for {entry_day}"}
+    data = dict(rows[0])
+    # Pre-signed display string — a negative best-peak day must not render
+    # as "+-12%" out of the template's hardcoded "+" prefix.
+    bp = data.get("best_peak_pct")
+    data["best_peak_signed"] = (
+        f"{'+' if bp >= 0 else ''}{int(bp)}%" if bp is not None else None
+    )
+    return {"status": "success", "data": _jsonable(data)}
+
+
+def fetch_life_distribution() -> dict:
+    """Full-life (surfaced -> expiration) distribution over the labeled cohort.
+
+    Reads the life_* surface on `enriched_option_outcomes` (life_status='OK'
+    means the complete surfaced-to-expiration path was labeled). These are the
+    scorecard/landing-page distribution numbers — the honest 'peaks are
+    everywhere, exits are rare' story. All realized, no leakage.
+
+    Returns:
+        dict: {"status": "success", "data": {n, med_peak_pct, touched_40_pct,
+              doubled_pct, med_expiry_pct}} or {"status": "empty"}.
+    """
+    query = f"""
+        SELECT
+            COUNT(*) AS n,
+            CAST(ROUND(APPROX_QUANTILES(life_peak_return, 100)[OFFSET(50)] * 100) AS INT64) AS med_peak_pct,
+            CAST(ROUND(100 * COUNTIF(life_peak_return >= 0.40) / COUNT(*)) AS INT64) AS touched_40_pct,
+            CAST(ROUND(100 * COUNTIF(life_peak_return >= 1.0) / COUNT(*)) AS INT64) AS doubled_pct,
+            CAST(ROUND(APPROX_QUANTILES(life_expiry_return, 100)[OFFSET(50)] * 100) AS INT64) AS med_expiry_pct
+        FROM `{OUTCOMES_TABLE}`
+        WHERE life_status = 'OK'
+          AND life_peak_return IS NOT NULL
+    """
+    try:
+        rows = [dict(r) for r in _bq().query(query).result()]
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"fetch_life_distribution failed: {exc}")
+        return {"status": "error", "message": str(exc)}
+
+    if not rows or not rows[0].get("n"):
+        return {"status": "empty", "message": "No life-labeled contracts yet"}
+    return {"status": "success", "data": _jsonable(rows[0])}
+
+
+# Rotating angle bank for the agent_angle education post. Deterministic
+# rotation by ISO day-of-year so the cadence never repeats back-to-back and
+# reruns of the same scan_date are idempotent. Copy points are TALKING POINTS
+# — the writer drafts fresh prose from them; it must not invent numbers
+# beyond what a point states. No em dashes (owner copy rule 2026-07-08).
+_AGENT_ANGLES: tuple[dict, ...] = (
+    {
+        "title": "Why agents need structured data, not screenshots",
+        "points": [
+            "A trading agent cannot reason over a chart screenshot. It needs fields: flow, open interest, score, history.",
+            "GammaRips serves the same curated pool humans see on the site as MCP tools an agent can query directly.",
+            "Agent Access is $39/mo. The human site stays free.",
+        ],
+    },
+    {
+        "title": "Curation is the product",
+        "points": [
+            "Thousands of tickers trade options every day. Our overnight scan cuts that to roughly 50 names with unusual bullish flow.",
+            "An agent that starts from 50 curated names beats an agent that starts from the whole market.",
+            "The full pool is free on the site. Link in bio.",
+        ],
+    },
+    {
+        "title": "We publish the whole distribution, not the wins",
+        "points": [
+            "Every name that makes the pool gets tracked. Peaks, troughs, and what it was worth at expiration.",
+            "No cherry-picking is possible when the losers stay on the page.",
+            "Your agent can query that history before it trusts a single number.",
+        ],
+    },
+    {
+        "title": "The exit is the whole game",
+        "points": [
+            "The median pool contract peaks well above its entry at some point, then expires worthless.",
+            "Picking the contract is the easy half. Deciding when to get out is the hard half.",
+            "We sell the data that frames that decision. We do not sell the decision.",
+        ],
+    },
+    {
+        "title": "Primitives, not picks",
+        "points": [
+            "The MCP gives your agent tools: the pool, the outcome history, the selection methodology.",
+            "Your agent reasons to its own contract. There is no pick endpoint on purpose.",
+            "Two agents with different risk settings should reach different answers.",
+        ],
+    },
+    {
+        "title": "What 'curated' means mechanically",
+        "points": [
+            "Directional options flow over $500K. A scanner score floor. No names inside their earnings window. A volatility regime check.",
+            "Rules are published. Nothing is vibes.",
+            "How it works is spelled out on the site. Link in bio.",
+        ],
+    },
+    {
+        "title": "Receipts over hype",
+        "points": [
+            "Every stat we post comes from a paper ledger with fixed, published rules.",
+            "Same entry time, same bracket, every name. That is what makes the numbers comparable.",
+            "Paper first. The framing stays honest because the data is public.",
+        ],
+    },
+    {
+        "title": "A morning routine for an agent",
+        "points": [
+            "Before the open: pull the fresh pool, check each name's flow and score, compare against the outcome history.",
+            "That is a five-minute job for an agent on MCP and an hour by hand.",
+            "Agent Access is $39/mo. Bring your own agent.",
+        ],
+    },
+    {
+        "title": "Free site, paid pipes",
+        "points": [
+            "Everything a human reads on gammarips is free: the pool, the reports, the scorecard distributions.",
+            "The paid product is machine access: MCP tools your trading agent queries directly.",
+            "Humans browse free. Agents subscribe.",
+        ],
+    },
+)
+
+
+def fetch_agent_angle(scan_date: str) -> dict:
+    """Pick today's agentic-trading education angle, deterministically.
+
+    Rotation = day-of-year modulo the angle-bank size, so the same scan_date
+    always maps to the same angle (idempotent reruns) and consecutive posts
+    never repeat.
+
+    Args:
+        scan_date: YYYY-MM-DD (ET). Drives the rotation index.
+
+    Returns:
+        dict: {"status": "success", "data": {"title": ..., "points": [...]}}
+    """
+    try:
+        day_of_year = datetime.strptime(scan_date, "%Y-%m-%d").timetuple().tm_yday
+    except ValueError:
+        day_of_year = datetime.now(ET).timetuple().tm_yday
+    angle = _AGENT_ANGLES[day_of_year % len(_AGENT_ANGLES)]
+    return {"status": "success", "data": angle}
+
+
 # ---------------------------------------------------------------------------
 # Rubric (planner or writer-invoked — optional; also enforced in reviewer callback)
 # ---------------------------------------------------------------------------
@@ -819,10 +1029,13 @@ def publish_to_x(
     image_bytes: bytes | None,
     quote_tweet_id: str | None = None,
     in_reply_to_tweet_id: str | None = None,
+    dry_run: bool = False,
 ) -> dict:
     """Publish a tweet via Tweepy. Handles media + QRT + thread-reply.
 
-    Honors DRY_RUN env var — returns a fake tweet_id without hitting X.
+    Honors DRY_RUN env var OR the per-request dry_run flag — returns a fake
+    tweet_id without hitting X. The per-request flag lets us validate a new
+    post type end-to-end on the live service without publishing.
 
     Returns:
         dict: {"status": "success"|"error", "tweet_id": "..." | None, "error": "...", "dry_run": bool}
@@ -832,6 +1045,7 @@ def publish_to_x(
         image_bytes=image_bytes,
         quote_tweet_id=quote_tweet_id,
         in_reply_to_tweet_id=in_reply_to_tweet_id,
+        dry_run=dry_run,
     )
     return {
         "status": "success" if result.tweet_id else "error",
@@ -839,6 +1053,30 @@ def publish_to_x(
         "error": result.error,
         "dry_run": result.dry_run,
     }
+
+
+def already_published(scan_date: str, post_type: str) -> bool:
+    """True if a REAL tweet was already logged for this scan_date+post_type.
+
+    Idempotency guard for Cloud Scheduler retries (the 540s service timeout +
+    up to 3 review-loop iterations makes a retry-after-slow-success possible,
+    and the writer re-drafts so X's duplicate-content rejection won't catch
+    it). Deliberately stricter than doc-existence: skip/no-op logs
+    (tweet_id=None) and dry-run logs must NOT block a later real publish.
+    Fail-open on read errors — a missed guard is one duplicate tweet; a
+    fail-closed guard on a Firestore blip is a silently skipped post day.
+    """
+    try:
+        doc_id = firestore_helpers.x_post_doc_id(scan_date, post_type)
+        snap = _fs().collection("x_posts").document(doc_id).get()
+        if not snap.exists:
+            return False
+        data = snap.to_dict() or {}
+        tid = data.get("tweet_id")
+        return bool(tid) and not data.get("dry_run") and not str(tid).startswith("dry_run_")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"already_published check failed (fail-open): {exc}")
+        return False
 
 
 def log_post(
@@ -867,6 +1105,125 @@ def log_post(
     except Exception as exc:  # noqa: BLE001
         logger.error(f"log_post failed: {exc}")
         return {"status": "error", "message": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Post-performance metrics collection (NOT an agent tool — called by the
+# /collect_metrics endpoint on a nightly cron). Closes the loop on "which
+# post types earn their slot": impressions/likes/etc per tweet into BQ.
+# ---------------------------------------------------------------------------
+
+_METRICS_SCHEMA_DDL = f"""
+CREATE TABLE IF NOT EXISTS `{{table}}` (
+    collected_at TIMESTAMP NOT NULL,
+    tweet_id STRING NOT NULL,
+    scan_date DATE,
+    post_type STRING,
+    impression_count INT64,
+    like_count INT64,
+    retweet_count INT64,
+    reply_count INT64,
+    quote_count INT64,
+    bookmark_count INT64
+)
+"""
+
+
+def collect_x_metrics(lookback_days: int = 10) -> dict:
+    """Snapshot public metrics for recent @gammarips tweets into BQ.
+
+    One BATCHED get_tweets call (<=100 ids) per run — deliberate: the X API
+    read quota on our tier is tiny, so this must stay a single request.
+    Fail-soft everywhere: a 403/429 from X logs and returns an error dict;
+    it never raises.
+
+    Args:
+        lookback_days: How many calendar days of x_posts to snapshot.
+
+    Returns:
+        dict: {"status": "success", "collected": N}
+              or {"status": "empty"|"error", "message": "..."}
+    """
+    end = datetime.now(ET).date()
+    start = end - timedelta(days=lookback_days)
+
+    # 1. Gather recent published tweet ids from the Firestore post log.
+    posts: dict[str, dict] = {}  # tweet_id -> {scan_date, post_type}
+    try:
+        docs = (
+            _fs().collection("x_posts")
+                 .where("scan_date", ">=", start.isoformat())
+                 .where("scan_date", "<=", end.isoformat())
+                 .stream()
+        )
+        for d in docs:
+            data = d.to_dict() or {}
+            tid = data.get("tweet_id")
+            if not tid or data.get("dry_run") or str(tid).startswith("dry_run_"):
+                continue
+            posts[str(tid)] = {
+                "scan_date": data.get("scan_date"),
+                "post_type": data.get("post_type"),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"collect_x_metrics: firestore read failed: {exc}")
+        return {"status": "error", "message": f"firestore: {exc}"}
+
+    if not posts:
+        return {"status": "empty", "message": "No published tweets in window"}
+
+    ids = sorted(posts.keys(), reverse=True)[:100]  # newest first, batch cap
+
+    # 2. One batched metrics read.
+    client = tweepy_helper.build_client()
+    if client is None:
+        return {"status": "error", "message": "missing_credentials"}
+    try:
+        # user_auth=True is REQUIRED: our tweepy Client has OAuth 1.0a user
+        # creds only (no bearer token), and tweepy defaults v2 reads to
+        # app-auth — which 401s without a bearer.
+        resp = client.get_tweets(
+            ids=ids, tweet_fields=["public_metrics"], user_auth=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"collect_x_metrics: get_tweets failed: {exc}")
+        return {"status": "error", "message": f"x_api: {exc}"}
+
+    now_iso = datetime.now(ET).isoformat()
+    rows: list[dict] = []
+    for tweet in (resp.data or []):
+        pm = tweet.public_metrics or {}
+        meta = posts.get(str(tweet.id), {})
+        rows.append({
+            "collected_at": now_iso,
+            "tweet_id": str(tweet.id),
+            "scan_date": meta.get("scan_date"),
+            "post_type": meta.get("post_type"),
+            "impression_count": pm.get("impression_count"),
+            "like_count": pm.get("like_count"),
+            "retweet_count": pm.get("retweet_count"),
+            "reply_count": pm.get("reply_count"),
+            "quote_count": pm.get("quote_count"),
+            "bookmark_count": pm.get("bookmark_count"),
+        })
+    if not rows:
+        return {"status": "empty", "message": "X returned no tweet data"}
+
+    # 3. Write to BQ. Explicit DDL schema — NEVER autodetect (2026-07-02 outage
+    #    class). Streaming insert is fine for an append-only analytics sink.
+    try:
+        bq = _bq()
+        bq.query(_METRICS_SCHEMA_DDL.format(table=METRICS_TABLE)).result()
+        errors = bq.insert_rows_json(METRICS_TABLE, rows)
+        if errors:
+            logger.error(f"collect_x_metrics: insert errors: {errors}")
+            return {"status": "error", "message": f"bq_insert: {errors[:3]}"}
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"collect_x_metrics: bq write failed: {exc}")
+        return {"status": "error", "message": f"bq: {exc}"}
+
+    logger.info(f"collect_x_metrics: snapshotted {len(rows)} tweets")
+    return {"status": "success", "collected": len(rows)}
 
 
 # ---------------------------------------------------------------------------

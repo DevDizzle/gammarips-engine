@@ -2,6 +2,11 @@
 
 Curated knowledge base for the strategy research effort. Read top-down.
 
+> **Distilled to the wiki (2026-07-17).** The one-claim compiled-knowledge layer now lives in
+> [`../wiki/`](../wiki/_index/REGISTRY.md). For "is lever X live and under what exit-context,"
+> read the wiki registry first; the files below stay canonical as the full evidence base and
+> hypothesis trail the notes cite.
+
 ## Start here
 
 1. **[`INTELLIGENCE_BRIEF.md`](INTELLIGENCE_BRIEF.md)** — top-of-stack 2-page brief. Where we are, what we know, open hypotheses (H1–H8), hard constraints. Read this first.
@@ -12,16 +17,16 @@ Curated knowledge base for the strategy research effort. Read top-down.
 
 - **`../../NEXT_SESSION_PROMPT.md`** — at repo root. The cold-start briefing for the next session. Updated in place when work pauses.
 
-## Active reports
+## Archived V1/V5.4-era reports + handoffs (2026-07-17)
 
-- **[`BENCHMARKING_VALIDATION_V1.md`](BENCHMARKING_VALIDATION_V1.md)** — 29-trade pre-war baseline with three-way benchmarking (option, underlying, SPY). Written 2026-04-08.
-- **[`UNDERLYING_VS_OPTIONS_V1.md`](UNDERLYING_VS_OPTIONS_V1.md)** — Analysis of underlying vs options instrument P&L gap and directional alpha.
-
-## Handoffs / one-shots
-
-- **[`handoffs/`](handoffs/)** — Deep Research prompts + their full outputs and one-off investigation memos. Notable:
-  - `2026-04-08-deep-research-1-strategy-output.md` — diagnosis of the volatility-idiosyncratic trap and signal-to-options translation gap
-  - `2026-04-08-deep-research-2-regime-output.md` — Feb–Apr 2026 regime characterization (Iran shock, record VRP)
+Moved to [`../archive/research_reports/`](../archive/research_reports/) — historical, not
+authoritative:
+- `BENCHMARKING_VALIDATION_V1.md` — 29-trade pre-war three-way benchmark (2026-04-08).
+- `UNDERLYING_VS_OPTIONS_V1.md` — underlying-vs-options P&L-gap analysis (distilled to
+  [[volatility-idiosyncratic-trap]] / [[option-pnl-not-underlying]]).
+- `2026-04-17-cohort-scan-labeled-v1.md`, `V5_4_METHODOLOGY_AUDIT_2026_05_09.md`.
+- `handoffs/` — the Deep Research prompts + outputs (volatility-idiosyncratic trap dx,
+  Feb–Apr 2026 regime characterization).
 
 ## Archive — original per-experiment reports
 

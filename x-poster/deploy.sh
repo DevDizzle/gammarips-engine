@@ -1,12 +1,16 @@
 #!/bin/bash
 # Deploy x-poster to Cloud Run.
 #
-# Triggered by 5 Cloud Scheduler jobs with different {"post_type": "..."} payloads:
-#   x-poster-report-0830   weekday 08:30 ET
-#   x-poster-signal-0905   weekday 09:05 ET
-#   x-poster-teaser-1230   weekday 12:30 ET
-#   x-poster-callback-1600 weekday 16:00 ET
-#   x-poster-scorecard-fri-1700  Friday 17:00 ET
+# Triggered by Cloud Scheduler jobs with different {"post_type": "..."} payloads
+# (2026-07-09 revamp — see docs/DECISIONS/2026-07-09-x-poster-revamp.md):
+#   x-poster-report-0830        weekday 07:45 ET (name is historical)
+#   x-poster-watchlist-0905     weekday 10:00 ET
+#   x-poster-agent-angle-1230   Mon/Wed/Fri 12:30 ET
+#   x-poster-life-stats-fri     Friday 12:00 ET
+#   x-poster-pool-outcomes-1745 weekday 17:45 ET
+#   x-poster-metrics-2130       nightly 21:30 ET → POST /collect_metrics
+# PAUSED (pick is private): x-poster-signal-0800, x-poster-callback-1645,
+# x-poster-scorecard-fri-1700
 set -e
 
 # Stage shared gammarips_content lib into build context.

@@ -1,0 +1,43 @@
+# GammaRips — Google Ads keywords
+# Campaign: Search only | US only | Maximize Clicks + max-CPC cap | $20/day
+# Fork chosen by owner (2026-07-09): MCP-DIRECT primary.
+# Match types: [exact] for the tiny category terms; "phrase" for the adjacency
+# that actually has volume. NO broad match (broad + click-bid + small budget = waste).
+#
+# ------------------------------------------------------------------------------
+# AG1 — MCP / AGENTIC CATEGORY  (Exact)  ->  https://gammarips.com/developers
+# The category you want to stake. Honest warning: near-zero search volume in 2026,
+# so this ad group will barely spend. It is a listening post — watch its impressions
+# as the real signal of whether the category exists yet.
+# ------------------------------------------------------------------------------
+[agentic trading data]
+[mcp server for trading]
+[mcp options data]
+[options data mcp]
+[mcp trading data]
+[mcp finance server]
+[mcp market data]
+[ai trading agent tools]
+[ai agent trading data]
+
+# ------------------------------------------------------------------------------
+# AG2 — OPTIONS DATA / FLOW API FOR BUILDERS  (Phrase)  ->  /developers
+# Where your $20/day will actually find clicks: the technical data-buyer who is the
+# closest real-world match to the MCP buyer. Still lands on the MCP dev page, NOT the
+# retail web UI — this stays MCP-direct, just with keywords that have searchers.
+# ------------------------------------------------------------------------------
+"options flow api"
+"options data api"
+"options flow data api"
+"unusual options activity api"
+"options order flow data"
+"options flow data feed"
+"options data for ai agents"
+
+# ------------------------------------------------------------------------------
+# AG3 — BRAND  (Exact + Phrase)  ->  https://gammarips.com/
+# Cheap, catches anyone who already heard the name (directories, X, HN, blog).
+# ------------------------------------------------------------------------------
+[gammarips]
+[gamma rips options]
+"gamma rips"

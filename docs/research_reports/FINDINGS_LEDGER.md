@@ -1,5 +1,10 @@
 # Findings Ledger — GammaRips Signal Research
 
+> **Distilled to the wiki (2026-07-17).** The one-claim compiled-knowledge versions of these
+> findings now live in [`docs/wiki/`](../wiki/_index/REGISTRY.md) (findings/ + literature/).
+> Start there for the current state of a lever; this file stays the **canonical evidence
+> base with the full tables and N** that each note cites — it is provenance, not the index.
+>
 > Durable evidence base. Every numeric claim in `INTELLIGENCE_BRIEF.md` and `STRATEGY_PLAYBOOK.md` should be traceable to a row in this file. Originals preserved in `_archive/research_reports_2026-04/`.
 
 ---
@@ -629,3 +634,51 @@ Tested whether the fixed 10:00 ET entry systematically bleeds vs an earlier fill
 - **Gross signal (real but not capturable):** 10:00 is the WORST entry tested; open beats it **+7.0pp** (paired, day-clustered CI [+2.1,+11.5], walk-forward stable; N=315/25d), 9:45 +3.4pp. Mechanism: at 10:00 you buy after the AM pop → TP-hit 13% vs 30%, timeout 48% vs 37%.
 - **Fill-realism KILLS it.** No NBBO on this Polygon plan → spread estimated from OHLC. Corwin-Schultz unreliable (trade-print bars understate spread → ~11bps, not credible). Under the model-free **adverse-bar fill** (buy entry-bar high / sell exit-bar low), in the **LIQUID subset (n_bars≥120, N=55 — the tradeable names): open Δ=+0.6% [−0.10,+0.10]; 9:45 negative, CI incl 0.** The edge lives ENTIRELY in illiquid contracts (median 66 traded min/session of 390; 77% <120 bars) where the early "fill price" isn't real.
 - **Decision:** do NOT change the live 10:00 entry. TTWO 06-22 was variance. Caveat: liquid N=55 + single regime → "no liquid edge" itself underpowered, but the thin-vs-liquid asymmetry is the tell; burden of proof was on the edge and it didn't clear. Memory: `project_entry_timing_1000_bleeds`.
+
+---
+
+## 2026-07-06 — ITM-at-expiration vs delta null: NO DIRECTIONAL EDGE (pre-committed H1 rejected); hold-to-exp floor is tail-dependent
+
+Trader-independent pool ROI study (read-only; scripts `.scratch/retro_itm_*.py`, extract cached in session scratchpad). Substrate: `enriched_option_outcomes` (3,094 rows, verified unique, all BULLISH calls) ⨝ `underlying_daily_bars` (max session 2026-07-01). Contract identity from structured strike/expiration columns, validated 0-mismatch vs OCC parse.
+
+### Universe / exclusions
+Expired (exp ≤ 07-01): 2,149 of 3,094 (945 not yet expired). Metric-A universe 2,146 per-signal / 1,896 unique (1 halted ticker, 2 NULL delta; fallback prior-close used 3×). Entry-priced (B/C) universe 1,316 / 1,237 (830 lack `opp_entry_price`: NO_BARS 762, NO_POST_ENTRY_BARS 68 — the illiquid tail; ITM% differs only 41.3→40.0 between universes, so selection bias on A is small). Data bug: 41 rows with `recommended_delta`≈0.0 on ITM-at-scan contracts (impossible; missing-delta-as-zero).
+
+### A. ITM% vs delta null (δ = scan-time `recommended_delta`, leakage-safe)
+| Variant | N | ITM% | mean δ | ITM−δ | p |
+|---|---|---|---|---|---|
+| Per-signal | 2,146 | 41.29% [39.2,43.4] | .4207 | −0.8pp | p(≥obs)=.787 |
+| Per-unique | 1,896 | 40.72% | .4165 | −0.9pp | .814 |
+| Cleaned δ≥0.05, per-signal | 2,105 | 40.95% | .4287 | **−1.9pp** | p(≤obs)=.031 |
+Null = Poisson-binomial on per-contract δ. Bucket calibration near-perfect: δ 0.2–0.46 N=878 ITM 35.2% vs .365; δ 0.46+ N=380 52.4% vs .547; cleaned low-δ N=106 11.3% vs .123. Months: Apr +4.7pp / May −2.0pp / Jun −3.3pp (noise). Era: pre-06-12 +0.5pp; post-06-12 N=68 −21pp but UNSTABLE (short-DTE, one fortnight, structurally truncated — re-run ≥200 expired era rows, ~mid-Aug). Since N(d1) > P(ITM)=N(d2) by ~3–5pp at pool IV/DTE, ITM≈δ−2pp ≈ zero risk-neutral edge.
+
+### B/C. Beyond-breakeven & floor ROI (hold-to-expiry intrinsic, option PnL, N=1,316)
+Beyond-breakeven 28.0% [25.7,30.5]. Floor ROI: mean +15.6% (bootstrap [+1.2,+31.3]) but median −100%, 60.0% expire worthless, p75 +27.2%, p90 +266%, max +3,893% (TLN 420C). Mean minus top-1/5/10/25 trades: +12.7/+4.9/−0.6/−12.0%. Months: Apr +57.5% / May −1.3% / Jun −0.1%; halves +39.5% → −8.3%. No fill friction included; real-money floor lower. Verified the moonshot bars are genuine (no split/discontinuity artifacts).
+
+### Verdict & rules
+The scanner surfaces FAIRLY-PRICED contracts: realized ITM converts at the market-implied rate even in a max-bullish regime. Do NOT publish "beats market odds" ITM claims or the floor mean (top-10-trade- and single-month-dependent). Product framing stands: curation + opportunity surface; exit is the free variable; ROI lives in the trading layer. Ceiling (through-expiry MFE) unmeasured — requires the to-expiration follow collector (`opp_window_days`=3 everywhere today).
+
+---
+
+## 2026-07-06 — Excursion path vs entry-IV null (retro #2): PATH-CALIBRATED too; the GIVEBACK is the real finding
+
+Companion to the ITM-vs-delta study (same universe, N=1,303 entry-priced expired calls, delta≥0.05; scripts `.scratch/retro_excursion_*.py`; intrinsic-bound peaks from underlying daily HIGHs vs per-contract GBM(σ=recommended_iv, μ=0, B=2,000, Brownian-bridge highs) nulls; percentile-PIT method).
+
+- **H1 FATNESS (realized peaks fatter than entry-IV-implied) — REJECTED at the mean.** Mean implied-percentile of realized peak **0.5095** (clustered 95% CI [0.489, 0.529] — straddles 0.5); KS vs uniform p=0.50. Raw surface is huge (peak p90 +445%, P(peak≥+100%)=36.1%) but implied says 35.5% — **exactly as fat as IV priced**. Pre-registered tail check nominally passes (13.7% ≥ own implied p90 vs 10%) but decays Apr 17.2% → Jun 10.4% (second WF half 10.7% = null) — regime, not structure. Only texture: DTE 22–45d tail 19.5% (post-hoc, directionally persistent across halves, underpowered).
+- **H2 SHARPNESS (peaks arrive earlier than the timing null) — NOT SUPPORTED on the bound.** Mean timing percentile 0.5096 [0.478, 0.541]; halves contradict (0.554 late / 0.460 early). Raw: median days-to-peak **7 of a 10-day life** (back third, as a driftless max-process implies); P(peak ≤3 td)=19.5% vs implied 19.0%. CAVEAT: intrinsic bound late-biases true option-price peaks (theta/vega) → H2 is INCONCLUSIVE for option prices, refuted only for underlying paths. Needs the to-expiration follow collector (GAP-002/RM-002).
+- **G GIVEBACK — the finding.** Median giveback (peak−terminal) +60 ROI pts; conditional on peak ≥+50% (N=571): median +155 pts, median share of peak retained at expiry **31%**, 37.8% round-trip to a LOSS; across all ever-profitable contracts **48.5% die at a loss at expiry**. Direct quantitative support for surface+discretionary-exit: the pool reliably produces large touchable peaks and holding surrenders ~70–90% of them.
+- **Verdict:** the pool IS the positive right-skewed big-peak distribution the owner wants — and it is precisely the distribution its own IV prices (neither fatter nor earlier). Sellable, verified facts = curation + the giveback numbers, NOT an IV-beating anomaly. Do not publish "excursions beat IV". Drift/robustness: μ=4%/yr immaterial; per-unique identical; entry-day post-10:00 excluded both legs (5.3% day-0-peak contamination noted).
+
+---
+
+## 2026-07-06 — 3-day harvest-curve study (retro #3): the pop is real but LATE and not rule-able; tournament picks are the one positive-EV lead (N=24)
+
+Owner hypothesis (pre-committed): "enter 10:00 day-1, harvest your own target within 3 days, strongest on tournament/tilted names." Data: `enriched_option_outcomes` opportunity surface (REAL option minute bars, 3-trading-day window incl. entry day, touch-based bar-high MFE off a realistic 10:00 fill +2%; semantics verified in `_simulate_opportunity_surface`). N=2,029 OK rows (scans 04-10→06-26; 880 NO_BARS + 85 NO_POST_ENTRY + 100 PENDING-BACKFILL excluded). Scripts `.scratch/retro_harvest_*.py`.
+
+- **Harvest curve (pool):** P(touch +15%)=55.0%, +20%=51.0% [48.8,53.2], +50%=30.7%, +100%=13.7%, +200%=3.7%; median peak +21.0%, p90 +122%. Real surface, coin-flip reliability.
+- **Timing:** meaningful pops are LATE — given peak≥+20%: day-1 14.8% / day-2 33.1% / day-3 52.1% (≥+50%: day-3 63.7%). Only 9.1% of the pool clears +15% on day 1. Day-1 global peaks are mostly dead contracts (median +3.6%). Day-3-heaviness suggests the 3-day window truncates the surface (collector). "A few hours from entry" = the exception, not the pattern.
+- **Fixed-target rule EV (limit +X% else window-end; exact for X≤80): NEGATIVE at every X** — −8.2% @+15, −7.2% @+20, −4.1% @+50, −2.4% @+80 (conservative fill-pad variant worse). Monotonically improving in X: cheap targets amputate the tail that pays for the ~half that never pops (E[terminal|no fill] ≈ −30 to −37%). Stop-risk: **P(trough≤−30%)=50.6%** (67.6% post-06-12); trough≤−60%: 22.2%.
+- **Cohorts:** tilt (mom_60≥.35∧band) lifts touch rates (+20%: +9.3pt [4.5,14.1]) but FAILS walk-forward at +50% (H2 −0.6pt) — regime, consistent with the known mom_60 fragility. **Tournament picks (N=24, all eras): the ONLY cohort with positive rule EV (+11.0% @X=75–80; hold-to-window-end mean +10.3%, WR 54.2%)** — but pick-vs-pool touch deltas' CIs span zero; V7.1-era picks N=2. A lead to accrue toward N≥30, not a result.
+- **Anecdote grounding (owner's "star killers"):** FCEL 06-24 peaked **+1,234%** (day 3) but the live same-day GIGO exit realized **−47.8%** on that very path — the sharpest recorded proof that the exit, not the pick, is the problem. FCEL 06-26 pick +137% (day 2), PANW 06-25 +268% (day 3), U 06-26 +88.7% (day 3, after −28% trough). All peaked day 2–3; none "hours in." V 07-06 not yet recorded anywhere.
+- **Ops follow-ups:** (a) opp backfill PENDING for scans 06-29/06-30 (100 rows, windows now closed — run the gated backfill); (b) 7 tournament-pick rows have NO labels at all (NO_BARS) — engineer look; (c) researcher read `forward_paper_ledger` read-only for pick membership (explicitly directed, flagged per role rules).
+- **Verdict: half-supported.** The surface exists and is worth selling WITH the risk side attached; no "harvest at +X%" claim or policy may ship; the honest personal-trading read: expect −30% drawdowns on half of paths, expect the pop on day 2–3 if it comes, and let the pick cohort accrue N before believing the +10% pick EV.

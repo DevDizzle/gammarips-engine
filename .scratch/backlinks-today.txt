@@ -1,0 +1,162 @@
+GAMMARIPS.COM DOMAIN-AUTHORITY PROGRAM (rebuilt 2026-07-07 with 32 verified
+targets — every URL below was checked by a research pass, none invented)
+================================================================================
+This is the .com program: backlinks TO gammarips.com, domain authority, and
+clearing "Crawled - currently not indexed." It is DISTINCT from the MCP
+directory sprint (OWNER-ACTION-PLAN.txt) — most MCP listings link the GitHub
+repo/endpoint, not the .com. Items already done in that sprint are marked.
+
+THE UNIVERSAL PITCH HOOK (adapt everywhere)
+--------------------------------------------------------------------------------
+"GammaRips is a 100% free nightly unusual-options-activity scanner (no trial,
+no paid web tier) that publishes a curated bullish flow pool — and, unusually,
+its own honest negative baseline: blind-buying the whole pool under a fixed
+exit loses money. It also publishes realized MFE/MAE outcome stats like '36%
+of flagged contracts touch +100%, but the median winner keeps only 31% of its
+peak.' Data, not advice."
+
+The negative-baseline honesty is the differentiator NO competitor can copy.
+Lead with it for editorial targets; it converts skeptics.
+
+WEEK 1 — MCP/AI directory sweep + start query flow (~60 min)
+--------------------------------------------------------------------------------
+[x] Official MCP Registry — DONE 07-07 (io.github.DevDizzle/gammarips v3.0.0)
+[x] Smithery — DONE 07-07 (listed + badge-verified)
+[x] mcp.so — submitted (chatmcp/mcpso#3057)
+[~] PulseMCP — auto-ingests the registry; reminder routine fires Mon 07-14;
+    when it lands, email hello@pulsemcp.com to attach the gammarips.com URL
+    to the listing (that's the .com link).
+[ ] Glama — glama.ai/mcp/servers "Add Server" (free; ignore the chat-product
+    CC screens). Finance category exists (3,225 servers).
+[ ] mcpservers.org/submit — free tier (likely nofollow); $39 one-time buys a
+    dofollow badge — borderline (a review fee, not a link scheme); your call.
+[ ] AI Agent Store — aiagentstore.io "Register Agent" (free, self-serve).
+    Pitch: "Data layer for trading agents — curated options-flow pool via MCP."
+[ ] aiagentsdirectory.com/submit-agent — confirm free first (pricing unstated;
+    questions: hello@aiagentsdirectory.com).
+[ ] Source of Sources — sourceofsources.com, free signup (5 min). Filter
+    Business/Finance digests only. 36% dofollow rate on placements — best in
+    category. Angles: UOA explainers, retail-options trends, AI agents in
+    trading. Speed wins: answer within the hour, perfect-fit queries only.
+
+WEEK 2 — GitHub awesome-lists + journalist platforms (~60 min)
+--------------------------------------------------------------------------------
+GitHub links are nofollow but are canonical discovery surfaces (devs + LLMs):
+[ ] punkpeye/awesome-mcp-servers (~90k stars) — PR to "Finance & Fintech".
+    One line: "GammaRips — options-flow intelligence for trading agents:
+    nightly curated unusual-activity pool, historical MFE/MAE outcome
+    surfaces, methodology. Data primitives, not trade advice." Follow
+    CONTRIBUTING.md (alphabetical, emoji flags).
+[ ] georgezouq/awesome-ai-in-finance — PR; fits "Agents"/data sections (they
+    list commercial sites: TradingView etc.).
+[ ] paperswithbacktest/awesome-systematic-trading — ISSUE not PR (their flow);
+    suggest under Data Sources. Lowest effort of the three.
+[ ] wilsonfreitas/awesome-quant — PR to "Market Data & Data Sources". 41 open
+    PRs — keep the entry minimal + correctly placed or it won't merge.
+[ ] Qwoted — qwoted.com free source account (2 pitches/mo). 70% of requests
+    from DR-80+ pubs (Forbes/Reuters/CNBC). Expertise tags: options markets,
+    market microstructure/flow data, AI agents in finance.
+[ ] Featured.com — free expert signup (owns the HARO brand). Answer only
+    options/market-data/AI-trading questions. The honest-baseline stat is
+    quotable copy.
+Standing from here: 10-15 min/week answering only perfect-fit SOS/Qwoted/
+Featured queries. One good placement/month beats ten mediocre pitches.
+
+WEEK 3 — Roundup outreach: the real dofollow prizes (~75 min, 5 emails)
+--------------------------------------------------------------------------------
+Format per email: 1 sentence naming the exact gap in THEIR article, 1 sentence
+on the free scanner, the MFE/MAE stat + negative baseline as credibility hook.
+One polite bump a week later, then drop it.
+
+1. Find My Moat — findmymoat.com/free/alternatives/unusual-whales
+   BEST FIT, DO FIRST. Page premise = tools with a permanent free tier that
+   replicate Unusual Whales; they have a "suggest a missing tool" form.
+   Contact: on-page form / support@findmymoat.com / X @Jera_Value.
+2. Bullish Bears — bullishbears.com/cheddar-flow-review/ (their alternatives
+   section lists only paid tools). Contact: bbteam@bullishbears.com.
+3. TraderHQ — traderhq.com UW + Cheddar Flow reviews. Their brand is
+   "performance-verified" — pitch the self-published negative baseline as
+   "a vendor that pre-verified its own limits." Contact: traderhq.com/contact.
+4. ChartingLens — chartinglens.com/blog/best-options-trading-tools-scanners
+   ("Free & Paid" headline but flow section is all paid). Small indie site —
+   most likely to reply. Contact link in site nav.
+5. daytradingz — daytradingz.com/best-unusual-options-activity-scanner/
+   (article admits free tools exist for first steps, names ~none). Contact
+   via About page. Affiliate-heavy = lower odds; keep it short.
+Long-shots (only if energized): LuxAlgo blog (reviewed CheddarFlow — pitch a
+review of the free counterpoint), tradercongress.com/blog/unusual-whales-
+alternatives (complementary congress-data site; check footer for contact).
+
+WEEK 4 — Content-led submissions (the compounding lane) (~90 min)
+--------------------------------------------------------------------------------
+[ ] Quantocracy — THE quant-blog aggregator, dofollow-likely. Criteria
+    (verified): quantitative, REPRODUCIBLE, submitted within 48h of posting.
+    The /lab negative-baseline + MFE/MAE study clears the reproducibility bar
+    most flow vendors can't. Flow: publish a fresh /lab post w/ methodology →
+    submit via quantocracy.com/contact within 48h → then submit every new
+    /lab post the same way. This is the single best recurring .com link
+    channel we found.
+[ ] PyQuant News — pyquantnews.com/write-for-pyquant-news/ (real submission
+    form, 41k+ audience). Pitch the MFE/MAE opportunity-surface study as a
+    contributed piece.
+[ ] Ben's Bites — news.bensbites.com community post (top-voted make the 120k
+    daily): "An MCP server that gives trading agents real options data — from
+    a vendor that publishes proof the naive strategy loses."
+[ ] FintechLabs — email jim@fintechlabs.com (free listing, founded <3yr
+    qualifies; 3-min pitch-video format).
+[ ] FinTech Weekly — fintechweekly.com/fintech-companies "Submit Your
+    Company" (verify free before submitting).
+
+BATCH LATER (self-serve, low priority)
+--------------------------------------------------------------------------------
+- SourceForge vendor listing (free tier; their Unusual-Whales/alternatives
+  pages already rank — being ON them is the value) + Slashdot software
+  directory (same operator, do together).
+- SaaSHub (DR ~75; free listing disputed-nofollow; position as alternative to
+  Unusual Whales/Cheddar Flow so their alternatives engine associates you).
+- BetaList (free queue ~2 months; ~$99 expedite = listing fee, your call).
+- Crunchbase: complete profile w/ categories FinTech + AI + Developer APIs —
+  the value is downstream syndication by aggregator sites, not the profile.
+- Product Hunt: launch THE MCP SERVER as the product ("wire your trading
+  agent to real options-flow data"), NOT "a stock scanner." Dedicated launch
+  day, not a leftover half-hour.
+- Show HN: "Show HN: I built an options-flow scanner and published proof that
+  blindly following it loses money." Peak-HN framing; one shot — write it
+  carefully, time it with a strong /lab post. (MCP angle = a second Show HN
+  months later.)
+- SKIPPED deliberately: Meridian/ImpliedOptions/TradeIdeas "vs" pages
+  (competitor marketing), Traders Union (pay-to-play), r/algotrading wiki
+  (unverified — check manually before spending time).
+
+INDEXING TRACK (runs alongside; your clicks)
+--------------------------------------------------------------------------------
+- Work request-indexing-urls.txt (~10/day GSC quota). Add /signals/archive.
+- Re-request still-unindexed money URLs ~1 week after each new dofollow link.
+- Monthly: export the GSC coverage report, compare "Indexed" (was 796 on
+  06-29) and "Duplicate" buckets (should drain — canonical fix shipped 07-07).
+- On-site is DONE (07-07, webapp PR #7): uppercase canonicals + redirect,
+  90-day sitemap window, /signals/archive hub (861 links), utility noindex.
+  Optional leftover: middleware.ts for a true HTTP 308 (adapter serves
+  meta-refresh-0 today — works for Google, less clean).
+
+COMPLIANCE GUARDRAILS (finance YMYL — stricter than everyone else)
+--------------------------------------------------------------------------------
+- Data-not-advice framing everywhere. NO performance/ROI claims, NO
+  IV-beating claim, NEVER ITM%/floor-mean as marketing. The honest negative
+  baseline IS the marketing.
+- POISON: Fiverr/Upwork link packages, PBNs, niche edits, guest-post
+  marketplaces, paid insertions. A YMYL finance domain that gets caught stops
+  ranking entirely. Directory listing fees (mcpservers.org $39, BetaList $99)
+  are fine — they're review fees with editorial standards, not link sales.
+- gammarips-review before any NEW public data exposure in pitch copy.
+
+EXPECTED YIELD / TIMELINE
+--------------------------------------------------------------------------------
+Weeks 1-2: ~8-12 directory/registry/list links (mixed follow). Weeks 3-6:
+2-5 editorial roundup links (the prizes). Ongoing: ~1 Quantocracy link per
+/lab post + ~1 journalist placement/month once query flow matures.
+"Crawled - not indexed" starts clearing 4-8 weeks after the first followed
+editorial links. Re-check GSC coverage monthly; the graph, not any single
+link, is the scoreboard.
+
+Scratch helper — delete whenever (not committed).

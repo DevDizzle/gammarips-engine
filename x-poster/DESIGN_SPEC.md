@@ -19,17 +19,33 @@ Shares code with `blog-generator` via `libs/gammarips_content/` (voice rules, co
 
 ## Post types + cadence
 
-| # | Type | Trigger | Payload | Image | Length |
-|---|---|---|---|---|---|
-| 1 | `signal` | Mon–Fri **09:55 ET** | `{"post_type":"signal"}` | YES (required) | 400 chars premium |
-| 2 | `standby` | Auto when `signal` finds no pick | — | YES (minimal "silence" card) | ≤280 chars |
-| 3 | `report` | Mon–Fri 08:30 ET | `{"post_type":"report"}` | optional | ≤280 chars |
-| 4 | `teaser` | Mon–Fri 12:30 ET | `{"post_type":"teaser"}` | optional | ≤300 chars |
-| 5 | `win` (QRT) | Mon–Fri 16:00 ET (if wins exist) | `{"post_type":"callback"}` → routes | optional | ≤200 chars (QRT quote) |
-| 6 | `loss` (neutral single) | Mon–Fri 16:00 ET (if losses exist) | same | NO (text-only per research) | ≤200 chars |
-| 7 | `scorecard` (3-tweet thread) | Fridays 17:00 ET | `{"post_type":"scorecard"}` | YES on tweet 1 | 400 chars × 3 |
+> **2026-07-09 REVAMP (free-UI/paid-MCP era)** — see
+> `docs/DECISIONS/2026-07-09-x-poster-revamp.md`. The paid email pick is DEAD;
+> all CTAs now point to the free site (link in bio) or MCP Agent Access.
+> `signal`/`callback`/`scorecard` stay PAUSED (the daily pick is private —
+> scalping optics; per-pick receipts replaced by pool-level receipts). Three
+> new post types below. All posts text-only. No em dashes anywhere (owner
+> copy rule 2026-07-08).
 
-**Weekly total:** ~20 auto posts + ~3 Evan originals + ~60 Evan replies = 83 touchpoints. FinTwit sweet spot.
+| # | Type | Trigger | Payload | Status | Length |
+|---|---|---|---|---|---|
+| 1 | `signal` | — | `{"post_type":"signal"}` | **PAUSED** (pick is private) | 400 |
+| 2 | `standby` | Auto when `signal` finds no pick | — | with signal | ≤280 |
+| 3 | `report` | Mon–Fri **07:45 ET** (generator runs 07:00) | `{"post_type":"report"}` | ENABLED daily | ≤360 |
+| 4 | `teaser` | none scheduled | `{"post_type":"teaser"}` | dormant | ≤300 |
+| 5 | `win`/`loss` (callback) | — | `{"post_type":"callback"}` | **PAUSED** (superseded by pool_outcomes) | ≤240 |
+| 6 | `scorecard` | — | `{"post_type":"scorecard"}` | **PAUSED** (superseded by pool_outcomes/life_stats) | 400 |
+| 7 | `watchlist` | Mon–Fri 10:00 ET | `{"post_type":"watchlist"}` | ENABLED | ≤380 |
+| 8 | `pool_outcomes` | Mon–Fri **17:45 ET** (after the 17:00 labeler) | `{"post_type":"pool_outcomes"}` | **NEW 2026-07-09** — daily pool-level bracket receipts from `enriched_option_outcomes`; never identifies the pick | ≤400 |
+| 9 | `life_stats` | Fridays **12:00 ET** | `{"post_type":"life_stats"}` | **NEW 2026-07-09** — weekly full-life distribution (median peak / % touched +40% / median expiry); min-N 300 guard | ≤400 |
+| 10 | `agent_angle` | Mon/Wed/Fri **12:30 ET** | `{"post_type":"agent_angle"}` | **NEW 2026-07-09** — agentic-trading education, deterministic 9-angle rotation, mirrors the landing hero | ≤400 |
+
+**Weekly cadence after revamp:** ~18 auto posts/week (5 watchlist + 5 report +
+5 pool_outcomes + 3 agent_angle + 1 life_stats) + Evan originals + Evan replies.
+A nightly `/collect_metrics` cron (21:30 ET) snapshots per-tweet public
+metrics into BQ `x_post_metrics` (one batched `get_tweets` per run;
+`user_auth=True` required — tweepy defaults v2 reads to bearer auth) so each
+post type earns its slot with data.
 
 > **2026-06-25 — `signal` post moved to 09:55 ET (co-move with the notifier cron).**
 > The notifier+tournament cron moves 07:30 → ~09:45 ET so it can re-fetch LIVE
