@@ -3,57 +3,63 @@
 > **Contract (owner call 2026-07-17):** this file is the CURRENT STATE for the next
 > session, not a log. REFRESH in place — replace stale content, never append dated
 > blocks. Hard cap ~100 lines. Rule: `.claude/rules/next-session-prompt.md`.
-> The append-era file (2026-05 → 07-17, 172KB) is archived at
-> `docs/archive/NEXT_SESSION_PROMPT-append-era-2026-07-17.md`.
 
-## Active workstream — 2026-07-17 simplification replan (RATIFIED)
-Read `docs/EXEC-PLANS/2026-07-17-simplification-replan.md` FIRST — it has the vision,
-locked decisions, and the progress checklist. Summary: MCP v4 = 29→9 tools; trader
-skills get run-time liquidity (makes "not selling the pick" mechanical) then an
-open-source curated twin repo; engine LLM-wiki docs distill; webapp video-led landing
-(YouTube). Per-repo slices: `REPLAN-2026-07-17.md` at the root of gammarips-mcp,
-gammarips-trader, gammarips-webapp. Sequence: trader-2A → MCP v4 → webapp + renames →
-wiki (parallel) → ship day (video + landing + public repo together). Nothing started
-as of 2026-07-17.
+## Active workstream — 2026-07-17 simplification replan: LANDED
+Built + shipped in one autonomous session (07-17 night). Plan of record:
+`docs/EXEC-PLANS/2026-07-17-simplification-replan.md`; digest: memory
+`simplification-replan-2026-07-17`.
+- **MCP v4 LIVE** at `https://mcp.gammarips.com` (branded Cloud Run domain +
+  Google cert; rev `gammarips-mcp-00040-lmq`). 29→9 tools; paywall correct
+  (`get_pool` preview free / full pro — a build defect that served the paid pool
+  free was caught + fixed). Plus **wiki-brain**: 26 free methodology pages via
+  `get_playbook` (`get_playbook("methodology")`). Two `gammarips-review` PASSes.
+- **Harness PUBLIC** — `github.com/DevDizzle/gammarips-harness` (scrub-clean,
+  points at mcp.gammarips.com). The clone-me GTM artifact.
+- **Trader** run-time skills + v4 rename → merged to `master` (`8a9f79c`).
+- **Engine wiki** 73/73 DECISIONS distilled → merged to `master` (PR #36); live
+  policy now answers from `docs/wiki/_index/REGISTRY.md` + a thin CLAUDE.md pointer.
+- **Webapp** `landing/video-led` branch READY (v4 surface + branded URL + video
+  hero poster + TOOL_COUNT/PRICE constants) — **HELD**; merges via `/ship` AFTER
+  the video exists.
 
 ## Owner queue
-- 🔴 **Rotate `POLYGON_API_KEY`** (07-06 leak incident; new Secret Manager version
-  WITHOUT trailing newline via `printf %s`; redeploy every mounting service:
-  gammarips-mcp, forward-paper-trader, enrichment-trigger, signal-notifier,
-  win-tracker). Still pending as of 07-17.
-- Record the morning-routine video (gates the landing ship) + the one-time
-  securities-counsel consult (real money + on-camera + paid product).
-- One real Stripe checkout test (pending since 07-07).
-- X: unpin the 03-14 tweet, pin the distribution-stat draft, bio refresh
-  (drafts: memory `project_x_revamp_2026_07_09`).
-- Directory follow-ups: cursor.directory browser form; Glama claim (free, GitHub
-  sign-in); PulseMCP (email hello@pulsemcp.com if the 07-14 routine reported absent).
-- Gated opportunity backfill for scans 06-29/06-30
-  (`backfill_opportunity_surface.py` dry-run → `--confirm`).
+- 🔴 **MCP git-repo topology tangle (DECIDE + I execute).** Local
+  `projects/gammarips-mcp` `origin` points at **`DevDizzle/gammarips-mcp-serverjson`**,
+  not `gammarips-mcp`. So the v4 consolidation push landed on **serverjson**'s main;
+  canonical `gammarips-mcp` main (`f77e42d`) has only the plugin-listing commits and
+  NO v4. Shared base `89262aa`; the repos are effectively swapped vs their names.
+  Production unaffected (source deploy). Fix (on your word): repoint local → `gammarips-mcp`,
+  merge its 2 plugin-listing commits, push v4 there, reset serverjson main.
+- **Registry republish** v4.0.0 + branded URL:
+  `cd gammarips-mcp && mcp-publisher login github && mcp-publisher publish` (token
+  expired; `login github` is interactive — you run it).
+- **Add a LICENSE** to `gammarips-harness` (recommend MIT — moat is the paid data).
+- **Record the morning video** → send YouTube link + harness repo link → I merge the
+  landing PR via `/ship`.
+- 🔴 **Rotate `POLYGON_API_KEY`** (07-06 leak; `printf %s` no trailing newline;
+  redeploy every mounting service: gammarips-mcp, forward-paper-trader,
+  enrichment-trigger, signal-notifier, win-tracker). Still pending.
+- One real Stripe checkout test. Counsel deferred to ~100 subs (owner call, risk
+  accepted — memory `scalping-frontrun-legal-constraint`).
+- X: unpin 03-14, pin distribution-stat draft, bio refresh (memory `project_x_revamp_2026_07_09`).
 
 ## Watch / dated checkpoints
-- **07-20**: OAuth checkpoint — `mcp_analytics` for claude.ai-shaped demand →
-  scope OAuth 2.1 build or keep holding.
-- **~07-23**: `x_post_metrics` two-week read → decide which post slots live.
-- **Mid-Aug**: re-run the post-06-12-era ITM check (needs ≥200 expired era rows).
 - **08-17**: kill-switch — zero MCP trials → early reevaluation
   (**10-05**: zero paying subs → business reevaluation).
-- Weekly: `mcp_analytics` metering readout. As of 07-17: zero external users
-  (all 3 keys are the owner's; anon traffic = crawlers + one 07-11 paywall-bouncer).
+- **~07-23**: `x_post_metrics` two-week read → which post slots live.
+- **Mid-Aug**: re-run the post-06-12-era ITM check (needs ≥200 expired era rows).
+- Weekly `mcp_analytics`: zero external paying users as of 07-17.
 
 ## Open engineering (non-blocking)
-- Substrate: 41 rows with `recommended_delta`=0.0 on ITM-at-scan contracts
-  (missing-delta-as-zero, May–Jun); 7 pick rows with zero labels (NO_BARS).
-- blog-generator: redeploy to pick up the shared-lib RETIRED_ALIASES; remove the
-  seeded topic `whatsapp-group-tag-the-agent` from its schedule first.
-- Engine repo branch `scorecard/life-distribution` carries UNCOMMITTED work:
-  x-poster 07-09 changes + the 07-17 replan docs + this file's rewrite.
-- Service-auth hardening not executed
-  (`docs/DECISIONS/2026-07-02-service-auth-hardening.md`).
+- MCP smoke-test scrub covers only the 26 new methodology pages — extend it to ALL
+  `content/playbooks/` (the `V7_1_TILTED_GIGO` changelog leak slipped that gap).
+- Webapp `/lab` research prose has pre-existing em dashes — `/ship` catches at merge.
+  Webapp internal Gemini tools (`src/ai/**`) + a legacy script still ref old MCP host.
+- Service-auth hardening not executed (`docs/DECISIONS/2026-07-02-service-auth-hardening.md`).
+- Substrate: 41 `recommended_delta`=0.0 ITM-at-scan rows; 7 pick rows NO_BARS.
 - RM-001b (bid/ask spread) BLOCKED on the quote-feed purchase — owner $ call.
 
-## Live posture (pointers, not prose)
-- Policy: V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` + `CHEAT-SHEET.md`.
-- Owner trades LIVE (Robinhood since 07-09, $1,004 → ~$825 at 07-17) — memory
-  `capital-constraint` has the PDT/day-trade-limit analysis.
+## Live posture
+- Policy: V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` + `docs/wiki/_index/REGISTRY.md` + `CHEAT-SHEET.md`.
+- Owner trades LIVE (Robinhood since 07-09) — memory `capital-constraint` (PDT analysis).
 - Daily crons run end-to-end; no urgent engine action.
