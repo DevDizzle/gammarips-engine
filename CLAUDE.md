@@ -66,7 +66,7 @@ Deeper context (read when relevant): `docs/DECISIONS/` (decision trail), `docs/E
 - Prefer Edit over Write. Do not create new docs unless a plan calls for it.
 - Do not trust historical `PROMPT-*` docs or old research summaries as current spec.
 - When touching ledger logic, keep cohort/version metadata explicit.
-- Update `NEXT_SESSION_PROMPT.md` in place when work pauses.
+- Update `NEXT_SESSION_PROMPT.md` in place when work pauses — REFRESH, never append dated blocks; hard cap ~100 lines; see `.claude/rules/next-session-prompt.md` for graduation paths.
 
 ## Subagents
 Three project-specific subagents in `.claude/agents/`:
