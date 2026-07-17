@@ -1,5 +1,10 @@
 # Findings Ledger — GammaRips Signal Research
 
+> **Distilled to the wiki (2026-07-17).** The one-claim compiled-knowledge versions of these
+> findings now live in [`docs/wiki/`](../wiki/_index/REGISTRY.md) (findings/ + literature/).
+> Start there for the current state of a lever; this file stays the **canonical evidence
+> base with the full tables and N** that each note cites — it is provenance, not the index.
+>
 > Durable evidence base. Every numeric claim in `INTELLIGENCE_BRIEF.md` and `STRATEGY_PLAYBOOK.md` should be traceable to a row in this file. Originals preserved in `_archive/research_reports_2026-04/`.
 
 ---

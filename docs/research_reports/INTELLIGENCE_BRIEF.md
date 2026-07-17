@@ -1,5 +1,10 @@
 # Intelligence Brief — GammaRips Signal Research
 
+> **Distilled to the wiki (2026-07-17).** The H-numbered claims and retros in this brief are
+> now one-claim notes in [`docs/wiki/`](../wiki/_index/REGISTRY.md) (findings/, literature/,
+> architecture/). For "is lever X live and under what exit-context," read the wiki registry;
+> this brief remains the **canonical narrative + hypothesis trail** those notes cite.
+>
 > **Read this first.** Two-page top-of-stack briefing for any session picking up the strategy work cold. Evidence base: `FINDINGS_LEDGER.md`. Strategy menu: `STRATEGY_PLAYBOOK.md`. Live handoff: `../../NEXT_SESSION_PROMPT.md`. Operator cheat: `../../CHEAT-SHEET.md`.
 
 ## 2026-07-06 update — ITM-vs-delta retro (N=2,146 expired): the pool is DELTA-CALIBRATED — no directional edge at expiration; the hold-to-exp "floor" mean is a lottery-tail artifact
