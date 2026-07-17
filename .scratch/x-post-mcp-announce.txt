@@ -1,0 +1,45 @@
+RECOMMENDED POST (builder story, ~600 chars, no links):
+
+I gave my trading agent direct access to our options flow engine.
+
+Every night we scan 5,000+ tickers and cut them down to a small pool with unusual bullish flow. Then we track what every contract actually did, all the way to expiration.
+
+The data is humbling. About 60% touch +40% at some point. The median still expires worthless.
+
+Most tools sell picks. We let your agent query the whole record, losers included, and reason for itself.
+
+It speaks MCP, so it plugs into Claude or any agent in about 5 minutes.
+
+Setup guide is pinned.
+
+⚠️ Paper-tracked. Not advice.
+
+
+--- Alternate 1: short + punchy (~280 chars) ---
+
+Your trading agent can now query our overnight flow engine directly.
+
+5,000+ tickers scanned nightly. A small bullish pool. The full outcome history of every past name, losers included.
+
+No picks. Just data your agent can reason over. MCP, 5-minute setup. Guide is pinned.
+
+
+--- Alternate 2: question hook (~300 chars) ---
+
+What would your AI agent do with 1,495 tracked options contracts?
+
+Here is what the record shows: 60% touched +40% at some point. The median expired worthless. The exit decides everything.
+
+That whole record is queryable over MCP now. Free tier, no key needed. Guide is pinned.
+
+⚠️ Paper-tracked. Not advice.
+
+
+--- Before you post ---
+
+1. Publish the article (x-article-mcp-connect.txt) and PIN it first.
+   All three drafts say "guide is pinned" so the pin must be live.
+2. Update the bio (x-profile-bio.txt) in the same sitting.
+3. Post between 8:00 and 10:00 AM ET or around noon for FinTwit reach.
+4. Stay in the replies for the first 30 minutes. Early replies from the
+   author are the strongest signal X's algorithm gets.

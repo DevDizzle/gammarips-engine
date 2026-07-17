@@ -103,11 +103,39 @@ def _unwrap_brief(brief: dict) -> dict:
     return brief
 
 
+# Post types whose brief must NEVER carry the private daily pick. The pool
+# receipts / education posts are pool-level by contract; a drifting planner
+# calling fetch_todays_pick would put the pick's ticker+direction into the
+# writer's context. Stripped deterministically before the writer runs.
+_POOL_LEVEL_POST_TYPES: frozenset[str] = frozenset(
+    {"pool_outcomes", "life_stats", "agent_angle"}
+)
+
+
 # --- Callbacks -------------------------------------------------------------
 async def seed_voice_rules(callback_context: CallbackContext) -> None:
     """Load brand voice rules into state before the first agent runs."""
     if "voice_rules" not in callback_context.state:
         callback_context.state["voice_rules"] = voice_rules.render_for_prompt()
+
+
+async def strip_pick_before_writer(callback_context: CallbackContext) -> None:
+    """Deterministic pick-privacy backstop for pool-level post types.
+
+    Prompt rules tell the planner not to fetch the pick for these types, but
+    prompts drift — this guarantees the writer's context contains no pick
+    regardless of what the planner did.
+    """
+    post_type = callback_context.state.get("post_type", "")
+    if post_type not in _POOL_LEVEL_POST_TYPES:
+        return
+    brief = _unwrap_brief(_coerce_draft(callback_context.state.get("post_brief", {})))
+    if isinstance(brief, dict) and brief.get("pick") is not None:
+        logger.warning(
+            f"{post_type}: planner brief carried a pick — stripped (pool-level contract)."
+        )
+        brief["pick"] = None
+        callback_context.state["post_brief"] = brief
 
 
 async def score_rubric_before_reviewer(callback_context: CallbackContext) -> None:
@@ -159,6 +187,9 @@ Scan date: {scan_date}   ← this is today's ET date, also the header date for t
 - report: fetch_todays_report_summary(scan_date)
 - callback (wins/losses): FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=5) to learn which tickers we've publicly named (callbacks should ONLY discuss tickers the X audience has seen). THEN call fetch_closing_trades(scan_date, restrict_tickers=<comma-joined ticker list>). For each closing trade in the result, call find_originating_post_for_ticker(ticker) to get the QRT id for win posts.
 - scorecard: FIRST call fetch_recently_posted_tickers(scan_date, lookback_days=10) — the public scorecard recaps ONLY trades on tickers the audience has publicly seen us name. THEN call fetch_weekly_ledger(week_ending=scan_date, restrict_tickers=<comma-joined ticker list>). Pass result.data through verbatim — items already include outcome_emoji, direction_short, pct_signed.
+- pool_outcomes: fetch_pool_outcomes(entry_day=scan_date) and NOTHING else — do NOT call fetch_todays_pick (the pick is private; these posts are pool-level by contract). Pass result.data through verbatim. Set brief.pick=null. NEVER mention or hint at which name was the daily tournament pick.
+- life_stats: fetch_life_distribution() and NOTHING else — do NOT call fetch_todays_pick. Pass result.data through verbatim. Set brief.pick=null.
+- agent_angle: fetch_agent_angle(scan_date) and NOTHING else — do NOT call fetch_todays_pick. Pass through verbatim. Set brief.pick=null.
 
 === STEP 2: Output the brief as a bare JSON dict ===
 
@@ -181,6 +212,9 @@ Required keys in post_brief:
 - watchlist: list of {ticker, direction, score, dollar_vol_m, vol_oi_ratio} — only populated for watchlist post_type; else [].
 - closing_trades: {wins: [...], losses: [...], total: N} — only for callback; else null. Each item already includes ticker, direction, entry_date, entry_price, exit_price, pct_signed (e.g. "+80%"), exit_reason_display (e.g. "target hit"). Pass them through to the writer verbatim — DO NOT re-derive percentages.
 - weekly_ledger: {trades: [...], wins, losses, net_return_pct} — only for scorecard; else null. Each trade item already includes outcome_emoji ("✅"/"❌"), direction_short ("BULL"/"BEAR"), pct_signed ("+80%"/"-60%"). Pass them through verbatim — DO NOT re-derive.
+- pool_outcomes: {n, targets, stops, timeouts, wins, touched_25, median_ret_pct, best_peak_signed, best_peak_ticker} — only for pool_outcomes post_type; else null. Pass through verbatim — DO NOT re-derive any number.
+- life_dist: {n, med_peak_pct, touched_40_pct, doubled_pct, med_expiry_pct} — only for life_stats post_type; else null. Pass through verbatim.
+- agent_angle: {title, points} — only for agent_angle post_type; else null. Pass through verbatim.
 - qrt_tweet_id: tweet_id of the original call being QRT'd (callback post_type only); else null.
 - image_direction: 1-2 sentences describing what the post card image should show (for the writer to refine).
 
@@ -195,6 +229,9 @@ DO NOT draft the tweet text. The writer handles formatting.""",
             tools.fetch_original_tweet_id,
             tools.find_originating_post_for_ticker,
             tools.fetch_weekly_ledger,
+            tools.fetch_pool_outcomes,
+            tools.fetch_life_distribution,
+            tools.fetch_agent_angle,
         ],
         output_key="post_brief",
     )
@@ -220,7 +257,7 @@ Prior reviewer notes: {review?}
 1. Pick the template that matches {post_type} and fill it in EXACTLY. Preserve emoji, punctuation, line breaks.
 2. Use {scan_date} in the header. NEVER substitute any other date.
 3. NEVER include a ticker that is not in the brief. If brief.pick is null for post_type=signal, switch to the STANDBY template — and the STANDBY template has NO ticker anywhere. Do NOT append "($SPY)" or "$SPY flow" or any index ticker as filler. Empty is empty.
-4. Disclaimer rule (Evan 2026-04-28): ONLY win / loss / callback / scorecard end with `⚠️ Paper-trade. Not advice.` (exact characters, no paraphrasing). signal / standby / teaser / report ship WITHOUT any disclaimer line — the canonicalizer strips disclaimer-ish trailers for those types.
+4. Disclaimer rule (Evan 2026-04-28; extended 2026-07-09): ONLY win / loss / callback / scorecard / pool_outcomes / life_stats end with `⚠️ Paper-trade. Not advice.` (exact characters, no paraphrasing). signal / standby / teaser / report / watchlist / agent_angle ship WITHOUT any disclaimer line — the canonicalizer strips disclaimer-ish trailers for those types.
 5. Never include hashtags. Never use "buy", "sell", "act now", "for you". URL whitelist is strict: REPORT post_type uses `https://gammarips.com/reports/<scan_date>`. SIGNAL post_type uses the bare landing page `https://gammarips.com` (Path B anchor — withholds contract details, drives subs). All other post_types: no URLs anywhere.
 6. mid_total_cost = round(mid * 100). Format with comma thousands: `$2,693`.
 7. contract_emoji: 📗 for CALL (BULLISH), 📕 for PUT (BEARISH).
@@ -235,18 +272,17 @@ Prior reviewer notes: {review?}
 === TEMPLATES (fill <slot> placeholders from brief; drop lines whose data is missing) ===
 
 --- SIGNAL (when brief.pick is not null) ---
-Path B anchor: name the ticker + direction + score, withhold contract/strike/
-expiration/mid/V/OI/DTE. Goal is (a) plant a public timestamped anchor that
-later wins/losses can QRT as receipts, (b) drive sub conversion via the URL,
-NOT to broadcast the curated pick — that stays paid-only via email/WhatsApp.
+NOTE 2026-07-09: the daily pick is PRIVATE under the free-UI/paid-MCP model —
+this post type stays PAUSED at the scheduler. Template kept for the paper
+trail; if ever re-enabled it must not promise contract details anywhere.
 
-📍 GammaRips pick today — $<ticker> <direction> (Score <score>)
+📍 GammaRips pick today - $<ticker> <direction> (Score <score>)
 
-Contract, entry, stop, target → email subscribers only.
+The full pool and its outcome history are free.
 https://gammarips.com
 
 --- STANDBY (when brief.pick is null for a signal post_type, OR post_type=standby) ---
-🛑 GammaRips Standby — <scan_date>
+🛑 GammaRips Standby - <scan_date>
 
 No GammaRips signal cleared the gate stack overnight.
 Scanner saw flow. Nothing met our thresholds.
@@ -256,26 +292,26 @@ Zero picks is a pick.
 Render brief.watchlist[0..2]. emoji: 📗 BULL → CALL, 📕 BEAR → PUT.
 direction_label: BULL or BEAR (5 chars). Round dollar_vol_m to 1 decimal: "$167M".
 
-📡 Today's flow magnets — <scan_date>
+📡 Today's flow magnets - <scan_date>
 
-$<t1_ticker> <t1_emoji> <t1_direction_label> — Score <t1_score> | $<t1_dollar_vol_m>M flow
-$<t2_ticker> <t2_emoji> <t2_direction_label> — Score <t2_score> | $<t2_dollar_vol_m>M flow
-$<t3_ticker> <t3_emoji> <t3_direction_label> — Score <t3_score> | $<t3_dollar_vol_m>M flow
+$<t1_ticker> <t1_emoji> <t1_direction_label> - Score <t1_score> | $<t1_dollar_vol_m>M flow
+$<t2_ticker> <t2_emoji> <t2_direction_label> - Score <t2_score> | $<t2_dollar_vol_m>M flow
+$<t3_ticker> <t3_emoji> <t3_direction_label> - Score <t3_score> | $<t3_dollar_vol_m>M flow
 
-Curated daily pick → email subscribers only.
+Full pool + what each name did next: free on the site. Link in bio.
 
 --- TEASER (runner-ups — NO entry/exit, this is the key differentiator vs signal) ---
-📡 Overnight flow — <scan_date>
+📡 Overnight flow - <scan_date>
 
 <N> runner-ups on our bench today:
-$<t1_ticker> <t1_emoji> <t1_direction> — V/OI <t1_voi> | Score <t1_score>
-$<t2_ticker> <t2_emoji> <t2_direction> — V/OI <t2_voi> | Score <t2_score>
-$<t3_ticker> <t3_emoji> <t3_direction> — V/OI <t3_voi> | Score <t3_score>
+$<t1_ticker> <t1_emoji> <t1_direction> - V/OI <t1_voi> | Score <t1_score>
+$<t2_ticker> <t2_emoji> <t2_direction> - V/OI <t2_voi> | Score <t2_score>
+$<t3_ticker> <t3_emoji> <t3_direction> - V/OI <t3_voi> | Score <t3_score>
 
-One fires the daily pick. Rest sit on the bench.
+The scanner keeps score. The pool is free on the site.
 
 --- REPORT (morning overnight brief compressed) ---
-📝 Overnight Brief — <scan_date>
+📝 Overnight Brief - <scan_date>
 
 <one-sentence theme from brief.report_summary.headline>
 • <bullet_1>
@@ -283,10 +319,44 @@ One fires the daily pick. Rest sit on the bench.
 
 🔗 https://gammarips.com/reports/<scan_date>
 
+--- POOL_OUTCOMES (daily pool-level receipts; ONLY from brief.pool_outcomes, verbatim numbers) ---
+NEVER identify or hint at which name was the daily tournament pick. Every
+number below comes from brief.pool_outcomes. If a field is null, drop its line.
+
+📊 Pool receipts - <scan_date>
+
+Same bracket on the <n> pool names we could price at the 10:00 bell:
+
+🎯 <targets> hit +40%
+🛑 <stops> stopped at -30%
+⏱️ <timeouts> timed out flat
+Best peak: <best_peak_signed> $<best_peak_ticker>
+
+Median: <median_ret_pct>%. Same pool, one exit rule. The exit is the game.
+
+--- LIFE_STATS (weekly full-life distribution; ONLY from brief.life_dist, verbatim numbers) ---
+🔬 What happens after a contract makes our pool. <n> contracts tracked from the morning they surfaced to expiration:
+
+Peak on the way: median +<med_peak_pct>%
+<touched_40_pct>% touched +40% at some point
+<doubled_pct>% doubled
+At expiration: median <med_expiry_pct>%
+
+Peaks are everywhere. Exits are rare. That gap is the whole game.
+
+--- AGENT_ANGLE (agentic-trading education; from brief.agent_angle) ---
+This is the ONE free-form template. Write 2-4 short plain sentences from
+brief.agent_angle.points — you may rephrase for flow but NEVER invent numbers,
+tickers, or claims beyond the points. 8th-grade reading level. No emoji walls
+(one lead emoji is fine). No ticker, no cashtag, no URL, no hashtags, no em
+dashes. If a point mentions "link in bio" or the $39/mo price, keep it exact.
+
+🤖 <2-4 sentences drafted from the angle points>
+
 --- WIN (callback when brief.closing_trades.wins is non-empty; QRT brief.qrt_tweet_id if present) ---
 Pull the FIRST item from brief.closing_trades.wins and render:
 
-✅ CALLED IT — <pct_signed> on $<ticker> <direction>
+✅ CALLED IT - <pct_signed> on $<ticker> <direction>
 
 Entry: $<entry_price> mid (<entry_date>)
 Exit: $<exit_price> (<scan_date>, <exit_reason_display>)
@@ -296,7 +366,7 @@ Exit: $<exit_price> (<scan_date>, <exit_reason_display>)
 --- LOSS (callback when brief.closing_trades.wins is empty AND brief.closing_trades.losses is non-empty; NEUTRAL single — no QRT, no defensive commentary) ---
 Pull the FIRST item from brief.closing_trades.losses and render:
 
-❌ STOPPED OUT — <pct_signed> on $<ticker> <direction>
+❌ STOPPED OUT - <pct_signed> on $<ticker> <direction>
 
 Entry: $<entry_price> (<entry_date>)
 Exit: $<exit_price> (<scan_date>, <exit_reason_display>)
@@ -332,8 +402,11 @@ Return a JSON dict with EXACTLY these keys:
 Posts ship text-only — no image_prompt is required. The `ticker` / `direction`
 fields are kept for downstream logging only.
 
-Char budgets (hard): signal=400, standby=280, teaser=300, report=280, win=200, loss=200, scorecard=400.""",
+Char budgets (hard): signal=400, standby=280, teaser=300, report=280, win=200, loss=200, scorecard=400, pool_outcomes=400, life_stats=400, agent_angle=400.
+
+14. Separator rule (owner 2026-07-08): use a plain hyphen "-" wherever the old templates used an em dash. NEVER emit an em dash or en dash anywhere in the post body.""",
         output_key="post_draft",
+        before_agent_callback=strip_pick_before_writer,
     )
 
 
@@ -362,8 +435,11 @@ Decision rules:
 SPECIAL CASES — do NOT REVISE for these; they are correct:
 - **post_type=standby**: The post has NO ticker and NO cashtag BY DESIGN. That is correct. Do NOT demand a cashtag. The caller explicitly requested standby — honor it regardless of whether underlying pick data exists.
 - **post_type=report**: May or may not include a cashtag depending on market theme. Either is fine.
-- **Disclaimer wording**: ONLY win/loss/callback/scorecard end with `⚠️ Paper-trade. Not advice.` (the canonicalizer enforces it). signal/standby/teaser/report ship WITHOUT a disclaimer — do NOT REVISE for missing disclaimer on those types.
+- **post_type=life_stats / agent_angle**: NO ticker and NO cashtag BY DESIGN — education/distribution posts. Do NOT demand a cashtag.
+- **post_type=pool_outcomes**: exactly one cashtag (the best-peak name) appearing mid-body is correct. REVISE only if it names the daily tournament pick as "the pick" — pool receipts must stay pool-level.
+- **Disclaimer wording**: win/loss/callback/scorecard/pool_outcomes/life_stats end with `⚠️ Paper-trade. Not advice.` (the canonicalizer enforces it). signal/standby/teaser/report/watchlist/agent_angle ship WITHOUT a disclaimer — do NOT REVISE for missing disclaimer on those types.
 - **No hashtags**: # anything in the body is wrong. We never use hashtags on X.
+- **No em dashes**: an em dash anywhere in the body is a REVISE (owner copy rule). Plain hyphens are correct.
 
 Be generous on aesthetic judgment. Lean APPROVE. Only REVISE for concrete rubric failures or actual voice/clarity issues. You are not a thesaurus.""",
         output_schema=ReviewResult,
@@ -406,6 +482,19 @@ class Publisher(BaseAgent):
         review = review_raw if isinstance(review_raw, dict) else {}
         draft = _coerce_draft(draft_raw)
         brief = _unwrap_brief(_coerce_draft(state.get("post_brief", {})))
+
+        # Idempotency guard (all post types): a Cloud Scheduler retry after a
+        # slow-but-successful run must not double-post. Only a logged REAL
+        # tweet blocks — skip/no-op/dry-run logs stay retryable.
+        if tools.already_published(scan_date, post_type):
+            logger.info(f"{post_type} already published for {scan_date} — skipping.")
+            noop = {"status": "skipped", "reason": "already_posted"}
+            state["publish_result"] = noop
+            yield Event(
+                author=self.name,
+                actions=EventActions(state_delta={"publish_result": noop}),
+            )
+            return
 
         # No-content guard for callback: paper-trader writes exits at 16:30 ET,
         # callback fires at 16:45 ET. If the ledger has zero closes for today,
@@ -503,6 +592,48 @@ class Publisher(BaseAgent):
                 )
                 return
 
+        # No-content guard for pool_outcomes: the 17:45 ET cron fires after
+        # the 17:00 labeler, but on a holiday / labeler outage there are no
+        # labeled rows — skip rather than post an empty receipts card.
+        if post_type == "pool_outcomes":
+            po = brief.get("pool_outcomes")
+            n = (po or {}).get("n") if isinstance(po, dict) else None
+            if not n:
+                logger.info("pool_outcomes fired but no labeled pool today — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error="no_pool_outcomes_today",
+                )
+                noop = {"status": "skipped", "reason": "no_pool_outcomes_today"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
+        # Minimum-N guard for life_stats: the full-life distribution is the
+        # flagship honesty stat — never publish it off a thin cohort.
+        LIFE_STATS_MIN_N = 300
+        if post_type == "life_stats":
+            ld = brief.get("life_dist")
+            n = (ld or {}).get("n") if isinstance(ld, dict) else None
+            if not n or n < LIFE_STATS_MIN_N:
+                logger.info(f"life_stats fired but N={n} < {LIFE_STATS_MIN_N} — skipping publish.")
+                tools.log_post(
+                    scan_date=scan_date, post_type=post_type,
+                    text="", tweet_id=None, iterations=0,
+                    error=f"life_stats_below_min_n_{n}",
+                )
+                noop = {"status": "skipped", "reason": "life_stats_below_min_n"}
+                state["publish_result"] = noop
+                yield Event(
+                    author=self.name,
+                    actions=EventActions(state_delta={"publish_result": noop}),
+                )
+                return
+
         # No-content guard for report: 8:30 ET cron fires before
         # overnight-report-generator may have written today's report doc, or
         # the doc exists but is empty. Without this, the writer drifts to
@@ -557,11 +688,14 @@ class Publisher(BaseAgent):
         # Text-only posts (Evan 2026-04-28). Editorial images were retired —
         # tweet copy carries the data and the PIL ticker overlays didn't read
         # well in-feed. No image_bytes is ever passed to publish_to_x now.
+        # Per-request dry_run (seeded via POST /post {"dry_run": true}) lets
+        # us validate new post types end-to-end without publishing.
         post_result = tools.publish_to_x(
             text=text,
             image_bytes=None,
             quote_tweet_id=qrt_id,
             in_reply_to_tweet_id=reply_id,
+            dry_run=bool(state.get("dry_run")),
         )
 
         # Log

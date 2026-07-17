@@ -1,0 +1,217 @@
+================================================================================
+GAMMARIPS OWNER ACTION PLAN — MCP LAUNCH SPRINT (written 2026-07-07)
+Deadline: Friday 2026-07-10. Do these in order. Everything is paste-ready.
+================================================================================
+
+STATUS AS OF 2026-07-07 EVENING (details: NEXT_SESSION_PROMPT.md top block)
+--------------------------------------------------------------------------------
+STEP 1 ✅ DONE  — registry published: io.github.DevDizzle/gammarips v3.0.0
+STEP 2 ✅ DONE  — PR #11 merged (also merged: #12 casing, #13 CI fix, #14 badge,
+                  #15 plugin wrapper, and the P1-P5 stack #6-#10; MCP redeployed
+                  rev 00038-92x, 29 tools verified, paywall intact)
+STEP 3 ✅ DONE  — Smithery live + badge-verified; $10/mo tier paid.
+                  Optional: add an OPTIONAL apiKey param -> Authorization header
+                  (makes Smithery the claude.ai-web bridge for paying users)
+STEP 4 ✅ AUTO  — PulseMCP ingests the registry; reminder routine fires Jul 14
+                  (if not listed by then: email hello@pulsemcp.com)
+STEP 5 ⏳ OPEN  — Glama: not crawled yet; the CC screen is their CHAT product,
+                  the directory is free. 5 min on add-server, or skip.
+STEP 6 ⏳ HALF  — PR #15 merged; cursor.directory browser submission remains.
+STEP 7 🔴 OPEN  — rotate POLYGON_API_KEY (+ webapp overrideEnv plaintext copy!)
+STEP 8 🔴 NEXT  — real checkout test (TOMORROW 07-08 — owner-declared)
+--------------------------------------------------------------------------------
+
+REUSABLE VALUES (paste these wherever a form asks)
+--------------------------------------------------------------------------------
+Server name:      GammaRips Options Intelligence
+MCP endpoint:     https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+Transport:        Streamable HTTP (remote server, no local install)
+GitHub repo:      https://github.com/DevDizzle/gammarips-mcp
+Website / docs:   https://gammarips.com/developers
+Pricing page:     https://gammarips.com/pricing
+Logo (400x400):   https://raw.githubusercontent.com/DevDizzle/gammarips-mcp/main/assets/logo-400.png
+                  (works after you merge PR #11 in step 2; until then replace
+                  /main/ with /add-server-json/ in that URL)
+Icon (small):     https://gammarips.com/icon.png
+License:          MIT
+
+SHORT DESCRIPTION (under 100 chars):
+Anti-firehose options-flow data for AI agents: curated daily pool, features, realized outcomes.
+
+LONG DESCRIPTION:
+Anti-firehose options-flow intelligence for AI agents. Every night the engine
+scans the US options market for unusual activity and curates hard - down to a
+small, high-signal candidate pool with point-in-time features, realized MFE/MAE
+opportunity surfaces, outcome labels, and methodology playbooks. Deliberately
+no "pick" endpoint: your agent reasons over data primitives to its own contract
+and exit. Free anon tier works with no account (daily report, playbooks,
+explainers). Pro tools require Agent Access ($39/mo) via a Bearer API key.
+Educational data, not investment advice.
+
+SERVER CONFIG JSON (some forms ask for it):
+{
+  "mcpServers": {
+    "gammarips": {
+      "type": "streamable-http",
+      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
+      "headers": { "Authorization": "Bearer gr_live_your_key" }
+    }
+  }
+}
+(Omit "headers" for the free tier.)
+
+
+================================================================================
+STEP 1 — PUBLISH TO THE OFFICIAL MCP REGISTRY (~2 min, terminal)
+================================================================================
+This is the most important listing: it is the upstream source other
+directories crawl. Three device codes already expired, so run it yourself.
+
+Open a terminal and run (one line at a time):
+
+    cd ~/gammarips-mcp-serverjson
+    ~/.local/bin/mcp-publisher login github
+
+It prints a URL (https://github.com/login/device) and a code. Open the URL in
+your browser, enter the code, click Authorize. Back in the terminal, then run:
+
+    ~/.local/bin/mcp-publisher publish
+
+Expected output: a success line for io.github.devdizzle/gammarips.
+The server.json in that folder is already validated against the registry.
+
+(Alternative: tell Claude "give me a device code" while you are at the
+keyboard, enter it within 15 minutes, and Claude auto-publishes.)
+
+
+================================================================================
+STEP 2 — MERGE PR #11 ON gammarips-mcp (~1 min, browser)
+================================================================================
+URL:  https://github.com/DevDizzle/gammarips-mcp/pull/11
+
+Content: server.json + Cursor/Cline setup snippets in README + the 400x400
+listing logo. Metadata only - zero runtime impact. Click "Merge pull request".
+
+
+================================================================================
+STEP 3 — SMITHERY (~3 min, browser)
+================================================================================
+1. Go to https://smithery.ai and sign in with GitHub (DevDizzle).
+2. Look for your server first - it may already be crawled from GitHub.
+   If it exists: claim it. If not: Add server / Publish.
+3. Choose REMOTE / hosted server. Paste:
+      Endpoint:  https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+      Transport: Streamable HTTP
+      Repo:      https://github.com/DevDizzle/gammarips-mcp
+      Docs:      https://gammarips.com/developers
+4. Description: paste the LONG DESCRIPTION from the top of this file.
+
+
+================================================================================
+STEP 4 — PULSEMCP (~3 min, browser)
+================================================================================
+1. Go to https://www.pulsemcp.com and find Submit (usually /submit or a
+   "Submit server" button).
+2. Fill:
+      Name:        GammaRips Options Intelligence
+      GitHub:      https://github.com/DevDizzle/gammarips-mcp
+      Endpoint:    https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+      Website:     https://gammarips.com/developers
+      Description: paste the LONG DESCRIPTION.
+3. It is hand-reviewed daily, so expect it to appear within a day or two.
+
+
+================================================================================
+STEP 5 — GLAMA (~2 min, browser)
+================================================================================
+1. Go to https://glama.ai/mcp/servers and sign in with GitHub (DevDizzle).
+2. Search "gammarips". The public repo is likely already auto-crawled.
+3. Claim the listing (moves it from anonymous-crawl to owner-verified tier).
+4. If not crawled yet, use their add/submit flow with the reusable values.
+
+
+================================================================================
+STEP 6 — CURSOR.DIRECTORY PLUGIN (~3 min, browser) [UPDATED 07-07]
+================================================================================
+cursor.directory now takes PLUGINS (Open Plugins standard), not raw MCP
+submissions. Claude prepped the repo as a plugin (manifest + a bundled
+"options-flow" skill that teaches agents the data-not-advice workflow):
+
+1. MERGE PR #15 first: https://github.com/DevDizzle/gammarips-mcp/pull/15
+   (metadata only - plugin.json + SKILL.md + README; gammarips-review: SHIP)
+2. Go to https://cursor.directory - "Submit a Plugin" - sign in with GitHub.
+3. Choose "Auto-detect from a GitHub repo" and paste:
+      https://github.com/DevDizzle/gammarips-mcp
+   It should detect: 1 MCP server (remote, keyless free tier) + 1 skill.
+4. Submit. (A Cursor agent auto-reviews the repo before it lists.)
+
+
+================================================================================
+ALREADY SUBMITTED FOR YOU (just watch for maintainer replies)
+================================================================================
+- Cline Marketplace:   https://github.com/cline/mcp-marketplace/issues/1969
+- Docker MCP Catalog:  https://github.com/docker/mcp-registry/pull/4296
+- mcp.so:              https://github.com/chatmcp/mcpso/issues/3057
+- Blog post LIVE:      https://gammarips.com/blog/wire-your-ai-agent-to-real-options-data-mcp
+Check those three links every couple of days; maintainers sometimes ask a
+question, and answering fast keeps you in the review queue.
+
+
+================================================================================
+STEP 7 — ROTATE POLYGON_API_KEY (carried over from the 07-06 incident)
+================================================================================
+The old key appeared once in a public error response. Rotate it:
+
+1. Get a NEW key from the Polygon (Massive) dashboard.
+2. Add it to Secret Manager WITHOUT a trailing newline:
+
+    printf %s 'THE_NEW_KEY' | gcloud secrets versions add POLYGON_API_KEY \
+      --project=profitscout-fida8 --data-file=-
+
+3. IMPORTANT: the webapp does NOT read Secret Manager for this - its copy is
+   a plaintext value in the App Hosting backend "overrideEnv" (Firebase
+   console -> App Hosting -> gammarips-webapp -> environment). Update it
+   there too, or ask Claude to PATCH it via the API.
+4. Redeploy every service that mounts the secret:
+   gammarips-mcp, forward-paper-trader, enrichment-trigger, signal-notifier,
+   win-tracker  (each: cd <service> && bash deploy.sh, or ask Claude).
+
+
+================================================================================
+STEP 8 — ONE REAL CHECKOUT TEST (~5 min, browser + your agent)
+================================================================================
+The only hop never exercised in prod is Stripe Checkout -> webhook
+entitlement. Test it end to end with a real card:
+
+1. Sign in at https://gammarips.com with a personal Google account
+   (NOT your founder/dev identity).
+2. Subscribe on /pricing ($39/mo, 7-day trial - you can cancel right after).
+3. Go to /account -> Generate API Key -> copy the gr_live_... key.
+4. Wire it into any agent (Claude Code):
+      claude mcp add --transport http gammarips \
+        https://gammarips-mcp-406581297632.us-central1.run.app/mcp \
+        --header "Authorization: Bearer gr_live_YOUR_KEY"
+5. Ask the agent to call get_enriched_signals. If it returns pool data, the
+   entire funnel works. Then cancel the sub via Manage Subscription and
+   confirm the key stops working within ~2 minutes (revocation path).
+
+
+================================================================================
+THE TIMELINE AND THE KILL-SWITCH (agreed 2026-07-07)
+================================================================================
+After this sprint: LET IT SIT. You focus on trading and dogfooding the MCP.
+Claude does a weekly metering readout from BigQuery (mcp_analytics).
+
+- Mon Jul 20:  leading-indicator checkpoint (distinct callers, paywall hits,
+               keys generated, trials). Decide whether OAuth 2.1 is worth
+               building for the Anthropic Connectors Directory.
+- Mon Aug 17:  if ZERO TRIALS started by now -> do not wait for October;
+               the funnel has a structural hole, reevaluate early.
+- Mon Oct 5:   THE GATE. If ZERO PAYING SUBS (completed trial + first real
+               charge, founder accounts excluded) -> reevaluate the business
+               (repackaging, B2B data licensing, API pivot, or wind down to
+               operator-only tooling). If 1+ paying -> continue, and only
+               then revisit paid ads with real CAC math.
+
+Full plan with research sources: docs/GTM-MCP-DIRECTORY-PLAN.md
+================================================================================

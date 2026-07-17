@@ -1,0 +1,80 @@
+# GammaRips — Responsive Search Ad copy (drop-in for the Google Ads UI)
+# COMPLIANCE: describes DATA + TOOLS + WORKFLOW only. Never a return, win rate,
+# profit, "signal", or advice. Char counts verified against Google limits.
+# All copy must PASS gammarips-review before launch (see README.md).
+#
+# ==============================================================================
+# RSA #1  ->  AG1 (MCP category) + AG2 (options-data-for-builders)
+# Final URL: https://gammarips.com/developers
+# ==============================================================================
+
+FINAL URL:
+https://gammarips.com/developers
+
+HEADLINES (15, <=30 chars):
+1.  Options Flow Data for Agents
+2.  Anti-Firehose Options Data
+3.  MCP Access for AI Traders
+4.  Point-in-Time, Leakage-Safe
+5.  Realized MFE/MAE Surfaces
+6.  One Curated Pool, Not Noise
+7.  Built for Claude Code & Cursor
+8.  Free Keyless Tier to Try
+9.  No Pick Endpoint
+10. Not Advice. Just Data.
+11. Options Data via MCP
+12. Wire Your Agent to Real Data
+13. Curated Daily Options Pool
+14. For BYO-Agent Traders
+15. Unusual Options Flow, Curated
+
+DESCRIPTIONS (4, <=90 chars):
+1. Anti-firehose options-flow data for your trading agent. Curated daily pool, not noise.
+2. Point-in-time features and realized MFE/MAE outcome surfaces via MCP. Not advice.
+3. Free keyless tier to try. No pick endpoint. Built for Claude Code, Cursor and MCP.
+4. Options-flow data and tools your agent reasons over to its own trade. Not a signal.
+
+DISPLAY PATH (<=15 each):
+Path 1: options-data
+Path 2: for-agents
+
+BUSINESS NAME:
+GammaRips
+
+SITELINKS (6; unique text <=25, unique final URL, 2 desc lines <=35):
+1. Developer Docs   | https://gammarips.com/developers    | Keyless try-now with examples   | Wire your agent in minutes
+2. Pricing          | https://gammarips.com/pricing       | $39/mo, 7-day free trial        | Free anon tier to start
+3. How It Works     | https://gammarips.com/how-it-works  | Curation, gates, methodology    | Data, not advice
+4. Methodology      | https://gammarips.com/methodology   | Point-in-time, leakage-safe     | Realized MFE/MAE surfaces
+5. The Lab          | https://gammarips.com/lab           | Pool-level experiments          | Honest, cohort-shaped stats
+6. Paper Scorecard  | https://gammarips.com/scorecard     | Pool-level, cohort-shaped       | Paper basis, losers included
+
+CALLOUTS (8, <=25 chars):
+1. Anti-Firehose Curation
+2. Free Keyless Tier
+3. No Pick Endpoint
+4. Point-in-Time Data
+5. Leakage-Safe
+6. Realized MFE/MAE Data
+7. Built for BYO Agents
+8. Not Advice, Just Data
+
+# ==============================================================================
+# RSA #2  ->  AG3 (brand)
+# Final URL: https://gammarips.com/
+# Reuse the sitelinks + callouts above. Brand-specific headlines/descriptions:
+# ==============================================================================
+
+FINAL URL:
+https://gammarips.com/
+
+HEADLINES (brand-forward; reuse others from RSA #1 to fill 15):
+1.  GammaRips Options Flow
+2.  GammaRips MCP Data Layer
+3.  Options Data for Your Agent
+4.  Anti-Firehose. Not Advice.
+5.  Free Keyless Tier to Try
+
+DESCRIPTIONS (<=90):
+1. GammaRips: anti-firehose options-flow data for AI agents. Curated pool, not advice.
+2. Point-in-time features and realized outcome surfaces via MCP. Free keyless tier.

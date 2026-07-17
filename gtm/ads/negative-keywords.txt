@@ -1,0 +1,75 @@
+# GammaRips — Google Ads NEGATIVE keywords (campaign-level)
+# Paste into Tools -> Shared library -> Negative keyword lists, attach to the campaign.
+# Two jobs: (1) keep the retail-gambler universe out (wrong buyer + policy landmines),
+# (2) protect the "data-not-advice / no signals" compliance posture.
+#
+# NOTE on match: these are phrase-match negatives (block any query containing the phrase).
+#
+# ---- Get-rich-quick / gambler intent (policy-prohibited + wrong buyer) ----
+"make money"
+"get rich"
+"get rich quick"
+"free money"
+"guaranteed"
+"double your money"
+"10x"
+"how to make money"
+"beat the market"
+"day trading"
+"penny stocks"
+"meme stock"
+"robinhood"
+"wsb"
+"wall street bets"
+"pump"
+"hot stocks"
+"best options to buy"
+"options to buy now"
+"should i buy"
+"stock picks"
+
+# ---- Signals / alerts services (we are explicitly NOT this — hard compliance line) ----
+"trading signals"
+"options signals"
+"stock signals"
+"options alerts"
+"signals group"
+"alerts group"
+"discord signals"
+"telegram signals"
+"copy trading"
+
+# ---- Advice / broker / adviser intent we do not serve ----
+"financial advisor"
+"broker"
+"brokerage"
+"robo advisor"
+"investment advice"
+"stock tips"
+"options tips"
+"trading bot"
+
+# ---- Wrong product / education / job seekers ----
+"course"
+"class"
+"tutorial"
+"for beginners"
+"explained"
+"what is options trading"
+"how to trade options"
+"learn options"
+"book"
+"pdf"
+"jobs"
+"salary"
+"internship"
+"definition"
+"meaning"
+
+# ---- DO NOT ADD as negatives (this IS the ICP) ----
+# options flow | unusual options | mcp | agent | agentic | api | data | quant | flow
+#
+# ---- WATCH, do not pre-negative ----
+# "free"  -> the keyless anon tier is the try-before-buy on-ramp; keep it for now,
+#            revisit at the day-10 Search-Terms scrub if it draws non-converters.
+# Competitor names (e.g. "unusual whales") -> high-intent ICP; leave them biddable.

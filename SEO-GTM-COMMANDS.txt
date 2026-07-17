@@ -1,0 +1,97 @@
+==============================================================================
+ GAMMARIPS — SEO / GTM ACTION CHECKLIST                              2026-07-09
+==============================================================================
+Three sections:
+  A) TERMINAL — one command to run (unblocks the data so Claude can go deeper)
+  B) BROWSER / GSC — sitemap + index your ~20 money pages
+  C) BROWSER / FREE DIRECTORIES — the actual revenue lever (MCP buyer channel)
+
+Do them in order. A is the only thing you type. B and C are clicks.
+Skip paid search ads for now — see the note at the bottom.
+
+------------------------------------------------------------------------------
+ A) GET THE DATA  (the gcloud login is BLOCKED by Google — use these instead)
+------------------------------------------------------------------------------
+NOTE: `bash seo-reauth.sh` / the gcloud login now hits Google's "This app is
+blocked" wall — Google won't grant Search Console/Analytics scopes to gcloud's
+generic app for a personal Gmail. Don't fight it. Pick ONE of these:
+
+A1. FASTEST — export from the GSC UI (no auth, ~60 sec; same as the Coverage zip)
+    1. GSC -> Performance report (left menu)
+    2. Date range -> Last 3 months
+    3. Top-right -> Export -> Download CSV (or Google Sheets)
+    4. Drop the file in /home/user/gammarips-engine/ and tell Claude it's there.
+    -> Claude analyzes it: retail-ticker traffic vs developer traffic.
+
+A2. PERMANENT — grant the service account read access (so Claude can pull it
+    itself, forever, no key file, no block). Add this email in BOTH places:
+
+        406581297632-compute@developer.gserviceaccount.com
+
+    - GA4: Admin -> Property Access Management -> "+" -> add email -> Viewer
+    - GSC: Settings -> Users and permissions -> Add user -> email -> Restricted
+    Then tell Claude "SA is added" and it wires up impersonation locally.
+
+(seo-reauth.sh is dead — Google blocks that path. Ignore it.)
+
+------------------------------------------------------------------------------
+ B) BROWSER — GOOGLE SEARCH CONSOLE  (search.google.com/search-console)
+------------------------------------------------------------------------------
+Make sure you're in the DOMAIN property: sc-domain:gammarips.com
+(not a "https://" URL-prefix property — that's likely why you didn't see a
+sitemap).
+
+B1. SUBMIT THE SITEMAP (2 min — the file already exists and is valid):
+    Left menu -> Sitemaps -> "Add a new sitemap" -> type:  sitemap.xml
+    -> Submit. (Full URL: https://gammarips.com/sitemap.xml)
+
+B2. REQUEST-INDEX YOUR ~20 MONEY PAGES (the ones that can earn revenue):
+    For EACH url below: paste it in the top "Inspect any URL" bar ->
+    "Request Indexing". ~20 clicks total. Do NOT bother with ticker pages.
+
+      https://gammarips.com/
+      https://gammarips.com/developers
+      https://gammarips.com/pricing
+      https://gammarips.com/methodology
+      https://gammarips.com/lab
+      https://gammarips.com/how-it-works
+      https://gammarips.com/scorecard
+      https://gammarips.com/about
+      https://gammarips.com/blog
+      https://gammarips.com/blog/wire-your-ai-agent-to-real-options-data-mcp
+      https://gammarips.com/blog/building-options-flow-pipeline-ai-agents
+      (+ your 4 other /blog/ posts — grab their URLs from the /blog index)
+
+B3. (OPTIONAL) EXPORT YOUR BACKLINKS so Claude can see them:
+    Left menu -> Links -> "Top linking sites" -> Export. These scripts CAN'T
+    pull backlinks (not in the Search Console API) — a UI export is the only way.
+
+------------------------------------------------------------------------------
+ C) BROWSER — FREE MCP DIRECTORY LISTINGS  (this is where subs come from)
+------------------------------------------------------------------------------
+Your buyer finds tools in MCP directories, not on Google. These are free,
+permanent, exactly-targeted, and double as backlinks. Endpoint to paste
+everywhere:  https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+Repo:        https://github.com/DevDizzle/gammarips-mcp
+
+C1. Smithery      -> smithery.ai -> sign in with GitHub -> Add/claim server
+                     -> endpoint above (Streamable HTTP, remote)
+C2. PulseMCP      -> pulsemcp.com/submit -> name "GammaRips Options Intelligence",
+                     repo URL + endpoint above
+C3. Glama         -> glama.ai -> sign in with GitHub -> claim the crawled
+                     DevDizzle/gammarips-mcp listing
+C4. cursor.directory -> Submit a Plugin -> paste the repo URL
+   (Official MCP Registry listing is already published — skip it.)
+
+------------------------------------------------------------------------------
+ WHY NO PAID SEARCH ADS YET
+------------------------------------------------------------------------------
+  - Almost nobody searches "agentic trading" / "options flow MCP" — Google
+    won't serve ads on keywords with no volume.
+  - Trading + Google Ads = compliance review hell (finance restrictions).
+  - $39/mo vs finance CPCs ($5-50/click) = the math can't work cold.
+  - Your own 07-07 plan says: saturate free directories FIRST, measure, THEN
+    decide if paid can ever pencil. Revisit at the Aug 17 checkpoint.
+  - If you ever do paid, it's Reddit (r/algotrading, r/ClaudeAI, r/LocalLLaMA)
+    or a dev newsletter — where agent-builders are — not Google Search.
+==============================================================================

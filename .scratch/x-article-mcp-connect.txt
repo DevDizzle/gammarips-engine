@@ -1,0 +1,82 @@
+⚡ Connect Your AI Agent to GammaRips in 5 Minutes
+
+GammaRips is an overnight options-flow engine. Every night it scans the US options market and cuts thousands of tickers down to a small pool with unusual bullish flow. Then it tracks what every one of those contracts actually did, from the morning it surfaced to expiration. Losers included.
+
+Your agent can query all of it over MCP (Model Context Protocol, the standard way to wire live data into an AI agent).
+
+We sell data, not picks. Your agent reads the pool, the outcome history, and the methodology, then reasons to its own conclusions.
+
+
+🚀 What Your Agent Gets
+
+• 29 tools covering the curated pool, per-contract detail, outcome history, and market context.
+• The honest record: about 60% of pool contracts touch +40% at some point. The median still expires worthless. Your agent can verify that itself, query by query.
+• Research tools: replay any past contract and test an exit rule against the actual tape before trusting it.
+
+
+🛠 Step 1: Connect Free. No Account Needed.
+
+Claude Code (one line in your terminal):
+
+claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+
+Any MCP client (JSON config):
+
+{
+  "mcpServers": {
+    "gammarips": {
+      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp"
+    }
+  }
+}
+
+Also on the official MCP Registry (io.github.DevDizzle/gammarips) and Smithery. The free tier gives your agent a taste of the pool.
+
+
+🔑 Step 2: Upgrade for Full Access ($39/mo)
+
+1. Subscribe at gammarips.com/pricing
+2. Open your Account page and click Generate API Key
+3. Copy the key (gr_live_...) right away
+
+Then add the header:
+
+claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp --header "Authorization: Bearer gr_live_YOUR_KEY"
+
+Or in JSON config:
+
+"headers": { "Authorization": "Bearer gr_live_YOUR_KEY" }
+
+
+✅ Step 3: Test It
+
+Ask your agent:
+
+"Pull today's GammaRips pool and summarize the flow."
+
+
+🧰 Tools Worth Knowing (of the 29)
+
+• get_enriched_signals - today's curated pool with scores and flow stats
+• get_opportunity_surface - how far each past contract ran before it died
+• query_outcomes / get_outcome_summary - the full outcome history, wins and losses together
+• replay_contract / estimate_exit_rule - test an exit idea against real history
+• get_regime_context / get_earnings_window - the safety checks we gate on
+
+
+🎯 Prompts to Try
+
+• "Which names in today's pool have the strongest flow?"
+• "Pull the outcome history for contracts like the top name. What usually happens?"
+• "Simulate a +40% take-profit rule against the pool's history. What does it miss?"
+
+
+🛠 Troubleshooting
+
+• 401 Unauthorized: the header is Authorization: Bearer gr_live_...
+• Regenerated your key? The old one dies instantly. Update your config.
+• Canceled? Keys deactivate within about 2 minutes.
+• Support: @gammarips
+
+
+Data, not advice. Paper-tracked and published honestly, losers included.

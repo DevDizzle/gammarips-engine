@@ -1,0 +1,58 @@
+GSC REQUEST INDEXING — gammarips.com — COPY-PASTE LIST
+========================================================
+How: search.google.com/search-console -> select the gammarips.com property
+-> paste ONE url into the inspection bar at the top -> wait for the result
+-> click "Request indexing". ~1 minute each. Quota is roughly 10/day —
+do one batch per day, in order. Check off as you go.
+
+DAY 1 — the money cluster (do these today)
+------------------------------------------
+https://gammarips.com/
+https://gammarips.com/developers
+https://gammarips.com/pricing
+https://gammarips.com/blog/wire-your-ai-agent-to-real-options-data-mcp
+https://gammarips.com/methodology
+https://gammarips.com/how-it-works
+https://gammarips.com/signals
+https://gammarips.com/scorecard
+https://gammarips.com/blog
+https://gammarips.com/lab
+
+DAY 2 — remaining evergreen + blog posts
+----------------------------------------
+https://gammarips.com/blog/building-options-flow-pipeline-ai-agents
+https://gammarips.com/blog/why-uoa-is-mostly-noise
+https://gammarips.com/blog/institutional-hedging-vs-directional
+https://gammarips.com/blog/vix-backwardation-gate
+https://gammarips.com/blog/fix-vs-oklo-case-study
+https://gammarips.com/reports
+https://gammarips.com/about
+https://gammarips.com/disclosures
+https://gammarips.com/reports/2026-07-07
+
+(Skip /terms and /privacy — not worth quota. Skip individual ticker pages
+— they're the long tail that only clears with domain authority, and
+individual requests won't move 1,900 pages.)
+
+WHY YOUR COVERAGE REPORT LOOKS THE WAY IT DOES (diagnosed 2026-07-07)
+---------------------------------------------------------------------
+- The sitemap DID work: Google crawled everything ("Discovered - not
+  indexed" = 0). It then DECLINED to index 1,962 pages ("Crawled -
+  currently not indexed") — that's the zero-backlink / thin-programmatic
+  signal, same disease as texttimeline but at 100x page count. It clears
+  domain-wide when real links land; it is not fixed URL-by-URL.
+- 270 "noindex" = legacy App Hosting bug (notFound() served as 200+noindex
+  on unknown tickers/dates). Already fixed in the webapp (real 404s now —
+  that's the 68 404s bucket, which is the fix WORKING). Decays on its own.
+- 48 duplicate-canonical pages = REAL live bug: /signals/[ticker]
+  self-canonicalizes to whatever casing arrives (/signals/aapl vs
+  /signals/AAPL both 200 with different canonicals). One-line fix in the
+  webapp repo — see backlinks-today.txt "ON-SITE FIXES".
+- 12 robots-blocked + 90 redirects = intentional and fine. Ignore.
+- Indexed count already recovered 30 (May) -> 796 (late June). The trend
+  is right; it needs links, not more sitemap.
+
+Re-request any still-unindexed Day-1 URLs about a week after the first
+backlinks go live (MCP directory listings count — they're real links).
+
+Scratch helper — delete whenever (not committed).

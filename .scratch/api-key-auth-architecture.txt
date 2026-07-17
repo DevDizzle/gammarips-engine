@@ -1,0 +1,26 @@
+API KEY AUTH - HOW IT WORKS
+
+Client lands on our docs and grabs a free trial key. We generate it ourselves from a
+random high-entropy secret with a prefix like gr_test_ or gr_live_ so we can tell trial
+vs paid apart and its scannable if it leaks. We show them the raw key one time only,
+then we dont store it, we only store a hash (sha-256), so a DB leak dont hand out workign
+keys.
+
+We keep everythign in a NoSQL record split in two tables. accounts = who they are + there
+billing state (plan, stripe customer id, trial expiry, sub status). api_keys = keyed by
+the hash, points back to a account. We split it so the entitlement lives on the ACCOUNT
+not the key, that way a client can rotate keys and it dont mess up there paid status.
+
+On every request we hash the incomming key, do a fast lookup, and branch:
+  - not found              -> 401
+  - revoked                -> 401 / 403
+  - paid + sub live        -> authorized
+  - trial still valid (withing 30 days AND under 250 calls) -> authorized
+  - trial expired/used up  -> 402 Payment Required  <- where we upsell them
+We cache that decision ~30-60 sec so we aint hammering the DB every call.
+
+How does "paid" get comunicated back from the POS? We NEVER trust the client to say they
+paid. Stripe is the source of truth, it tells us thru signed webhooks (checkout completed,
+sub updated/deleted, invoice paid/failed) and we flip the account to paid. Webhooks get
+missed sometimes so a daily reconcile cron pulls the real status from stripe and fixes any
+drift. Trial validity needs none of that, its just expiry + call count vs now.

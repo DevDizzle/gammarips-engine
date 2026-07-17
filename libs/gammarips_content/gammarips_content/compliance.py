@@ -28,6 +28,9 @@ CHAR_BUDGETS: dict[str, int] = {
     "win": 240,       # QRT quote is short — original tweet provides context
     "loss": 240,      # Neutral single, per X research — no QRT
     "scorecard": 400, # Per tweet in the 3-tweet thread
+    "pool_outcomes": 400,  # Daily pool-level bracket receipts (2026-07-09)
+    "life_stats": 400,     # Weekly full-life distribution stats (2026-07-09)
+    "agent_angle": 400,    # Agentic-trading education post (2026-07-09)
     "blog": 2_000_000,  # Effectively unbounded for blog markdown
 }
 
@@ -37,15 +40,21 @@ CHAR_BUDGETS: dict[str, int] = {
 IMAGE_REQUIRED: frozenset[str] = frozenset()
 
 
-# Posts where cashtag-at-pos-0 is exempt (e.g. loss singles that lead with "Stopped").
-CASHTAG_RULE_EXEMPT: frozenset[str] = frozenset({"loss", "report", "scorecard"})
+# Posts where cashtag-at-pos-0 is exempt (e.g. loss singles that lead with
+# "Stopped"). standby has no ticker BY DESIGN; pool_outcomes leads with the
+# pool stats (its one cashtag lands mid-body); life_stats and agent_angle
+# are ticker-free education/receipts posts.
+CASHTAG_RULE_EXEMPT: frozenset[str] = frozenset(
+    {"loss", "report", "scorecard", "standby", "pool_outcomes", "life_stats", "agent_angle"}
+)
 
 
 # Posts that require the Paper-trade disclaimer. Only trade-performance recaps
 # carry the disclaimer (Evan 2026-04-28). signal/standby/teaser/report ship
 # without — they describe upcoming setups, not realized results.
+# pool_outcomes + life_stats recap realized paper outcomes → disclaimer.
 DISCLAIMER_REQUIRED: frozenset[str] = frozenset(
-    {"win", "loss", "callback", "scorecard"}
+    {"win", "loss", "callback", "scorecard", "pool_outcomes", "life_stats"}
 )
 
 
@@ -176,10 +185,12 @@ DISCLAIMER_CANONICAL_SHORT = "⚠️ Paper-trade. Not advice."
 # Only trade-performance recaps carry a disclaimer. Forward-looking posts
 # (signal / standby / teaser / report) ship without one.
 _DISCLAIMER_BY_POST_TYPE: dict[str, str] = {
-    "win":       DISCLAIMER_CANONICAL_SHORT,
-    "loss":      DISCLAIMER_CANONICAL_SHORT,
-    "callback":  DISCLAIMER_CANONICAL_SHORT,   # win/loss routed via callback
-    "scorecard": DISCLAIMER_CANONICAL_SHORT,
+    "win":           DISCLAIMER_CANONICAL_SHORT,
+    "loss":          DISCLAIMER_CANONICAL_SHORT,
+    "callback":      DISCLAIMER_CANONICAL_SHORT,   # win/loss routed via callback
+    "scorecard":     DISCLAIMER_CANONICAL_SHORT,
+    "pool_outcomes": DISCLAIMER_CANONICAL_SHORT,   # realized pool receipts
+    "life_stats":    DISCLAIMER_CANONICAL_SHORT,   # realized full-life stats
 }
 
 _DISCLAIMER_LINE = re.compile(
@@ -332,7 +343,9 @@ def canonicalize_blog_disclaimer(markdown: str) -> str:
 def canonicalize_draft_text(text: str, post_type: str) -> str:
     """Strip LLM drift and enforce canonical output before publish.
 
-    Does three things the prompt cannot reliably enforce:
+    Does four things the prompt cannot reliably enforce:
+    0. Replace em/en dashes with a plain hyphen — owner rule 2026-07-08: no
+       em dashes in ANY public GammaRips copy.
     1. Replace any trailing disclaimer-ish line(s) with the canonical disclaimer
        for this post_type. Catches paraphrasing like "Paper-trade only. Not advice."
     2. Strip `$SPY`/`$QQQ`/`$IWM`/`$DIA` filler from standby headers — writer
@@ -340,6 +353,7 @@ def canonicalize_draft_text(text: str, post_type: str) -> str:
     3. Drop `V/OI None` segments from teaser runner-up lines when the upstream
        enrichment row has a null value.
     """
+    text = text.replace("—", "-").replace("–", "-")
     lines = text.splitlines()
 
     # 1. Strip trailing disclaimer line(s) + blanks
@@ -352,7 +366,7 @@ def canonicalize_draft_text(text: str, post_type: str) -> str:
         for line in lines:
             if "Standby" in line or "standby" in line.lower():
                 line = _INDEX_FILLER_IN_HEADER.sub("", line)
-                line = re.sub(r"\s+—", " —", line).rstrip()
+                line = re.sub(r"\s+-", " -", line).rstrip()
             cleaned.append(line)
         lines = cleaned
 
