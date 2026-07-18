@@ -33,7 +33,6 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
 - **Registry republish** v4.0.0 + branded URL:
   `cd gammarips-mcp && mcp-publisher login github && mcp-publisher publish` (token
   expired; `login github` is interactive — you run it).
-- **Add a LICENSE** to `gammarips-harness` (recommend MIT — moat is the paid data).
 - **Record the morning video** → send YouTube link + harness repo link → I merge the
   landing PR via `/ship`.
 - 🔴 **Rotate `POLYGON_API_KEY`** (07-06 leak; `printf %s` no trailing newline;
