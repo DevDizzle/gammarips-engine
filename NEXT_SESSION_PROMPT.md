@@ -30,9 +30,6 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
   (`.cursor-plugin/plugin.json` 4.0.0 + branded URL; bundled skill rewritten to
   the 9-tool surface + methodology corpus). If cursor.directory / Open Plugins
   does NOT auto-pull from the repo, re-submit / refresh the listing to v4.
-- **Registry republish** v4.0.0 + branded URL:
-  `cd gammarips-mcp && mcp-publisher login github && mcp-publisher publish` (token
-  expired; `login github` is interactive — you run it).
 - **Record the morning video** → send YouTube link + harness repo link → I merge the
   landing PR via `/ship`.
 - 🔴 **Rotate `POLYGON_API_KEY`** (07-06 leak; `printf %s` no trailing newline;
