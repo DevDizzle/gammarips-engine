@@ -13,6 +13,9 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
   (`get_pool` preview free / full pro — a build defect that served the paid pool
   free was caught + fixed). Plus **wiki-brain**: 26 free methodology pages via
   `get_playbook` (`get_playbook("methodology")`). Two `gammarips-review` PASSes.
+  Canonical repo reconciled = `DevDizzle/gammarips-mcp` (`0d9c883`: v4 code +
+  **Cursor plugin v4** + branded listing); local-repo→serverjson mis-wire fixed,
+  serverjson reset. GTM entry = plugins (Claude/Cursor) + the open-source harness.
 - **Harness PUBLIC** — `github.com/DevDizzle/gammarips-harness` (scrub-clean,
   points at mcp.gammarips.com). The clone-me GTM artifact.
 - **Trader** run-time skills + v4 rename → merged to `master` (`8a9f79c`).
@@ -23,13 +26,10 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
   the video exists.
 
 ## Owner queue
-- 🔴 **MCP git-repo topology tangle (DECIDE + I execute).** Local
-  `projects/gammarips-mcp` `origin` points at **`DevDizzle/gammarips-mcp-serverjson`**,
-  not `gammarips-mcp`. So the v4 consolidation push landed on **serverjson**'s main;
-  canonical `gammarips-mcp` main (`f77e42d`) has only the plugin-listing commits and
-  NO v4. Shared base `89262aa`; the repos are effectively swapped vs their names.
-  Production unaffected (source deploy). Fix (on your word): repoint local → `gammarips-mcp`,
-  merge its 2 plugin-listing commits, push v4 there, reset serverjson main.
+- **Cursor plugin listing refresh:** the plugin file is now v4 in the repo
+  (`.cursor-plugin/plugin.json` 4.0.0 + branded URL; bundled skill rewritten to
+  the 9-tool surface + methodology corpus). If cursor.directory / Open Plugins
+  does NOT auto-pull from the repo, re-submit / refresh the listing to v4.
 - **Registry republish** v4.0.0 + branded URL:
   `cd gammarips-mcp && mcp-publisher login github && mcp-publisher publish` (token
   expired; `login github` is interactive — you run it).
