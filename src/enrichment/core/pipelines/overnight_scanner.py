@@ -6,6 +6,7 @@ Pure numeric scoring — zero LLM calls.
 """
 
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -440,6 +441,10 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
             continue
         if spread_pct is not None and spread_pct > 0.40:
             continue
+        # Data-sanity floor, NOT a liquidity gate (re-framed 2026-07-28): a
+        # contract with <10 prints has no trustworthy last-trade mark to price
+        # off. Tradeability itself is scored below (log-OI ramp) and flagged
+        # name-level downstream (expected_liquidity).
         if vol < 10:
             continue
 
@@ -462,21 +467,30 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
         iv = c.get("implied_volatility") or 0
 
         # Contract selection optimizes for TRADEABILITY, not unusualness
-        # (fix 2026-06-04). The OLD score rewarded LOW open interest via a
-        # `vol/OI` term — which handed us the swept lottery strike (untradeable:
-        # OKTA $127 6/12 had OI 5 and a ~35% LIVE spread) over the standard
-        # liquid strike (OKTA $130, OI 48). Unusual flow should pick the
-        # NAME+direction; the CONTRACT must be one you can actually fill. Open
-        # interest is the PRIMARY signal here (standing size accumulates and
-        # can't be faked); the snapshot spread is noisy (it read 0.5% on that
-        # 35%-wide OKTA strike) so it's weighted lightly. A live fillability
-        # check at pick time is the belt-and-suspenders layer.
+        # (fix 2026-06-04; recalibrated 2026-07-28). The OLD score rewarded LOW
+        # open interest via a `vol/OI` term — which handed us the swept lottery
+        # strike (untradeable: OKTA $127 6/12 had OI 5 and a ~35% LIVE spread)
+        # over the standard liquid strike (OKTA $130, OI 48). Unusual flow
+        # should pick the NAME+direction; the CONTRACT must be one you can
+        # actually fill. The 2026-06-04 "OI is PRIMARY... can't be faked"
+        # rationale was FALSIFIED at its old saturation point by the 2026-07-28
+        # entry-day tradeability study (15 days, N=750, FINDINGS_LEDGER
+        # "2026-07-28 (evening)"): min(oi/200) maxed for 87% of the delivered
+        # pool, and 16% of maxed contracts were still entry-day ghosts (<10
+        # prints). Ghost rate falls monotonically with OI, reaching ~2-4% only
+        # at OI 2000-5000, so the OI term now ramps on a log scale saturating
+        # at ~3000. Sweep volume is NON-monotonic at the top (vol>=2000 -> 13.6%
+        # ghosts — the one-off-sweep signature: the sweep is the signal, not
+        # liquidity), so its weight is demoted 2.0 -> 1.0. The snapshot spread
+        # is noisy (it read 0.5% on that 35%-wide OKTA strike) so it stays
+        # lightly weighted. A live fillability check at pick time is the
+        # belt-and-suspenders layer.
         # See docs/DECISIONS/2026-06-04-contract-selection-liquidity.md.
         score = (
-            min(oi / 200.0, 1.0) * 5.0                 # open interest — PRIMARY liquidity
-            + min(vol / 200.0, 1.0) * 2.0              # volume — secondary liquidity
+            min(math.log10(oi + 1) / math.log10(3000.0), 1.0) * 5.0  # open interest — log ramp, saturates ~3000 (2026-07-28)
+            + min(vol / 200.0, 1.0) * 1.0              # volume — demoted (non-monotonic at the top, 2026-07-28)
             + ((1.0 - min(spread_pct, 1.0)) * 1.5 if spread_pct is not None else 0.0)  # tight spread — tertiary (NULL when unquoted)
-            + (2.0 if 0.25 <= delta <= 0.50 else 0)    # sweet-spot delta bonus
+            + (2.0 if 0.20 <= delta <= 0.46 else 0)    # delta bonus — validated band (0.46 CEILING, FINDINGS_LEDGER 2026-07-28)
             + gamma * 8.0                              # convexity (de-emphasized from 20x)
             - (abs(theta) / max(mid, 0.01)) * 1.0      # theta drag penalty
         )

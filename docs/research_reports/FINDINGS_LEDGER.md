@@ -711,3 +711,18 @@ Six pre-committed hypothesis families on pool composition/ordering; every claime
 - **`pool_liquidity_snapshot` quote columns 100% NULL** (31,400/31,400 rows; bid/ask/mid/spread_pct) — RM-001b confirmed still fully blocked; the fetcher populates OI/greeks/day-bars only. Needs a quote-capable endpoint/entitlement, not waiting.
 
 Provenance: workflow `wf_e301233a-c66` (12 agents: 6 finders + 6 adversarial verifiers, ~641K tokens, 165 tool calls). Full structured output archived in the session task output; per-agent transcripts under the session workflows dir.
+
+---
+
+## 2026-07-28 (evening) — Entry-day contract tradeability study: the ghost-pool mechanism, quantified (15 days, N=750)
+
+Trigger: owner real-money kill on UNP 260821C310 (6 contracts all day, ~30% effective spread) + trader-side measurement (`gammarips-trader/docs/POOL-LIQUIDITY-FINDING-2026-07-28.txt`, one session, 48% of pool under 50 contracts). Engine-side study on `pool_liquidity_snapshot` (scans 07-06..07-24, 15 complete entry days × 50, joins 100%). Label: entry-day max non-stale `day_volume` per recommended contract.
+
+- **The measurement replicates structurally: 42.8% of pool rows trade <50 contracts on entry day (daily median 42%, range 28–70%), 22.3% GHOST (<10), 8.9% trade zero.** Every one of 15 days.
+- **The trader doc's causal claims are half-right.** OI and sweep volume DO carry rank signal (Spearman +0.48/+0.52, same-sign 15/15 days) — the doc's "OI does not predict" was an N=1 over-claim. What is actually broken is the picker's SATURATION: `min(oi/200)*5` (`overnight_scanner.py:476`) is maxed by 87% of the delivered pool and 16% of maxed contracts are still ghosts. OI≥1000 still leaves 23.9% under-50. Sweep volume is non-monotonic at the top (vol≥2000 → 13.6% ghosts — the one-off-sweep signature).
+- **The two strongest predictors are NAME-level and completely unused by the pipeline:** underlying share volume (rho +0.585; tercile P(≥50) 27%→87%) and chain breadth/active strikes (+0.554; 30%→87%). `prior_day_pool_volume` +0.594 but only 24% coverage (repeats are rare). Best scan-time GHOST rule (in-sample-fitted, ~825 cuts searched, disclose accordingly): `und_day_vol≤2.5M AND active_strikes_total≤15 AND rec_oi≤1000` → precision 0.60 / recall 0.59, flags 22% of pool; as admission gate keeps 78% and cuts kept-ghost rate 22.3%→11.6%.
+- **Pick-time is near-deterministic but time-shifted:** at the 09:52 snapshot (delayed feed; prints through ~09:37; 09:45 shows NOTHING — first fresh data 09:52), early≥5 prints → 96.3% finish ≥50; early≥20 → 100%; early==0 (52% of pool) → 40.6% ghost / 68.1% under-50. A 0-print veto on the tournament pick would have blocked the owner's UNP entry.
+- **Score floor is cosmetic:** among BULLISH+UOA>$500K (median 142 qualified/day), removing score≥4 changes the top-50 pool on 1 of 20 days (6 slots total). It neither causes the liquidity problem nor filters anything the cap doesn't. overnight_score rho with entry-day volume +0.196 (weakest meaningful predictor).
+- **Sim-PnL-on-ghosts is untrustworthy (research hygiene rule):** INVALID_LIQUIDITY catches only 37% of ghosts; the other 105 sim-"filled" ghosts show mean −2.8% with 79% illiquid_exit — stale marks, not safe trades. A human pays the ~30% spread. Do NOT use sim PnL on tradeability-label ghosts in any future returns study.
+
+Scripts + labeled data in session scratchpad (`label_data.csv`, `full_labeled.csv`, `analyze*.py`). Thresholds are 15-day in-sample — re-fit rolling before/after any deploy. Deployment via docs/DECISIONS + gammarips-engineer + gammarips-review.

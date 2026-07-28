@@ -29,10 +29,13 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
   Video drops in later as a one-line iframe swap (comment left in `hero.tsx`).
 
 ## Owner queue
-- **Tradability flag on the published pool — APPROVED 07-28, not yet built** (~53%
-  of the 50 fails the live-OI≥1000 floor at pick time; fillability, not PnL —
-  FINDINGS_LEDGER `2026-07-28`). Public-surface change ⇒ design + `gammarips-review`
-  next session (where to flag: MCP `get_pool` + webapp).
+- **Layer-4 pick-time liquidity veto — timing decision pending:** the 0-print veto
+  needs the tournament pick moved ~09:45→~09:53-09:55 (delayed feed's first fresh
+  snapshot is 09:52; veto would have blocked the 07-28 UNP kill). Owner yes/no on
+  the shift; evidence FINDINGS_LEDGER `2026-07-28 (evening)`.
+- **Surface `expected_liquidity` via MCP `get_pool` + webapp** (engine-side field
+  ships in the 07-28 tradeability build; MCP is a separate repo — wire it next
+  session so subscribers see CLEAN/THIN before entry).
 - **Cursor plugin listing refresh:** the plugin file is now v4 in the repo
   (`.cursor-plugin/plugin.json` 4.0.0 + branded URL; bundled skill rewritten to
   the 9-tool surface + methodology corpus). If cursor.directory / Open Plugins
@@ -52,6 +55,11 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
 - X: unpin 03-14, pin distribution-stat draft, bio refresh (memory `project_x_revamp_2026_07_09`).
 
 ## Watch / dated checkpoints
+- **07-29 first live run of the tradeability build** (deployed 07-28 eve): check
+  enrichment logs for the `liq demotion ON ... flagged/admitted` line + clean
+  `Atomically replaced scan_date=...`; then `agg_pool_tradeability` daily — expect
+  kept-pool ghost rate to trend 22%→~12%. Rollback = `LIQ_DEMOTION=false` env.
+  `docs/DECISIONS/2026-07-28-pool-tradeability-build.md`.
 - **mom_60 tilt KEPT by owner call 07-28** (research says retire-grade OOS —
   FINDINGS_LEDGER `2026-07-28`; owner: "don't drop the tilt yet"). Revisit with
   live-cohort N≥30 or if the live book underperforms.

@@ -109,6 +109,26 @@ MOM_THRESHOLD = float(os.getenv("MOM_THRESHOLD", "0.35"))
 # disables the (at most 2 grouped-daily calls) fetch entirely.
 PERSIST_MOM_60 = os.getenv("PERSIST_MOM_60", "true").strip().lower() in ("1", "true", "yes")
 
+# Name-level liquidity DEMOTION (2026-07-28 entry-day tradeability study,
+# FINDINGS_LEDGER "2026-07-28 (evening)"). Entry-day contract tradeability is
+# best predicted by NAME-level features: underlying share volume (rho +0.585)
+# and chain active-strikes breadth (+0.554). A signal is liq-flagged (likely
+# GHOST — entry-day contract volume <10) when ALL THREE hold:
+#   day_volume <= LIQ_UND_VOL_MIN  AND
+#   (call_active_strikes + put_active_strikes) <= LIQ_STRIKES_MIN  AND
+#   recommended_oi <= LIQ_OI_MIN
+# (precision 0.60 / recall 0.59, flags ~22% of pool). Flagged names are
+# DEMOTED below every unflagged name in the edge-rank — never hard-dropped, so
+# a thin day can never starve the pool below ENRICH_TOP_N. LIQ_DEMOTION=false
+# restores the exact prior ordering (kill switch); the published
+# expected_liquidity column is written regardless (telemetry, not ordering).
+# Thresholds are 15-day IN-SAMPLE fits (scans 2026-07-06..07-24) — re-fit as
+# pool_liquidity_snapshot accrues. See docs/DECISIONS/ (pool-tradeability).
+LIQ_DEMOTION = os.getenv("LIQ_DEMOTION", "true").strip().lower() in ("1", "true", "yes")
+LIQ_UND_VOL_MIN = int(os.getenv("LIQ_UND_VOL_MIN", "2500000"))
+LIQ_STRIKES_MIN = int(os.getenv("LIQ_STRIKES_MIN", "15"))
+LIQ_OI_MIN = int(os.getenv("LIQ_OI_MIN", "1000"))
+
 # Output prefixes in GCS
 NEWS_OUTPUT_PREFIX = "overnight-enrichment/news/"
 TECHNICALS_OUTPUT_PREFIX = "overnight-enrichment/technicals/"
@@ -493,6 +513,7 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
 
     query = f"""
     SELECT ticker, direction, overnight_score, price_change_pct, underlying_price,
+           day_volume,
            signals, recommended_contract, recommended_strike, recommended_expiration,
            recommended_mid_price, recommended_spread_pct, contract_score,
            recommended_delta, recommended_gamma, recommended_theta, recommended_vega,
@@ -654,6 +675,43 @@ def _get_momentum_context(scan_date: str, polygon_key: str) -> dict:
     return _MOM_CACHE.get(scan_date) or {"mom": {}, "anchor": None, "lookback": None}
 
 
+def _liquidity_flag(sig: dict) -> tuple[bool, int | None, int | None]:
+    """Scan-time GHOST rule from the 2026-07-28 entry-day tradeability study.
+
+    Returns (liq_flagged, und_day_volume, active_strikes_total). liq_flagged is
+    True only when ALL THREE point-in-time scan fields clear the AND-rule
+    (day_volume <= LIQ_UND_VOL_MIN AND strikes_total <= LIQ_STRIKES_MIN AND
+    recommended_oi <= LIQ_OI_MIN). A missing component fails OPEN (unflagged) —
+    missing data must never demote a name. Leakage-safe: every input is a
+    scan_date field from overnight_signals; no entry-day data touches this.
+    """
+    def _as_int(v):
+        try:
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    und_vol = _as_int(sig.get("day_volume"))
+    # Review amendment 2026-07-28: the scanner coerces a MISSING underlying
+    # day volume to 0 (not NULL), and 0 would trivially satisfy the <= leg —
+    # treat 0 as unknown so a snapshot hiccup can never contribute to a flag.
+    if und_vol == 0:
+        und_vol = None
+    ca = _as_int(sig.get("call_active_strikes"))
+    pa = _as_int(sig.get("put_active_strikes"))
+    # Review amendment 2026-07-28: require BOTH strike counts — a single-side
+    # NULL understates the total and biases toward the flag.
+    strikes_total = ca + pa if (ca is not None and pa is not None) else None
+    rec_oi = _as_int(sig.get("recommended_oi"))
+
+    flagged = (
+        und_vol is not None and und_vol <= LIQ_UND_VOL_MIN
+        and strikes_total is not None and strikes_total <= LIQ_STRIKES_MIN
+        and rec_oi is not None and rec_oi <= LIQ_OI_MIN
+    )
+    return flagged, und_vol, strikes_total
+
+
 def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None,
                        polygon_key: str | None = None) -> list[dict]:
     """Concentrate the grounded-LLM token budget on the names that can actually win.
@@ -668,7 +726,9 @@ def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None
     of history get NEUTRAL momentum). Keep the top ``k``. The RR / ATR levers used
     by the notifier's edge-rank are intentionally omitted here — they're computed
     DURING enrichment (not yet available). Returns all qualifying signals unchanged
-    when there are <= k of them. See docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md
+    when there are <= k of them. A liquidity DEMOTION term (2026-07-28 tradeability
+    study) sorts GHOST-rule-flagged names below all unflagged names — soft, never a
+    drop; see _liquidity_flag. See docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md
     and docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md."""
     pool = signals
     if ENRICH_BULLISH_ONLY:
@@ -687,6 +747,14 @@ def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None
         return mom_map.get(str(s.get("ticker", "")).upper())
 
     def _key(s: dict) -> tuple:
+        # Liquidity DEMOTION term (2026-07-28 tradeability study): flagged
+        # (likely-ghost) names sort BELOW every unflagged name regardless of
+        # edge score — a soft floor, not a drop. They still fill slots when
+        # there are fewer than k unflagged candidates, so a thin day can never
+        # starve the pool. LIQ_DEMOTION=false neutralizes the term (constant).
+        liq_ok = True
+        if LIQ_DEMOTION:
+            liq_ok = not _liquidity_flag(s)[0]
         edge = 0.0
         if str(s.get("direction", "")).upper() == "BULLISH":
             edge += 2.0
@@ -711,7 +779,7 @@ def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None
             score = float(s.get("overnight_score") or 0.0)
         except (TypeError, ValueError):
             score = 0.0
-        return (edge, mom_sort, score)
+        return (liq_ok, edge, mom_sort, score)
 
     capped = sorted(pool, key=_key, reverse=True)[:k]
     logger.info(
@@ -719,6 +787,17 @@ def _edge_select_top_n(signals: list[dict], k: int, scan_date: str | None = None
         f"{'BULLISH ' if ENRICH_BULLISH_ONLY else ''}qualifying -> grounding top "
         f"{len(capped)} (ENRICH_TOP_N={k}); tickers={[s.get('ticker') for s in capped]}"
     )
+    if LIQ_DEMOTION:
+        flagged_all = [s.get("ticker") for s in pool if _liquidity_flag(s)[0]]
+        capped_set = {id(s) for s in capped}
+        admitted = [s.get("ticker") for s in pool
+                    if _liquidity_flag(s)[0] and id(s) in capped_set]
+        logger.info(
+            f"liq demotion ON (und_vol<={LIQ_UND_VOL_MIN}, strikes<={LIQ_STRIKES_MIN}, "
+            f"oi<={LIQ_OI_MIN}): {len(flagged_all)} flagged of {len(pool)} qualifying; "
+            f"{len(flagged_all) - len(admitted)} demoted out, {len(admitted)} still "
+            f"admitted (thin-day fill); flagged={flagged_all}; admitted={admitted}"
+        )
     if MOMENTUM_TILT:
         if mom_tilt_on:
             audit = []
@@ -1624,6 +1703,18 @@ def write_enriched_signals(
             "mom_lookback_days": int(MOM_LOOKBACK_DAYS),
         }
 
+        # Published tradeability verdict (2026-07-28 study, trader doc R3/R5):
+        # the Layer-1 GHOST-rule verdict for this NAME plus its two name-level
+        # components, written on EVERY row (including demoted-but-admitted
+        # thin-day fills) and independent of the LIQ_DEMOTION ordering switch.
+        # NOT the inoperative is_tradeable flag (TF-15) — a new field.
+        liq_flagged, liq_und_vol, liq_strikes = _liquidity_flag(sig)
+        row.update({
+            "expected_liquidity": "THIN" if liq_flagged else "CLEAN",
+            "liq_underlying_volume": liq_und_vol,
+            "liq_active_strikes": liq_strikes,
+        })
+
         # Premium signal scoring
         premium_input = {
             "flow_intent": risk["flow_intent"],
@@ -1688,7 +1779,10 @@ def write_enriched_signals(
             ADD COLUMN IF NOT EXISTS mom_60 FLOAT64,
             ADD COLUMN IF NOT EXISTS mom_anchor_date DATE,
             ADD COLUMN IF NOT EXISTS mom_lookback_date DATE,
-            ADD COLUMN IF NOT EXISTS mom_lookback_days INT64
+            ADD COLUMN IF NOT EXISTS mom_lookback_days INT64,
+            ADD COLUMN IF NOT EXISTS expected_liquidity STRING,
+            ADD COLUMN IF NOT EXISTS liq_underlying_volume INT64,
+            ADD COLUMN IF NOT EXISTS liq_active_strikes INT64
         """).result()
     except Exception as e:
         logger.warning(f"V5.2 schema ensure failed (will still attempt load): {e}")

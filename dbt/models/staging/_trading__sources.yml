@@ -95,6 +95,22 @@ sources:
           - name: ticker
             tests: [not_null]
 
+      - name: pool_liquidity_snapshot
+        description: >
+          Interval liquidity re-read of the current enriched pool (~50
+          contracts), one row per (contract, as_of), written every ~10 min
+          during RTH by signal-notifier/pool_liquidity.py. TELEMETRY — never a
+          feature; entry-day-live tape keyed by explicit as_of. bid/ask/mid/
+          spread_pct are NULL placeholders pending RM-001b. Declared minimally
+          (no freshness) for agg_pool_tradeability.
+        columns:
+          - name: scan_date
+            tests: [not_null]
+          - name: contract
+            tests: [not_null]
+          - name: as_of
+            tests: [not_null]
+
       # ---- Outcomes / research domain (Phase 2) ----
 
       - name: enriched_option_outcomes

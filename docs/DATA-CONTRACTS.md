@@ -35,6 +35,10 @@ Expected fields used by policy logic include:
 **Metadata columns (added 2026-06-03, NULLABLE, NON-GATING):**
 - `sector` / `industry` — SIC-mapped at scan time in `overnight_scanner.py` (per-ticker Polygon detail endpoint), already present on the raw `overnight_signals` table; now carried through to the enriched table and the Firestore doc. **Read by no gate, WHERE, or ranking** — purely descriptive. Consumed only by the webapp's same-sector related-signals ranking and available for post-hoc cohort analysis. `None` on Polygon detail failures. See `docs/DECISIONS/2026-06-03-sector-persistence-and-webapp-internal-linking.md`.
 
+**Tradeability columns (added 2026-07-28, NULLABLE):**
+- `expected_liquidity` — STRING `"CLEAN"`/`"THIN"`: the scan-time GHOST-rule verdict for the NAME (`day_volume <= 2.5M AND call+put active strikes <= 15 AND recommended_oi <= 1000` → THIN; 15-day in-sample fit, precision 0.60/recall 0.59). Written on EVERY row including demoted-but-admitted thin-day fills, independent of the `LIQ_DEMOTION` ordering switch. Point-in-time scan fields only (leakage-safe). NOT the inoperative `is_tradeable` (TF-15). NULL on pre-2026-07-28 rows.
+- `liq_underlying_volume` (INT64) / `liq_active_strikes` (INT64) — the rule's name-level components (scanner `day_volume`; `call_active_strikes + put_active_strikes`) so consumers can see why. See `docs/DECISIONS/2026-07-28-pool-tradeability-build.md`.
+
 Schema is ensured idempotently via `ALTER TABLE ADD COLUMN IF NOT EXISTS` on every enrichment run. Old rows retain NULL and are automatically excluded by the notifier's fail-closed filter.
 
 ## Forward ledger — `profitscout-fida8.profit_scout.forward_paper_ledger`

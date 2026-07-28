@@ -105,3 +105,35 @@ models:
               arguments:
                 min_value: 0
                 max_value: 1
+
+  - name: agg_pool_tradeability
+    description: >
+      Standing pool-tradeability metric (trader doc R5, 2026-07-28 study). Per
+      scan_date: pool size and the share of recommended contracts whose
+      entry-day max non-stale day_volume is under 50 (thin) / under 10 (ghost),
+      from pool_liquidity_snapshot. Telemetry rollup — never a feature.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scan_date]
+    columns:
+      - name: scan_date
+        tests: [not_null]
+      - name: entry_day
+        tests: [not_null]
+      - name: pct_under_50
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: pct_under_10
+        tests:
+          - dbt_utils.accepted_range:
+              config:
+                severity: warn
+              arguments:
+                min_value: 0
+                max_value: 1
