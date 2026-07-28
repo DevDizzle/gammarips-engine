@@ -17,6 +17,10 @@
 # signal_ranker_runs (REQUIRED cols, DDL unchanged). Case-memory is now
 # load-bearing (fail-closed if absent). The legacy SCORER_*/PICKER_* env vars
 # are retained but inert. See docs/DECISIONS/2026-06-04-scorer-picker-collapse-to-single-judge.md.
+# Prompt bumped to tournament_v1_1 / JUDGE_PROMPT_VERSION=8 on 2026-07-28 —
+# ONE added liquidity instruction (early_volume / oi_build / expected_liquidity);
+# rollback = revert these two env values to 7 / tournament_v1.
+# See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
 set -e
 
 # Pre-deploy guard: the picker_v5 case-memory block must actually be present and
@@ -56,7 +60,7 @@ gcloud run deploy signal-judge \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=7,JUDGE_PROMPT_LABEL=tournament_v1,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=8,JUDGE_PROMPT_LABEL=tournament_v1_1,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

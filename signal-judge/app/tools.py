@@ -54,10 +54,16 @@ MIN_SCORER_SUCCESS_FRAC = float(os.getenv("MIN_SCORER_SUCCESS_FRAC", "0.5"))
 # in signal_ranker_runs (mode=REQUIRED columns can't be nulled), so the
 # post-collapse cohort is cleanly separable from the v5 two-stage cohort.
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", PICKER_MODEL)
-# version 7 = bracket tournament (2026-06-04); 6 = judge_v6 single call; 5 = two-stage.
-# Mirrored into BOTH scorer_/picker_prompt_version (REQUIRED cols) so cohorts stay separable.
+# version 8 = tournament_v1_1 (2026-07-28 liquidity directive: early_volume /
+# oi_build / expected_liquidity line added to _build_prompt — otherwise
+# byte-identical); 7 = bracket tournament tournament_v1 (2026-06-04);
+# 6 = judge_v6 single call; 5 = two-stage. Mirrored into BOTH
+# scorer_/picker_prompt_version (REQUIRED cols) so cohorts stay separable.
+# NOTE: production pins these via deploy.sh --set-env-vars — keep code default,
+# deploy.sh, and this comment in sync. No version-8 rows existed in
+# signal_ranker_runs before 2026-07-28 (verified), so 8 cleanly labels v1_1.
 JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "8"))
-JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1")
+JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1_1")
 # Bounded retry for the single fused call — one malformed structured output no
 # longer forfeits the whole slate (replaces the gather+MIN_SCORER_SUCCESS_FRAC
 # partial-failure tolerance lost in the collapse).

@@ -29,10 +29,10 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
   Video drops in later as a one-line iframe swap (comment left in `hero.tsx`).
 
 ## Owner queue
-- **Layer-4 pick-time liquidity veto — timing decision pending:** the 0-print veto
-  needs the tournament pick moved ~09:45→~09:53-09:55 (delayed feed's first fresh
-  snapshot is 09:52; veto would have blocked the 07-28 UNP kill). Owner yes/no on
-  the shift; evidence FINDINGS_LEDGER `2026-07-28 (evening)`.
+- **Cohort reset applied 07-28 (review adjudication — owner may override):**
+  `LIVE_COHORT_START_DATE` → 2026-07-29 (public panel restarts under the new
+  selection; 22 prior rows kept in ledger, not truncated). Override = constant
+  revert + DECISIONS note.
 - **Surface `expected_liquidity` via MCP `get_pool` + webapp** (engine-side field
   ships in the 07-28 tradeability build; MCP is a separate repo — wire it next
   session so subscribers see CLEAN/THIN before entry).
@@ -55,11 +55,14 @@ Built + shipped in one autonomous session (07-17 night). Plan of record:
 - X: unpin 03-14, pin distribution-stat draft, bio refresh (memory `project_x_revamp_2026_07_09`).
 
 ## Watch / dated checkpoints
-- **07-29 first live run of the tradeability build** (deployed 07-28 eve): check
-  enrichment logs for the `liq demotion ON ... flagged/admitted` line + clean
-  `Atomically replaced scan_date=...`; then `agg_pool_tradeability` daily — expect
-  kept-pool ghost rate to trend 22%→~12%. Rollback = `LIQ_DEMOTION=false` env.
-  `docs/DECISIONS/2026-07-28-pool-tradeability-build.md`.
+- **07-29 first live run of BOTH 07-28 builds:** (a) enrichment 05:30 — `liq
+  demotion ON ... flagged/admitted` line + clean atomic replace; (b) notifier
+  09:52 — "Two-tier slate floor" summary line, email Liquidity line,
+  `signal_ranker_runs.*_prompt_version=8`; (c) `agg_pool_tradeability` — ghost
+  rate should trend 22%→~12%. Rollbacks: `LIQ_DEMOTION=false` /
+  `PRINT_FLOOR_ENABLED=false` (cron+judge rollback rules in the DECISIONS note).
+- **~08-27: re-fit print/liq thresholds** on ~30 more days of
+  `pool_liquidity_snapshot` (review hard requirement — 15-day in-sample fits).
 - **mom_60 tilt KEPT by owner call 07-28** (research says retire-grade OOS —
   FINDINGS_LEDGER `2026-07-28`; owner: "don't drop the tilt yet"). Revisit with
   live-cohort N≥30 or if the live book underperforms.

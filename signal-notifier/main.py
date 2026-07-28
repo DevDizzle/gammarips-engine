@@ -91,7 +91,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 # the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
 #   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
-LIVE_COHORT_START_DATE = "2026-06-26"  # LIVE-OI FLOOR cohort (reset 2026-06-25): first ENTRY is the first live-OI-floor pick (scan 06-25 -> entry 06-26). Ledger TRUNCATED 2026-06-25 (3 prior V7_1 rows TTWO/VICR/AFL dumped to .scratch/forward_paper_ledger_pre_2026-06-26_reset.json); BBWI (entry 06-25, pre-floor old-gates pick) is EXCLUDED by this floor. policy_version STAYS V7_1_TILTED_GIGO (mechanics unchanged; only selection now liquidity-aware). See docs/DECISIONS/2026-06-25-cohort-reset-live-oi.md.
+LIVE_COHORT_START_DATE = "2026-07-29"  # TOURNAMENT-LIQUIDITY cohort (reset 2026-07-28, gammarips-review adjudication): first ENTRY under the two-tier print/OI slate floor + tournament_v1_1 judge (scan 07-28 -> entry 07-29). Unlike the 06-25 reset the ledger is NOT truncated — the 22 prior live-OI-floor rows stay in forward_paper_ledger, excluded from the public cohort by this date filter (archival over deletion). policy_version STAYS V7_1_TILTED_GIGO (exit mechanics unchanged; only selection is liquidity-aware). Precedent: the 06-25 live-OI floor reset (docs/DECISIONS/2026-06-25-cohort-reset-live-oi.md); this change is strictly larger (slate floor + judge information set + prompt v1_1 + 09:52 pick time). See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
 
 # Fixed-dollar position sizing for the public cohort_stats panel.
 # The ledger records actual per-contract premium + percent return; the public
@@ -245,6 +245,27 @@ EDGE_RR_MAX = 1.4
 OI_FLOOR = int(os.environ.get("OI_FLOOR", "200"))
 TOURNEY_MIN = int(os.environ.get("TOURNEY_MIN", "8"))
 LIQUIDITY_TILT = os.environ.get("LIQUIDITY_TILT", "true").strip().lower() in ("1", "true", "yes")
+
+# EARLY-PRINT slate floor (2026-07-28 tournament liquidity upgrade, see
+# docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md). The cron moves
+# 09:45 -> 09:52 ET so the 15-min-delayed Polygon feed shows REAL entry-day
+# prints (through ~09:37) at read time. The tradeability study (15 days, N=750,
+# FINDINGS_LEDGER "2026-07-28 (evening)") found the print count near-
+# deterministic: >=5 prints at the 09:52 read -> 96.3% of contracts finish the
+# day tradeable (>=50 contracts); 0 prints -> 68.1% finish under 50 (40.6%
+# ghost). OI alone can't get there — OI>=1000 still leaves 23.9% under-50 — so
+# prints are the PRIMARY floor and the live-OI floor becomes SECONDARY.
+#   * PRINT_FLOOR_ENABLED: kill switch. false -> the floor block is bit-identical
+#     to the pre-2026-07-28 single-tier OI-floor behavior.
+#   * PRINT_FLOOR_MIN: a contract must show >= this many KNOWN prints to stay
+#     (default 1 — a known 0-print contract is dropped from the slate). A None
+#     print count (fetch failure/timeout) is UNKNOWN, not zero: the row is KEPT
+#     and falls through to the OI floor (fail-open per-row, mirroring the
+#     existing live-OI failure semantics).
+# Thresholds are 15-day IN-SAMPLE fits — re-fit as pool_liquidity_snapshot
+# accrues.
+PRINT_FLOOR_ENABLED = os.environ.get("PRINT_FLOOR_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+PRINT_FLOOR_MIN = int(os.environ.get("PRINT_FLOOR_MIN", "1"))
 
 # Per-candidate Polygon option-snapshot timeout (seconds). Matches the
 # compute_active_days_20d single-attempt / 8s fail-soft pattern. The whole
@@ -1185,7 +1206,23 @@ def compute_14d_ledger_summary(scan_date: date, window_days: int = 14) -> dict:
 
 
 def _candidate_for_ranker(row: pd.Series, static_rank: int) -> dict:
-    """Convert a top-10 enriched row to a JSON-safe candidate dict for /rank."""
+    """Convert a top-10 enriched row to a JSON-safe candidate dict for /rank.
+
+    2026-07-28 tournament liquidity upgrade: three tradeability fields are
+    attached when available (each key OMITTED when its inputs are unknown —
+    the judge prompt says "may include"):
+      * ``early_volume``     — contracts traded so far this morning (the
+        SANCTIONED alias of the internal ``_today_volume``; the raw key is
+        still popped/blocklisted). Pre-entry (~09:37 prints read ~09:52 vs the
+        10:00 entry), same leakage class as the permitted ``live_oi``.
+      * ``oi_build``         — live_oi minus the scan-frozen recommended_oi
+        (overnight OI change); only when BOTH are known. Note recommended_oi
+        itself stays judge-blocked (stale snapshot) — the DELTA is the signal.
+      * ``expected_liquidity`` — scan-time CLEAN/THIN verdict from the enriched
+        row (2026-07-28 pool-tradeability build); flows through the generic
+        column copy below and is omitted when NULL (pre-build rows).
+    See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
+    """
     c: dict = {}
     for k, v in row.items():
         if pd.isna(v):
@@ -1195,6 +1232,20 @@ def _candidate_for_ranker(row: pd.Series, static_rank: int) -> dict:
         else:
             c[k] = v
     c["static_rank"] = static_rank
+
+    tv = row.get("_today_volume")
+    if tv is not None and not pd.isna(tv):
+        try:
+            c["early_volume"] = int(tv)
+        except (TypeError, ValueError):
+            pass
+    lo, ro = row.get("live_oi"), row.get("recommended_oi")
+    if (lo is not None and not pd.isna(lo)
+            and ro is not None and not pd.isna(ro)):
+        try:
+            c["oi_build"] = int(lo) - int(ro)
+        except (TypeError, ValueError):
+            pass
     return c
 
 
@@ -1252,9 +1303,13 @@ def _fetch_live_oi(underlying: str, contract: str) -> tuple[int | None, int | No
 
     Returns ``(live_oi, today_volume, status)`` where:
       * ``live_oi``      — ``results.open_interest`` (int) or None.
-      * ``today_volume`` — ``results.day.volume`` (int) or None. INTERNAL ONLY:
-        the caller pops this out before building the /rank payload — it is never
-        surfaced to the judge.
+      * ``today_volume`` — ``results.day.volume`` (int) or None. Stored under the
+        INTERNAL ``_today_volume`` key (raw key popped before the /rank payload);
+        as of 2026-07-28 it reaches the judge ONLY via the sanctioned
+        ``early_volume`` alias (owner-approved, same pre-entry leakage class as
+        live_oi — see docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md).
+        NOTE: on the 15-min-delayed feed this is ~always 0/None before ~09:52 ET —
+        the print floor requires the 09:52 cron to be meaningful.
       * ``status``       — "ok" | "polygon_empty" | "polygon_error".
 
     C1 (LEAKAGE, non-negotiable): the v3/snapshot/options response also carries
@@ -1486,27 +1541,58 @@ def _effective_oi(row: pd.Series) -> float:
     return 0.0
 
 
+def _known_prints(row: pd.Series) -> int | None:
+    """Entry-day print count for a row, or None when UNKNOWN (fetch failed /
+    timed out / column absent). A KNOWN 0 is int 0 — the distinction is the whole
+    point of the print floor's fail-open semantics."""
+    tv = row.get("_today_volume")
+    if tv is None or pd.isna(tv):
+        return None
+    try:
+        return int(tv)
+    except (TypeError, ValueError):
+        return None
+
+
 def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
-    """Deterministic live-OI liquidity floor + soft tilt, run on the edge-capped
+    """Deterministic TWO-TIER slate floor + soft tilt, run on the edge-capped
     strict pool just before the tournament. See
-    docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md.
+    docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md (OI floor) and
+    docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md (early-print floor).
+
+    Two-tier design (2026-07-28): the tradeability study showed prints at the
+    ~09:52 delayed read are near-deterministic for entry-day tradeability
+    (>=5 prints -> 96.3% finish >=50 contracts; 0 prints -> 68.1% under-50)
+    while OI>=1000 still leaves 23.9% under-50 — so early prints are the
+    PRIMARY floor and live OI the SECONDARY.
 
     Steps:
-      1. Re-fetch LIVE OI per candidate (C1: OI-only; entry-day-live fields
-         discarded at fetch time).
-      2. DROP candidates with live_oi < OI_FLOOR (fill-rate cliff, not PnL).
-      3. FAIL-SOFT FLOOR: if fewer than TOURNEY_MIN survive, restore the
-         top-effective-OI names up to TOURNEY_MIN so the tournament never starves
-         to zero (which would spuriously surface no_candidates_passed_gates).
-      4. SOFT TILT: order survivors by effective OI desc (fillability).
+      1. Re-fetch LIVE OI + today's print count per candidate (C1: OI+day.volume
+         only; every other entry-day-live field discarded at fetch time).
+      2. PRIMARY (PRINT_FLOOR_ENABLED): DROP candidates whose print count is a
+         KNOWN int < PRINT_FLOOR_MIN (i.e. a known 0 at the default). A None
+         count (fetch failure) is UNKNOWN -> the row is KEPT and falls through
+         to step 3 (fail-open per-row, mirroring live-OI failure semantics).
+      3. SECONDARY: DROP candidates with effective OI < OI_FLOOR (fill-rate
+         cliff, not PnL) — applied exactly as before 2026-07-28.
+      4. FAIL-SOFT FLOOR: if fewer than TOURNEY_MIN survive BOTH floors, restore
+         dropped candidates ranked by (print count desc NULLS LAST, live_oi desc
+         NULLS LAST) up to TOURNEY_MIN so the tournament never starves to zero.
+         Restored rows are marked `_print_floor_restored=True` (internal; popped
+         before /rank, surfaced only in the operator email).
+      5. SOFT TILT: order floor-passing survivors by effective OI desc
+         (fillability); fail-soft restores append below them.
 
     C4 (total fail-soft): the whole body is wrapped — ANY exception returns the
     INPUT df unchanged (frozen-OI / edge-rank order), never empty, never raising
-    into the live pick. The LIQUIDITY_TILT kill switch short-circuits to identical
-    pre-2026-06-25 behavior.
+    into the live pick. Kill switches: LIQUIDITY_TILT=false short-circuits to
+    pre-2026-06-25 behavior (no refresh at all); PRINT_FLOOR_ENABLED=false runs
+    the legacy single-tier OI-floor path bit-identically (pre-2026-07-28).
 
-    `live_oi` is the only NEW key that surfaces to /rank (C1). `_today_volume` is
-    internal — it is popped before the payload is built (see call_signal_ranker).
+    Wire contract: `live_oi` surfaces to /rank as-is; `_today_volume` is
+    internal and popped before the payload — its SANCTIONED alias `early_volume`
+    is attached in _candidate_for_ranker (2026-07-28), after this floor has
+    already consumed the raw value.
     """
     if not LIQUIDITY_TILT:
         return candidates_df
@@ -1517,35 +1603,110 @@ def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
 
         # Effective OI per row (live where available, frozen otherwise).
         eff = refreshed.apply(_effective_oi, axis=1)
-        survivors = refreshed[eff >= OI_FLOOR].copy()
-
         n_total = len(refreshed)
+
+        if not PRINT_FLOOR_ENABLED:
+            # ---- LEGACY single-tier path (kill switch OFF ramp) ----
+            # Bit-identical to the pre-2026-07-28 block: OI floor only, fail-soft
+            # by top effective OI over the WHOLE pool, tilt by effective OI.
+            survivors = refreshed[eff >= OI_FLOOR].copy()
+            n_pass = len(survivors)
+            if n_pass < TOURNEY_MIN:
+                ordered_all = refreshed.assign(_eff_oi=eff).sort_values(
+                    "_eff_oi", ascending=False
+                )
+                keep_n = min(TOURNEY_MIN, n_total)
+                survivors = ordered_all.head(keep_n).drop(columns=["_eff_oi"]).copy()
+                logger.info(
+                    f"Live-OI floor: only {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
+                    f"fail-soft restored top-{keep_n} by effective OI "
+                    f"(survivors: {list(survivors['ticker'])})"
+                )
+            else:
+                survivors = survivors.assign(
+                    _eff_oi=survivors.apply(_effective_oi, axis=1)
+                ).sort_values("_eff_oi", ascending=False).drop(columns=["_eff_oi"])
+                logger.info(
+                    f"Live-OI floor: {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
+                    f"tilted by effective OI (survivors: {list(survivors['ticker'])})"
+                )
+            return survivors.reset_index(drop=True)
+
+        # ---- TWO-TIER path (2026-07-28) ----
+        refreshed = refreshed.copy()
+        refreshed["_print_floor_restored"] = False
+
+        # PRIMARY: early-print floor. Drop only KNOWN print counts below the
+        # floor; None (fetch failure) is UNKNOWN -> keep, OI floor decides.
+        print_drop_idx = [
+            idx for idx, row in refreshed.iterrows()
+            if (p := _known_prints(row)) is not None and p < PRINT_FLOOR_MIN
+        ]
+        print_drop_set = set(print_drop_idx)
+        if print_drop_set:
+            dropped_tickers = list(refreshed.loc[print_drop_idx, "ticker"])
+            logger.info(
+                f"Early-print floor: dropped {len(print_drop_set)}/{n_total} "
+                f"candidates with known prints < {PRINT_FLOOR_MIN} at the delayed "
+                f"read: {dropped_tickers}"
+            )
+
+        # SECONDARY: live-OI floor, applied as before (fetch-failure rows fall
+        # back to frozen recommended_oi via _effective_oi).
+        oi_drop_set = {
+            idx for idx in refreshed.index
+            if idx not in print_drop_set and eff.loc[idx] < OI_FLOOR
+        }
+        drop_set = print_drop_set | oi_drop_set
+
+        survivors = refreshed.loc[~refreshed.index.isin(drop_set)].copy()
         n_pass = len(survivors)
 
-        if n_pass < TOURNEY_MIN:
-            # Fail-soft floor: never starve the tournament. Take the top-OI names
-            # up to TOURNEY_MIN regardless of the floor so a thin day still ranks.
-            ordered_all = refreshed.assign(_eff_oi=eff).sort_values(
-                "_eff_oi", ascending=False
-            )
-            keep_n = min(TOURNEY_MIN, n_total)
-            survivors = ordered_all.head(keep_n).drop(columns=["_eff_oi"]).copy()
-            logger.info(
-                f"Live-OI floor: only {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
-                f"fail-soft restored top-{keep_n} by effective OI "
-                f"(survivors: {list(survivors['ticker'])})"
-            )
-        else:
-            # Soft tilt: order the passing pool by effective OI desc (fillability).
-            survivors = survivors.assign(
-                _eff_oi=survivors.apply(_effective_oi, axis=1)
-            ).sort_values("_eff_oi", ascending=False).drop(columns=["_eff_oi"])
-            logger.info(
-                f"Live-OI floor: {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
-                f"tilted by effective OI (survivors: {list(survivors['ticker'])})"
-            )
+        # FAIL-SOFT FLOOR: restore dropped rows, best-tape-first, up to
+        # TOURNEY_MIN — the tournament never starves.
+        restored_idx: list = []
+        if n_pass < TOURNEY_MIN and drop_set:
+            dropped = refreshed.loc[refreshed.index.isin(drop_set)]
 
-        return survivors.reset_index(drop=True)
+            def _restore_key(idx) -> tuple[int, float]:
+                row = dropped.loc[idx]
+                p = _known_prints(row)
+                lo = row.get("live_oi")
+                try:
+                    lo_k = float(lo) if lo is not None and not pd.isna(lo) else -1.0
+                except (TypeError, ValueError):
+                    lo_k = -1.0
+                # NULLS LAST on both keys under descending sort.
+                return (p if p is not None else -1, lo_k)
+
+            order = sorted(dropped.index, key=_restore_key, reverse=True)
+            need = min(TOURNEY_MIN, n_total) - n_pass
+            restored_idx = order[:need]
+            if restored_idx:
+                refreshed.loc[restored_idx, "_print_floor_restored"] = True
+                logger.info(
+                    f"Fail-soft floor: only {n_pass}/{n_total} cleared both floors "
+                    f"(TOURNEY_MIN={TOURNEY_MIN}); restored {len(restored_idx)} by "
+                    f"(prints desc, live_oi desc): "
+                    f"{list(refreshed.loc[restored_idx, 'ticker'])}"
+                )
+
+        # SOFT TILT on genuine survivors (effective OI desc, as before); the
+        # fail-soft restores append BELOW them (they failed a floor).
+        survivors = survivors.assign(
+            _eff_oi=survivors.apply(_effective_oi, axis=1)
+        ).sort_values("_eff_oi", ascending=False).drop(columns=["_eff_oi"])
+        restored = refreshed.loc[restored_idx]
+        out = pd.concat([survivors, restored]) if len(restored) else survivors
+
+        logger.info(
+            f"Two-tier slate floor: {n_total} -> {len(out)} "
+            f"(print-floor dropped {len(print_drop_set)}, "
+            f"OI-floor dropped {len(oi_drop_set)}, "
+            f"fail-soft restored {len(restored_idx)}); "
+            f"slate: {list(out['ticker'])}"
+        )
+        return out.reset_index(drop=True)
     except Exception as e:
         # C4: never raise into the live pick. Fall back to the input df untouched
         # (edge-rank order, frozen OI). Worst case = today's exact behavior.
@@ -1581,12 +1742,17 @@ def call_signal_ranker(
         for idx, (_, row) in enumerate(top_10_df.iterrows(), start=1)
     ]
     # C1: `_today_volume` is an INTERNAL liquidity-floor input (today's live
-    # option volume). It must NEVER reach the judge — pop it out of every
-    # candidate before the payload is built. `live_oi` (the only new permitted
-    # live key) stays. `_candidate_for_ranker` copies all df columns verbatim, so
-    # this is where the internal column is stripped from the wire format.
+    # option volume). The RAW key never reaches the judge — pop it out of every
+    # candidate before the payload is built. As of 2026-07-28 its SANCTIONED
+    # alias `early_volume` (attached in _candidate_for_ranker, owner-approved)
+    # IS on the wire — pre-entry information, same leakage class as `live_oi`
+    # (both read ~09:52, entry 10:00). `_print_floor_restored` is a fail-soft
+    # bookkeeping marker for the operator email — internal, popped too.
+    # `_candidate_for_ranker` copies all df columns verbatim, so this is where
+    # the internal columns are stripped from the wire format.
     for cand in candidates:
         cand.pop("_today_volume", None)
+        cand.pop("_print_floor_restored", None)
 
     # C3 leakage guard (2026-06-25): the live-OI snapshot also carries entry-day
     # IV / greeks / day OHLC / last trade / last quote. Those are discarded at
@@ -1644,6 +1810,37 @@ def call_signal_ranker(
     except Exception as e:
         logger.error(f"signal-judge call failed: {e}")
         return None
+
+
+def _liquidity_email_line(row: pd.Series) -> str:
+    """One-line early-print liquidity readout for the operator email
+    (2026-07-28 tournament liquidity upgrade). Returns '' when the run had no
+    print data at all (FALLBACK path / LIQUIDITY_TILT off — the transient
+    columns don't exist). Thresholds from the tradeability study: >=5 prints at
+    the ~09:52 delayed read -> 96.3% tradeable day; a floor-passing pick shows
+    >=PRINT_FLOOR_MIN prints by construction unless fail-soft restored it.
+    """
+    prints = _known_prints(row)
+    restored_raw = row.get("_print_floor_restored")
+    restored = (
+        restored_raw is not None
+        and not pd.isna(restored_raw)
+        and bool(restored_raw)
+    )
+    if restored and (prints is None or prints < PRINT_FLOOR_MIN):
+        return "Liquidity: UNVERIFIED - restored by fail-soft floor"
+    if prints is None:
+        if "_today_volume" in row.index:
+            # Refresh ran but this contract's fetch failed (kept fail-open).
+            return "Liquidity: UNVERIFIED - live print count unavailable"
+        return ""  # no refresh this run (fallback / kill switch): no line
+    restored_tag = " (restored by fail-soft floor)" if restored else ""
+    if prints >= 5:
+        return f"Liquidity: {prints} prints by ~09:52 (confirmed){restored_tag}"
+    if prints >= 1:
+        return f"Liquidity: {prints} prints by ~09:52 (CAUTION - thin tape){restored_tag}"
+    # Known 0 without restore: only reachable with PRINT_FLOOR_ENABLED=false.
+    return f"Liquidity: 0 prints by ~09:52 (CAUTION - no tape yet){restored_tag}"
 
 
 def format_email_html(
@@ -1715,6 +1912,11 @@ def format_email_html(
       </div>
             """
 
+    # Early-print liquidity readout (2026-07-28) — rendered right under the
+    # entry/limit block; '' when the run had no print data (no line).
+    liq_line = _liquidity_email_line(row)
+    liq_html = f"<br>{liq_line}" if liq_line else ""
+
     eds = _entry_display_strings(entry_disp)
     if eds:
         stale_tag = ' <span style="color:#c62828;">(stale)</span>' if eds["stale"] else ""
@@ -1722,11 +1924,13 @@ def format_email_html(
             f'Strike {strike} · DTE {dte} · Entry ~{eds["entry"]} @{eds["asof_label"]}{stale_tag}'
             f'<br>Limit BUY {eds["limit"]} · do not chase &gt; {eds["chase"]}'
             f'<br>Target {eds["target"]} (+40%) · Stop {eds["stop"]} (-30%)'
+            f'{liq_html}'
             f'<br>V/OI {vol_oi_str} · {money_str}'
         )
     else:
         contract_detail_html = (
             f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}"
+            f"{liq_html}"
         )
 
     html = f"""
@@ -1998,6 +2202,11 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
     # is_win/outcome_tier) are DELIBERATELY NOT selected. ``moneyness_where`` is the
     # FALLBACK-only band (empty on strict). See
     # docs/DECISIONS/2026-06-04-bracket-tournament.md.
+    # `expected_liquidity` (2026-07-28 pool-tradeability build): scan-time
+    # CLEAN/THIN verdict written by enrichment-trigger; NULL on pre-build rows
+    # (_candidate_for_ranker omits NULLs). Column is ALTER-added by the
+    # enrichment DDL — the enrichment-trigger deploy MUST land before this
+    # query first runs. See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
     return f"""
     SELECT
         ticker, scan_date, direction, underlying_price, price_change_pct,
@@ -2016,7 +2225,8 @@ def _build_candidate_query(target_date: date, fallback: bool = False) -> str:
         support, resistance, high_52w, low_52w,
         thesis, news_summary, key_headline, catalyst_type, catalyst_score,
         mean_reversion_risk, move_overdone, reversal_probability, risk_reward_ratio,
-        premium_bull_flow, premium_bear_flow, premium_high_rr, premium_high_atr, premium_hedge
+        premium_bull_flow, premium_bear_flow, premium_high_rr, premium_high_atr, premium_hedge,
+        expected_liquidity
     FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
     WHERE DATE(scan_date) = "{target_date}"
       AND recommended_strike IS NOT NULL

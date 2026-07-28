@@ -86,6 +86,14 @@ class Candidate(BaseModel):
     reversal_probability: float | None = None
     risk_reward_ratio: float | None = None
 
+    # Tradeability (2026-07-28 tournament liquidity upgrade — permitted judge
+    # inputs; each key OMITTED by the notifier when unknown, so None here means
+    # "not measured this run"). See
+    # docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
+    early_volume: int | None = None       # contracts traded so far this morning (~09:52 delayed read)
+    oi_build: int | None = None           # live_oi minus scan-frozen recommended_oi (overnight OI change)
+    expected_liquidity: str | None = None  # scan-time CLEAN/THIN verdict from the enriched row
+
 
 class LedgerSummary(BaseModel):
     """14d ledger summary for the Picker. signal-notifier computes from

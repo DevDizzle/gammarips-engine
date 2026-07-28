@@ -101,8 +101,14 @@ STALE_FIELDS_BLOCKLIST: frozenset[str] = frozenset({
     "day_low",
     "day_vwap",
     # `_today_volume` is the notifier's INTERNAL liquidity-floor input (today's
-    # live option volume). It is popped before the /rank payload (C1); blocked
-    # here too in case a future caller forgets the pop.
+    # live option volume). The RAW key is popped before the /rank payload (C1)
+    # and blocked here too in case a future caller forgets the pop. As of
+    # 2026-07-28 (tournament liquidity upgrade) its SANCTIONED alias
+    # `early_volume` — plus `oi_build` (live_oi minus scan-frozen OI) and the
+    # scan-time `expected_liquidity` verdict — ARE permitted judge inputs:
+    # pre-entry information (~09:52 read vs the 10:00 entry), same leakage
+    # class as `live_oi`. Only the sanctioned names pass; the raw ones stay
+    # blocked so an accidental re-attach never widens the surface.
     "_today_volume",
     "today_volume",
 })
@@ -132,6 +138,9 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
             "This is the final round. Weigh each finalist against the rulebook above "
             "and the market report (regime, macro backdrop, sector tape) before you rank. "
         )
+    # tournament_v1_1 (2026-07-28): ONE added instruction — the liquidity
+    # directive below. Everything else is byte-identical to tournament_v1.
+    # See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
     return (
         "Your goal: make money buying a single option and selling it for a profit within 3 trading days.\n"
         "Buying the right stock is not enough — the option must capture the move within 3 days, "
@@ -142,6 +151,10 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
         f"{report_md}\n</report>\n\n"
         "Candidate contracts (one JSON each — flow, contract, greeks, technicals, news):\n"
         f"{blobs}\n\n"
+        "Candidates may include early_volume (contracts traded so far this morning), "
+        "oi_build (overnight open-interest change), and expected_liquidity (CLEAN/THIN). "
+        "A pick that cannot be traded is a loss regardless of thesis: among comparable "
+        "setups, prefer the one showing real early trading activity.\n\n"
         f"{rulebook_directive}"
         'Rank the contracts you would buy, best first. Return ONLY JSON: '
         '{"picks":["<ticker>","<ticker>",...],"why":"<one sentence on your #1 pick>"}'

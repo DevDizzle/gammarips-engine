@@ -6,7 +6,7 @@ Scans overnight unusual options activity → a randomized bracket **tournament**
 ## Your daily routine
 | Time | Action |
 |---|---|
-| ~9:50 AM ET | Email arrives (or nothing — skip day). Webapp + WhatsApp push fire at the same moment, just before the open settles. |
+| ~9:55 AM ET | Email arrives (or nothing — skip day); expect it ~9:53–9:57 once the 09:52 run lands (2026-07-28 liquidity upgrade, deploy pending `gammarips-review`; was ~9:50). Webapp + WhatsApp push fire at the same moment. The email now carries a `Liquidity: N prints` line — treat CAUTION/UNVERIFIED as a size-down or skip signal. |
 | 10:00 AM ET | Buy 1 contract with a **LIMIT** at the published Entry/Limit price — **do NOT market-buy, do NOT chase above the "don't chase" cap.** Then set the −30% stop AND +40% target. |
 | 10:00 AM – 3:45 PM (same day) | Phone in pocket. Both exit orders armed. |
 | Any time either fills | Cancel the other order (Robinhood doesn't auto-OCO options). |
@@ -28,7 +28,7 @@ V7.1 has **no execution-side gates** — selection is the tournament. Upstream, 
 1. Overnight score ≥ 4 (enrichment floor; EV inverts at ≥ 7)
 2. Directional UOA > $500K (enrichment)
 3. **BULLISH-only** (hard gate — the edge levers are call-delta-defined)
-4. **Live OI ≥ 1000** at the 09:45 pick (liquidity floor, 2026-06-25 — picks on FRESH open interest, not stale scan-time OI)
+4. **Early-print floor + Live OI ≥ 1000** at pick time (two-tier, 2026-07-28 — deploy pending `gammarips-review`): a contract showing a known **0 prints** at the ~09:52 delayed read is dropped (0 prints → 68% chance the day stays untradeable); live OI stays as the secondary floor (FRESH open interest, not stale scan-time OI, 2026-06-25)
 5. **No earnings during the hold** — exclude any ticker reporting in the hold window. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*). Fail-closed if the earnings calendar is unreachable.
 6. **VIX ≤ VIX3M** — skip the whole day if backwardation.
 
@@ -55,7 +55,7 @@ The enriched BULLISH slate goes to **signal-judge** (`tournament_v1`, `gemini-3.
 - If EV < 0 → pause, re-run the research angle
 
 ## Services (reference only)
-`overnight-scanner (23:00 ET) → enrichment-trigger (05:30 ET) → overnight-report-generator → signal-notifier (09:45 ET) ← signal-judge (V7.1 tournament_v1) → email + Firestore todays_pick → forward-paper-trader (ledger)`
+`overnight-scanner (23:00 ET) → enrichment-trigger (05:30 ET) → overnight-report-generator → signal-notifier (09:45 ET; moving to 09:52 with the 2026-07-28 liquidity upgrade, deploy pending review) ← signal-judge (V7.1 tournament_v1_1) → email + Firestore todays_pick → forward-paper-trader (ledger)`
 
 ## Source of truth
 This file + `docs/TRADING-STRATEGY.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.

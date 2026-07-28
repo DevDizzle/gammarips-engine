@@ -18,6 +18,14 @@ echo "Deploying $SERVICE_NAME to Cloud Run in project $PROJECT_ID..."
 # Optional tuning (rarely needed): LIVE_OI_FETCH_TIMEOUT_S=8, LIVE_OI_MAX_WORKERS=16
 # See docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md.
 #
+# Early-print slate floor knobs (2026-07-28 tournament liquidity upgrade —
+# requires the 09:52 ET cron; at 09:45 the delayed feed shows nothing):
+#   PRINT_FLOOR_ENABLED=true  kill switch — false = bit-identical pre-2026-07-28
+#                             single-tier OI-floor behavior
+#   PRINT_FLOOR_MIN=1         a contract must show >= this many KNOWN prints at
+#                             the ~09:52 read to stay (None = unknown = kept)
+# See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
+#
 # POOL_LIQ_REFRESH_TOKEN (2026-07-07, review FIX-1): secret-mounted shared token
 # for POST /refresh_pool_liquidity — the Cloud Scheduler job
 # `pool-liquidity-refresh` sends it as X-Refresh-Token; force/scan_date knobs
@@ -37,7 +45,7 @@ gcloud run deploy $SERVICE_NAME \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=1 \
-  --set-env-vars="SIGNAL_JUDGE_URL=https://signal-judge-406581297632.us-central1.run.app,OI_FLOOR=1000,TOURNEY_MIN=8,LIQUIDITY_TILT=true" \
+  --set-env-vars="SIGNAL_JUDGE_URL=https://signal-judge-406581297632.us-central1.run.app,OI_FLOOR=1000,TOURNEY_MIN=8,LIQUIDITY_TILT=true,PRINT_FLOOR_ENABLED=true,PRINT_FLOOR_MIN=1" \
   --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,FMP_API_KEY=FMP_API_KEY:latest,POLYGON_API_KEY=POLYGON_API_KEY:latest,POOL_LIQ_REFRESH_TOKEN=POOL_LIQ_REFRESH_TOKEN:latest" \
   --service-account="firebase-adminsdk-fbsvc@$PROJECT_ID.iam.gserviceaccount.com"
 
