@@ -10,7 +10,8 @@ Endpoints (all POST, invoked by Cloud Scheduler with OIDC; not public):
   POST /freshness   -> dbt source freshness
   GET  /healthz     -> liveness
 
-NOT DEPLOYED. Draft pending the first live `dbt build` + a gammarips-review pass.
+DEPLOYED and cron'd daily: Cloud Scheduler `dbt-daily-build` -> POST / and
+`dbt-source-freshness` -> POST /freshness (verified live 2026-07-28).
 """
 
 import os

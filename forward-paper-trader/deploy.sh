@@ -13,6 +13,9 @@ echo "Deploying $SERVICE_NAME to Cloud Run in project $PROJECT_ID..."
 # secret the notifier's /refresh_pool_liquidity uses). MUST stay in
 # --set-secrets — the flag REPLACES the secret set, so dropping it silently
 # strips the mount on the next deploy.
+# FILL_WINDOWS_TOKEN (2026-07-28): per-endpoint token gating the
+# POST /fill_closed_windows daily opp-window filler (X-Refresh-Token header).
+# Same REPLACES-the-set caveat applies.
 
 gcloud run deploy $SERVICE_NAME \
   --project=$PROJECT_ID \
@@ -25,8 +28,8 @@ gcloud run deploy $SERVICE_NAME \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=1 \
-  --set-env-vars="GCP_PROJECT_ID=$PROJECT_ID" \
-  --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,POOL_LIQ_REFRESH_TOKEN=POOL_LIQ_REFRESH_TOKEN:latest" \
+  --set-env-vars="GCP_PROJECT_ID=$PROJECT_ID,FILL_WINDOWS_MAX_ROWS=200" \
+  --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,POOL_LIQ_REFRESH_TOKEN=POOL_LIQ_REFRESH_TOKEN:latest,FILL_WINDOWS_TOKEN=FILL_WINDOWS_TOKEN:latest" \
   --service-account="firebase-adminsdk-fbsvc@$PROJECT_ID.iam.gserviceaccount.com"
 
 echo "Done!"

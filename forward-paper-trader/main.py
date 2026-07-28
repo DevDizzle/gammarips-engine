@@ -145,6 +145,18 @@ LABEL_3D_SIM_VERSION = "HOLD3D_V6_LEGACY_8060"         # 3-day:   HOLD=3 -60/+80
 OPP_SIM_VERSION = "OPP_MFE_MAE_V1"                      # excursion surface
 LIFE_SIM_VERSION = "LIFE_TO_EXPIRY_V1"                  # full-life surface (surfaced -> expiration)
 LIFE_DAILY_LIMIT = int(os.getenv("LIFE_DAILY_LIMIT", "600"))  # per-run cap for /label_life_surface
+FILL_WINDOWS_MAX_ROWS = int(os.getenv("FILL_WINDOWS_MAX_ROWS", "400"))  # per-run cap for /fill_closed_windows
+# Shared-secret gate for /fill_closed_windows — same X-Refresh-Token idiom as
+# /label_life_surface, but its OWN env var so tokens are per-endpoint revocable
+# (deliberately NOT reusing POOL_LIQ_REFRESH_TOKEN). The service is fully public
+# (allUsers invoker + ingress=all, verified 2026-07-28), so an unset token means
+# an UNGATED Polygon-burning endpoint: warn loudly at startup so an ungated
+# deploy is a visible choice, never a silent hole.
+if not os.getenv("FILL_WINDOWS_TOKEN", "").strip():
+    logger.warning(
+        "FILL_WINDOWS_TOKEN is unset — POST /fill_closed_windows will run UNGATED "
+        "on a public service; set the env var to fail-close the endpoint."
+    )
 
 # ---- ENRICHED_OUTCOMES research columns — EXPLICIT type creation (must-fix #2/#5/#6)
 # The must-fix #2 regime scan-date FEATURE + entry-close TELEMETRY columns, the
@@ -2694,6 +2706,258 @@ def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
     return True, summary
 
 
+# ---- Automated closed-window opportunity-surface fill (review 2026-07-28) ------
+# The daily /label_enriched_pool cron writes opp_status='WINDOW_OPEN' (the whole
+# opp_*/3d group NULL) for any scan_date whose multi-day window is still open —
+# and NOTHING revisited those rows automatically: the fill was a MANUAL one-shot
+# (scripts/ledger_and_tracking/backfill_opportunity_surface.py), whose cadence
+# stalled 2026-06-26 -> 2026-07-28 and left ~950 dark rows. gammarips-review
+# (2026-07-28) mandated automating it; /fill_closed_windows below is that
+# automation — same semantics as the (amended) backfill script, on a daily cron.
+# Column lists MUST match the collector's out-dict groups (and the ancestor
+# script's _OPP_COLS/_D3_COLS) — these are the ONLY columns the fill MERGEs.
+_OPP_FILL_COLS = [
+    "opp_window_days", "opp_status", "opp_entry_timestamp", "opp_entry_price",
+    "opp_peak_return", "opp_trough_return", "opp_minutes_to_peak",
+    "opp_minutes_to_trough", "opp_bar_count", "opp_sim_version",
+]
+_D3_FILL_COLS = [
+    "realized_return_pct_3d", "exit_reason_3d", "exit_day_3d",
+    "exit_timestamp_3d", "entry_price_3d", "peak_premium_3d",
+    "label_3d_sim_version", "label_3d_hold_days", "label_3d_stop_pct",
+    "label_3d_target_pct",
+]
+
+
+def _rows_needing_window_fill(
+    client: bigquery.Client, start: date, end: date, limit: int | None
+) -> list[dict]:
+    """Select enriched_option_outcomes rows still needing an opp/3d fill in
+    [start .. end] — the same predicate + QUALIFY dedup as the ancestor
+    backfill's _rows_to_process (no --force arm): a row qualifies while its opp
+    fill is missing/open (opp_status NULL/'WINDOW_OPEN') OR its 3-day label is
+    missing (realized_return_pct_3d NULL — e.g. an opp-only partial fill). One
+    source row per (scan_date, ticker, recommended_contract) — two identical
+    keys in staging would abort the whole MERGE batch ("must match at most one
+    source row"); values are deterministic, so keeping the highest-volume/OI
+    dup is lossless."""
+    lim = f"LIMIT {int(limit)}" if limit else ""
+    sql = f"""
+    SELECT
+      scan_date, entry_day, ticker, direction, recommended_contract,
+      recommended_strike, recommended_expiration, recommended_dte,
+      recommended_volume, recommended_oi, recommended_spread_pct,
+      is_premium_signal, premium_score
+    FROM `{ENRICHED_OUTCOMES_TABLE}`
+    WHERE scan_date BETWEEN @start AND @end
+      AND recommended_strike IS NOT NULL
+      AND recommended_expiration IS NOT NULL
+      AND (opp_status IS NULL OR opp_status = 'WINDOW_OPEN'
+           OR realized_return_pct_3d IS NULL)
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY scan_date, ticker, recommended_contract
+      ORDER BY recommended_volume DESC NULLS LAST, recommended_oi DESC NULLS LAST
+    ) = 1
+    ORDER BY scan_date, ticker
+    {lim}
+    """
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", start),
+        bigquery.ScalarQueryParameter("end", "DATE", end),
+    ])
+    return [dict(r) for r in client.query(sql, job_config=cfg).result()]
+
+
+def _compute_window_fill(client: bigquery.Client, row: dict, today_et: date) -> dict | None:
+    """Compute the opp-surface + 3-day arm for one row; None if window still open.
+
+    Faithful port of backfill_opportunity_surface._compute (the reference
+    implementation) onto this module's own functions: reuses
+    _simulate_opportunity_surface and _simulate_contract with the SAME 3-day
+    overrides as the daily collector — NEVER a re-implemented bar walk.
+    """
+    entry_day = row["entry_day"] or get_next_trading_day(row["scan_date"])
+    if not _multi_day_window_closed(entry_day, OPP_WINDOW_DAYS, today_et):
+        return None  # window not closed yet — tomorrow's work, skip silently
+
+    out = {
+        "scan_date": row["scan_date"],
+        # Ticker EXACTLY as stored (do NOT .upper()): the MERGE key is
+        # CASE-SENSITIVE and the collector writes the raw
+        # overnight_signals_enriched value — uppercasing would silently miss a
+        # non-uppercase stored ticker and update nothing.
+        "ticker": row["ticker"],
+        "recommended_contract": row["recommended_contract"],
+    }
+
+    opp = _simulate_opportunity_surface(row, entry_day, OPP_WINDOW_DAYS)
+    out.update({k: opp.get(k) for k in _OPP_FILL_COLS if k != "opp_sim_version"})
+    out["opp_sim_version"] = OPP_SIM_VERSION
+
+    exit_day_3d = get_nth_next_trading_day(entry_day, LABEL_3D_HOLD_DAYS - 1)
+    if _multi_day_window_closed(entry_day, LABEL_3D_HOLD_DAYS, today_et):
+        # SOFT-SKIP on NULL dte/vol/oi (not a hole): _simulate_contract
+        # int()-casts those and RAISES; the except below swallows it, so such a
+        # row simply gets NO 3-day label while its opportunity surface (which
+        # needs none of those fields) still fills. Expected attrition — the
+        # daily collector already filters dte/vol/oi NOT NULL, so it is rare.
+        try:
+            rec3 = _simulate_contract(
+                client, row, entry_day, exit_day_3d,
+                None, None, None, pick_doc=None,
+                hold_days=LABEL_3D_HOLD_DAYS, stop_pct=LABEL_3D_STOP_PCT,
+                target_pct=LABEL_3D_TARGET_PCT, exit_hhmm=LABEL_3D_EXIT_HHMM,
+                use_trail=False, fetch_benchmarks=False,
+            )
+        except Exception as e:  # noqa: BLE001 — one bad 3-day sim must not abort the run
+            logger.warning(
+                f"window fill: 3-day sim failed for {out['ticker']} {row['scan_date']}: {e}")
+            rec3 = {}
+        out.update({
+            "realized_return_pct_3d": rec3.get("realized_return_pct"),
+            "exit_reason_3d": rec3.get("exit_reason"),
+            "exit_day_3d": exit_day_3d,
+            "exit_timestamp_3d": rec3.get("exit_timestamp"),
+            "entry_price_3d": rec3.get("entry_price"),
+            "peak_premium_3d": rec3.get("peak_premium"),
+            "label_3d_sim_version": LABEL_3D_SIM_VERSION,
+            "label_3d_hold_days": int(LABEL_3D_HOLD_DAYS),
+            "label_3d_stop_pct": float(LABEL_3D_STOP_PCT),
+            "label_3d_target_pct": float(LABEL_3D_TARGET_PCT),
+        })
+    return out
+
+
+def _merge_window_fill_rows(client: bigquery.Client, computed: list[dict]) -> int:
+    """Stage + MERGE opp_*/3d values onto existing enriched_option_outcomes rows,
+    keyed (scan_date, ticker, recommended_contract) — the identical staging
+    pattern (and reasons) as _merge_life_rows / the ancestor backfill's _merge:
+    schema-ensure first, then a target-typed staging table via SELECT..WHERE
+    FALSE (NEVER autodetect — the all-NULL-column landmine that broke the pick
+    pipeline 2026-07-02), JSONL load, guarded MERGE, drop staging. Updates ONLY
+    the opp_*/3d columns — never identity/feature/live-label columns."""
+    if not computed:
+        return 0
+    _ensure_enriched_outcomes_columns(client)
+    staging = f"{PROJECT_ID}.profit_scout._stg_opp_fill_{uuid.uuid4().hex[:8]}"
+    staged_cols = ["scan_date", "ticker", "recommended_contract"] + _OPP_FILL_COLS + _D3_FILL_COLS
+    staged_col_sql = ", ".join(f"`{c}`" for c in staged_cols)
+    client.query(
+        f"CREATE TABLE `{staging}` "
+        f"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS "
+        f"SELECT {staged_col_sql} FROM `{ENRICHED_OUTCOMES_TABLE}` WHERE FALSE"
+    ).result()
+    try:
+        jsonl = "\n".join(json.dumps(r, default=str) for r in computed)
+        client.load_table_from_file(
+            io.BytesIO(jsonl.encode("utf-8")), staging,
+            job_config=bigquery.LoadJobConfig(
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            ),
+        ).result()
+        set_clause = ", ".join(f"`{c}` = S.`{c}`" for c in _OPP_FILL_COLS + _D3_FILL_COLS)
+        # MATCHED guard (review 2026-07-28): a transient Polygon failure computes
+        # opp_status='NO_BARS' — never let that overwrite a stored 'OK' row
+        # (re-selected only for its missing 3d label). Unfilled targets
+        # (NULL/WINDOW_OPEN) always accept; filled targets only accept an OK source.
+        merge_sql = f"""
+        MERGE `{ENRICHED_OUTCOMES_TABLE}` T
+        USING `{staging}` S
+          ON T.scan_date = S.scan_date
+         AND T.ticker = S.ticker
+         AND T.recommended_contract = S.recommended_contract
+        WHEN MATCHED AND (T.opp_status IS NULL
+                          OR T.opp_status = 'WINDOW_OPEN'
+                          OR S.opp_status = 'OK')
+          THEN UPDATE SET {set_clause}
+        """
+        job = client.query(merge_sql)
+        job.result()
+        return job.num_dml_affected_rows or 0
+    finally:
+        try:
+            client.query(f"DROP TABLE IF EXISTS `{staging}`").result()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"window-fill staging cleanup failed for {staging} (non-fatal): {e}")
+
+
+def run_fill_closed_windows(lookback_days: int = 10, limit: int | None = None) -> dict:
+    """Daily closed-window fill driver (review 2026-07-28): find rows the daily
+    labeler left dark (opp_status='WINDOW_OPEN' at label time, or a missing
+    3-day label) whose multi-day window has since CLOSED, recompute the opp
+    surface + 3-day label with the deployed simulators, and MERGE them in.
+    Idempotent (deterministic values + guarded MERGE) — no claim/lock needed, a
+    double-run recomputes identical numbers. Writes ONLY to
+    ENRICHED_OUTCOMES_TABLE; never forward_paper_ledger or any live surface.
+    A zero-work day is SUCCESS; a hard failure raises (endpoint 500s)."""
+    max_rows = FILL_WINDOWS_MAX_ROWS
+    client = bigquery.Client(project=PROJECT_ID)
+    today_et = datetime.now(est).date()
+
+    # Schema-ensure BEFORE querying opp_status — on a first run against a table
+    # predating the research columns the SELECT would otherwise 400.
+    _ensure_enriched_outcomes_columns(client)
+
+    start = today_et - timedelta(days=int(lookback_days))
+    rows = _rows_needing_window_fill(client, start, today_et, limit)
+
+    # Pre-classify open vs closed on pure date math (no Polygon calls) so the
+    # per-run cap applies only to REAL work and the deferred remainder is exact.
+    closed_rows, skipped_open = [], 0
+    for r in rows:
+        entry_day = r["entry_day"] or get_next_trading_day(r["scan_date"])
+        if _multi_day_window_closed(entry_day, OPP_WINDOW_DAYS, today_et):
+            closed_rows.append(r)
+        else:
+            skipped_open += 1  # tomorrow's work — skipped silently by design
+
+    capped = len(closed_rows) > max_rows
+    if capped:
+        logger.warning(
+            f"window fill: capped at FILL_WINDOWS_MAX_ROWS={max_rows} — "
+            f"{len(closed_rows) - max_rows} closed-window row(s) deferred to the next run."
+        )
+        closed_rows = closed_rows[:max_rows]
+
+    # Merge every 200 rows INSIDE the compute loop (same forward-progress
+    # rationale as run_label_life_surface: each row costs Polygon calls, so an
+    # end-only merge could lose the whole run to the Cloud Run request timeout
+    # with zero rows committed; the WINDOW_OPEN/NULL queue self-heals next fire).
+    computed, statuses, processed, merged = [], {}, 0, 0
+    for r in closed_rows:
+        c = _compute_window_fill(client, r, today_et)
+        if c is None:  # unreachable after pre-classification; kept for safety
+            skipped_open += 1
+            continue
+        processed += 1
+        st = c.get("opp_status") or "NONE"
+        statuses[st] = statuses.get(st, 0) + 1
+        computed.append(c)
+        if len(computed) >= 200:
+            merged += _merge_window_fill_rows(client, computed)
+            computed = []
+    merged += _merge_window_fill_rows(client, computed)
+
+    # Polygon-outage signature: EVERY processed row NO_BARS. Entry days are
+    # trading days by construction (get_next_trading_day), i.e. real past
+    # market-open sessions, so all-NO_BARS means today's FETCH side failed, not
+    # the tape. Log ERROR but still return the counts as success — the dbt
+    # staleness test + scheduler alerting is the pager, and retrying a partial
+    # fill here would only burn into Polygon rate limits.
+    if processed > 0 and statuses.get("NO_BARS", 0) == processed:
+        logger.error(
+            f"window fill: ALL {processed} processed row(s) returned NO_BARS — "
+            f"Polygon outage signature; investigate before the next scheduled run."
+        )
+
+    summary = {"processed": processed, "merged": merged,
+               "skipped_open": skipped_open, "capped": capped,
+               "candidates": len(rows), "statuses": statuses}
+    logger.info(f"window fill: {summary}")
+    return summary
+
+
 def run_iv_cache_update():
     """Daily IV cache refresh — one row per underlying per as_of_date in
     `polygon_iv_history`. Fetches the trailing-30-day signal watchlist from
@@ -3157,6 +3421,50 @@ def trigger_label_enriched_pool():
         return jsonify({"status": "error", "message": result}), 500
     except Exception as e:
         logger.error(f"Error in label_enriched_pool endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/fill_closed_windows", methods=["POST"])
+def trigger_fill_closed_windows():
+    """RESEARCH-ONLY closed-window fill endpoint (review 2026-07-28).
+
+    The daily /label_enriched_pool cron writes opp_status='WINDOW_OPEN' (the
+    whole opp_*/3d group NULL) for any scan_date whose multi-day window is still
+    open, and nothing revisited those rows automatically — the fill lived in
+    scripts/ledger_and_tracking/backfill_opportunity_surface.py, this endpoint's
+    one-shot ANCESTOR, whose manual cadence stalled 2026-06-26 -> 2026-07-28
+    (~950 dark rows). This endpoint SUPERSEDES that script's manual runs: hit by
+    a dedicated daily Cloud Scheduler cron (OIDC-invoked) after the labeler, it
+    recomputes closed windows with the deployed simulators and MERGEs ONLY the
+    opp_*/3d columns into enriched_option_outcomes — never forward_paper_ledger
+    or any live surface. Idempotent; a zero-work day is SUCCESS (200).
+
+    Token-gated like /label_life_surface (fail-closed when FILL_WINDOWS_TOKEN
+    is set; its OWN env var so tokens stay per-endpoint revocable — see
+    docs/DECISIONS/2026-07-02-service-auth-hardening.md): the values are
+    deterministic/unpoisonable, but the service is public and an open endpoint
+    would be a free Polygon-quota burner. Callers (the Cloud Scheduler cron)
+    send the token in the X-Refresh-Token HEADER, never the body.
+
+    Body (optional): {"lookback_days": N} (default 10), {"limit": N}. Per-run
+    safety cap FILL_WINDOWS_MAX_ROWS (default 400) — a capped run WARNs with the
+    deferred remainder and the queue drains on subsequent fires.
+    """
+    import hmac as _hmac
+
+    expected_token = os.environ.get("FILL_WINDOWS_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    if expected_token and not _hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"status": "denied"}), 403
+
+    try:
+        req = request.get_json(silent=True) or {}
+        lookback_days = int(req.get("lookback_days", 10))
+        limit = req.get("limit")
+        result = run_fill_closed_windows(lookback_days=lookback_days, limit=limit)
+        return jsonify({"status": "success", **result}), 200
+    except Exception as e:
+        logger.error(f"Error in fill_closed_windows endpoint: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

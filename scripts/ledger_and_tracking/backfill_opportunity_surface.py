@@ -2,10 +2,11 @@
 on existing enriched_option_outcomes rows for CLOSED windows (substrate must-fix #6).
 
     ################################################################################
-    #  NOT YET EXECUTED.  This calls Polygon (per-contract option bars) and makes     #
-    #  BigQuery WRITES (MERGE into a research table).  It is gammarips-review +        #
-    #  OWNER gated.  Do NOT run until both sign off AND the must-fix #6 collector      #
-    #  (forward-paper-trader main.py) is DEPLOYED (schema/semantics must match).       #
+    #  EXECUTED 2026-07-28 (review + owner gated; 850 rows filled, scans through      #
+    #  07-22). SUPERSEDED for all future fills by the automated daily                  #
+    #  POST /fill_closed_windows endpoint on forward-paper-trader + the                #
+    #  fill-closed-windows 17:30 ET cron — do NOT run this manually again.             #
+    #  See docs/DECISIONS/2026-07-28-opp-labeler-automation-and-alerting.md.           #
     ################################################################################
 
 WHY (docs/DECISIONS/2026-07-01-momentum-persist-and-opportunity-surface.md):
@@ -115,6 +116,10 @@ def _rows_to_process(client, start: date, end: date, force: bool, limit: int | N
       AND recommended_strike IS NOT NULL
       AND recommended_expiration IS NOT NULL
       {fill_filter}
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY scan_date, ticker, recommended_contract
+      ORDER BY recommended_volume DESC NULLS LAST, recommended_oi DESC NULLS LAST
+    ) = 1
     ORDER BY scan_date, ticker
     {lim}
     """
@@ -221,13 +226,20 @@ def _merge(client, computed: list[dict], mod) -> int:
         ).result()
         set_cols = _OPP_COLS + _D3_COLS
         set_clause = ", ".join(f"`{c}` = S.`{c}`" for c in set_cols)
+        # MATCHED guard (review 2026-07-28): a transient Polygon failure computes
+        # opp_status='NO_BARS' — never let that overwrite a stored 'OK' row
+        # (re-selected only for its missing 3d label). Unfilled targets
+        # (NULL/WINDOW_OPEN) always accept; filled targets only accept an OK source.
         merge_sql = f"""
         MERGE `{TABLE}` T
         USING `{staging}` S
           ON T.scan_date = S.scan_date
          AND T.ticker = S.ticker
          AND T.recommended_contract = S.recommended_contract
-        WHEN MATCHED THEN UPDATE SET {set_clause}
+        WHEN MATCHED AND (T.opp_status IS NULL
+                          OR T.opp_status = 'WINDOW_OPEN'
+                          OR S.opp_status = 'OK')
+          THEN UPDATE SET {set_clause}
         """
         job = client.query(merge_sql)
         job.result()
