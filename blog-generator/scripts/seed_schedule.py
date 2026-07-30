@@ -31,13 +31,21 @@ if str(_ROOT / "libs" / "gammarips_content") not in sys.path:
 from gammarips_content import firestore_helpers, voice_rules  # noqa: E402
 
 
-PROJECT_ID = os.getenv("PROJECT_ID", "profitscout-fida8")
+# GAMMARIPS_PROJECT_ID, not PROJECT_ID: the Cloud Workstation profile exports a
+# global PROJECT_ID (another product's project), which silently redirected a
+# seed run on 2026-07-30. A generic env name is a footgun for local runs.
+PROJECT_ID = os.getenv("GAMMARIPS_PROJECT_ID", "profitscout-fida8")
 
 # Schedule version — bump when the rows change.
-SCHEDULE_VERSION = "2026-04-24"
+SCHEDULE_VERSION = "2026-07-30"
 
 
-# 13 rows from docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md §6.
+# Wk 1-13 from docs/EXEC-PLANS/2026-04-20-copy-seo-content-overhaul.md §6.
+# Wk 14 mirrors the row added directly in Firestore 2026-07-07 (kept here so a
+# re-seed doesn't drop it — _seed_schedule REPLACES the rows array).
+# Wk 15-20 (2026-07-30): query-shaped SEO retargeting — titles read like search
+# queries humans type, MCP / AI-agent-trading cluster first (the monetized
+# product), then options-flow education. All evergreen (no ledger reads).
 # type values map to app/tools.py LIVE_CONTEXT_POST_TYPES for gating.
 # cta values: "webapp_visit" | "pro_trial" | "starter_trial"
 BLOG_SCHEDULE_ROWS: list[dict] = [
@@ -244,6 +252,121 @@ BLOG_SCHEDULE_ROWS: list[dict] = [
         "cta": "pro_trial",
         "type": "video_demo",
         "cross_channel": ["x_thread_video", "linkedin", "reddit"],
+        "status": "pending",
+    },
+    {
+        "slug": "wire-your-ai-agent-to-real-options-data-mcp",
+        "week_num": 14,
+        "title_candidate": (
+            "Stop Asking AI for Stock Picks: Wire Your Agent to Real Options Data (MCP)"
+        ),
+        "persona": ["A", "B"],
+        "keywords": [
+            "MCP server for trading",
+            "AI agent options data",
+            "agentic trading",
+            "options flow API for AI agents",
+        ],
+        "cta": "pro_trial",
+        "type": "thought_leadership",
+        "cross_channel": ["x_thread"],
+        "status": "pending",
+    },
+    # --- Query-shaped retargeting (2026-07-30). MCP cluster first. ---
+    {
+        "slug": "best-mcp-servers-for-trading-and-finance",
+        "week_num": 15,
+        "title_candidate": "Best MCP Servers for Trading and Finance (2026 Guide)",
+        "persona": ["A", "B"],
+        "keywords": [
+            "best MCP servers for trading",
+            "MCP servers for finance",
+            "trading MCP server",
+        ],
+        "cta": "pro_trial",
+        "type": "evergreen_explainer",
+        "cross_channel": ["x_thread", "reddit_algotrading", "linkedin"],
+        "status": "pending",
+    },
+    {
+        "slug": "connect-claude-to-live-options-data-mcp",
+        "week_num": 16,
+        "title_candidate": (
+            "How to Connect Claude to Live Options Data (MCP Setup Walkthrough)"
+        ),
+        "persona": ["A", "B"],
+        "keywords": [
+            "connect Claude to market data",
+            "Claude MCP setup",
+            "Claude options data",
+        ],
+        "cta": "pro_trial",
+        "type": "evergreen_explainer",
+        "cross_channel": ["x_thread", "reddit_algotrading"],
+        "status": "pending",
+    },
+    {
+        "slug": "what-data-does-an-ai-trading-agent-need",
+        "week_num": 17,
+        "title_candidate": "What Data Does an AI Trading Agent Actually Need?",
+        "persona": ["A", "B"],
+        "keywords": [
+            "AI trading agent data",
+            "what data does a trading agent need",
+            "options data for AI agents",
+        ],
+        "cta": "pro_trial",
+        "type": "evergreen_explainer",
+        "cross_channel": ["x_thread", "reddit_algotrading", "linkedin"],
+        "status": "pending",
+    },
+    {
+        "slug": "how-to-read-unusual-options-activity",
+        "week_num": 18,
+        "title_candidate": (
+            "How to Read Unusual Options Activity: A Step-by-Step Guide"
+        ),
+        "persona": ["A", "D"],
+        "keywords": [
+            "how to read unusual options activity",
+            "unusual options activity explained",
+            "UOA scanner",
+        ],
+        "cta": "webapp_visit",
+        "type": "evergreen_explainer",
+        "cross_channel": ["x_thread", "reddit_options"],
+        "status": "pending",
+    },
+    {
+        "slug": "how-to-read-options-flow-beginners",
+        "week_num": 19,
+        "title_candidate": "How to Read Options Flow: A Beginner's Walkthrough",
+        "persona": ["A", "D"],
+        "keywords": [
+            "how to read options flow",
+            "options flow for beginners",
+            "options order flow explained",
+        ],
+        "cta": "webapp_visit",
+        "type": "evergreen_explainer",
+        "cross_channel": ["x_thread", "reddit_options"],
+        "status": "pending",
+    },
+    {
+        "slug": "options-flow-scanner-free-vs-paid",
+        "week_num": 20,
+        "title_candidate": (
+            "Options Flow Scanners: What Free Tools Show You (and What They Miss)"
+        ),
+        "persona": ["A", "D"],
+        "keywords": [
+            "options flow scanner",
+            "free options flow scanner",
+            "options flow tools",
+        ],
+        "cta": "webapp_visit",
+        "type": "evergreen_explainer",
+        "cross_channel": ["x_thread", "reddit_options", "linkedin"],
         "status": "pending",
     },
 ]

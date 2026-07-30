@@ -147,7 +147,7 @@ def fetch_prior_posts(limit: int = 5) -> dict:
         dict: {"status": "success", "data": [{slug, title, keywords}, ...]}
               or {"status": "empty"} if no posts yet.
     """
-    limit = max(1, min(int(limit or 5), 20))
+    limit = max(1, min(int(limit or 5), 200))
     try:
         query = (
             _fs().collection("blog_posts")
@@ -465,8 +465,23 @@ def publish_to_firestore(
     if not slug:
         return {"status": "error", "message": "slug required"}
     try:
+        doc_ref = _fs().collection("blog_posts").document(slug)
+        snap = doc_ref.get()
+        if snap.exists and (snap.to_dict() or {}).get("status") == "published":
+            # A slug collision must never clobber a live post. To regenerate a
+            # published post deliberately, flip its status in the console first.
+            logger.error(f"publish_to_firestore: refusing to overwrite published post '{slug}'")
+            return {
+                "status": "error",
+                "message": (
+                    f"slug '{slug}' is already a published post. If this is an "
+                    "improvised topic, pick a new slug; if this is a schedule row "
+                    "stuck pending after a successful publish, flip the row to "
+                    "'published' in blog_schedule/current instead"
+                ),
+            }
         reading_time = _estimate_reading_time(markdown)
-        _fs().collection("blog_posts").document(slug).set({
+        doc_ref.set({
             "slug": slug,
             "title": title,
             "description": description,
@@ -496,7 +511,17 @@ def log_rejected(slug: str, notes: str) -> dict:
     if not slug:
         return {"status": "error", "message": "slug required"}
     try:
-        _fs().collection("blog_posts").document(slug).set({
+        doc_ref = _fs().collection("blog_posts").document(slug)
+        snap = doc_ref.get()
+        if snap.exists and (snap.to_dict() or {}).get("status") == "published":
+            # 2026-07-13 incident: a retry-storm rerun reused a published slug,
+            # got rejected, and this merge silently unpublished the live post.
+            logger.error(f"log_rejected: refusing to overwrite published post '{slug}'")
+            return {
+                "status": "error",
+                "message": f"slug '{slug}' is a published post; rejection not recorded on it",
+            }
+        doc_ref.set({
             "slug": slug,
             "status": "rejected",
             "reviewer_notes": notes or "",

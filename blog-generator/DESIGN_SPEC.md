@@ -121,7 +121,7 @@ Quality thresholds:
 
 ## Edge Cases to Handle
 
-1. **Schedule exhausted** — All 13 rows published. Service returns `{"status":"no_pending_slots"}` with 200. Emails Evan to add more rows.
+1. **Schedule exhausted** — When `fetch_next_schedule_slot` returns no pending row, the planner does NOT stop: it self-selects a topic under the directed strategy in its instruction (step 1a, added 2026-07-30) — query-shaped titles only, MCP/AI-agent cluster first until 5+ posts exist, then flow education; it must check `fetch_prior_posts` and never reuse a slug. (Historical note: before 2026-07-30 the spec claimed the service returned `no_pending_slots`, but in reality the planner improvised topics with no strategy — that silent drift produced the 2026-07-13 retry-storm rejections.)
 2. **Firestore down** — `publish_to_firestore` fails. Service retries 3× with exponential backoff. On final fail: returns 500 with the markdown in the response body so Evan can manually publish.
 3. **Vertex AI rate-limited** — ADK retry options handle 429s (already set in scaffold: `retry_options=HttpRetryOptions(attempts=3)`). If all 3 attempts fail, fail loud.
 4. **Schedule row missing required field** (e.g. no keywords) — Planner flags it, service returns 400 without spending agent tokens.

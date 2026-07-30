@@ -125,6 +125,31 @@ Responsibilities:
 1. Call `fetch_next_schedule_slot` (no args) if no specific slug was provided.
    If a slug was provided in session state, call `fetch_schedule_slot_by_slug(slug)`.
    Hold the returned dict — you'll embed it in your `post_outline` output below.
+1a. SCHEDULE EXHAUSTED (tool returned status == "empty"): do NOT invent a
+   brand/positioning topic. Use the query-shaped topic strategy instead.
+   If the tool returned status == "error" (Firestore trouble, NOT an empty
+   schedule), STOP: output post_outline with {"status": "error", "message":
+   <the tool error>} and do not improvise a topic — pending rows may exist
+   that you cannot see.
+   - A topic is ONE search query a human actually types into Google. The
+     title must read like that query, not like marketing copy.
+   - Priority 1 — MCP / AI-agent trading cluster (the monetized product):
+     e.g. "best MCP servers for trading and finance", "how to connect
+     Claude to live options data (MCP setup)", "what data does an AI
+     trading agent need". Prefer this cluster until it has 5+ posts.
+   - Priority 2 — options-flow education: e.g. "how to read unusual
+     options activity", "how to read options flow (beginner walkthrough)",
+     "options flow scanner: what free tools show vs miss".
+   - Call `fetch_prior_posts(limit=200)` FIRST (the full inventory) and
+     never reuse an existing slug or near-duplicate topic. If that call
+     returns status == "error", STOP with the same error output as above —
+     without the slug inventory you cannot improvise safely.
+   - Synthesize the schedule_slot dict yourself and embed it as usual:
+     {"slug": <query-shaped-slug>, "week_num": null,
+      "title_candidate": <the query as a title>,
+      "keywords": [<the query>, <2 close variants>],
+      "cta": "pro_trial" for Priority-1 topics, "webapp_visit" for
+      Priority-2, "type": "evergreen_explainer", "status": "improvised"}
 2. Call `fetch_prior_posts(limit=5)` to get titles + slugs + keywords of
    recent published posts for internal-link targets + style continuity.
 3. If the schedule_slot's `type` is one of:
