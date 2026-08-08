@@ -11,21 +11,27 @@
 `docs/DECISIONS/2026-08-06-growth-sequence-video-hn-ads.md` is the plan of record.
 07-07 directory sprint = 30-day null result; passive listings don't move this, don't
 re-propose. Steps, in order:
-1. **Merge + deploy the 5 webapp PRs (owner merges; `main` auto-deploys).** All five
-   test-merged CLEAN in sequence, combined tree builds, combined smoke test passes.
-   **#21 GA4 attribution** (purchases land `(not set)`; pre-traffic blocker, only fixes
-   checkouts made after deploy) · **#20** lowercase-ticker 308 · **#22** reports archive
-   hub · **#23** head hygiene (og:image on 11 pages, title dupes, 12 SERP-truncated
-   descriptions) · **#24** options-flow-API FAQ + report chain + ticker→report links.
-   Post-deploy checks are written into each PR body (see Watch below).
-2. **Video: "How to Trade Options Using Claude"** — outline/script/compliance rails in
-   `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Owner review → webapp
-   `gammarips-copywriter` pass → record (fresh demo key, revoke after shoot).
-   Embed: webapp `landing/video-led` branch (READY, iframe swap, merges via `/ship`).
-3. **Show HN timed with the video** — the one unfired $0 channel. Draft to write.
-   Lead with the zero-friction line, not a site link:
-   `claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp`
-   (anonymous tier: no card, no key). That one-liner is the demo.
+1. ✅ **DONE 08-08 — all 5 webapp PRs merged, deployed, verified live.** #21 GA4
+   attribution (only fixes checkouts made AFTER deploy) · #20 lowercase-ticker 308 ·
+   #22 reports archive · #23 head hygiene · #24 options-flow-API FAQ + report chain +
+   ticker→report links. Verified in prod: 15/15 pages emit og:image, all titles carry
+   one brand suffix, all descriptions 129-150 chars, `/signals/aapl` 308s,
+   `/reports/archive` lists **116 reports back to 2026-02-13**, `/developers` carries
+   FAQPage schema with "options flow api" x18, the oldest report links forward, and
+   `/signals/NVDA` links its 08-03 briefing.
+2. **🔴 NEXT: Video: "How to Trade Options Using Claude."** Owner is recording a clip of
+   his real morning routine running `/trade` in the harness, then wants to coordinate
+   with **Gemini to cut and edit**. Rails + outline in
+   `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Use a fresh demo key, revoke after the
+   shoot. Embed: webapp `landing/video-led` branch (READY, iframe swap, `/ship`).
+3. **Show HN — submission is WRITTEN and ready: `~/workspace/HN-SUBMISSION.txt`**
+   (title, url, text, the ban-triggering mistakes, the 3 questions he will get).
+   Submit the **repo** `github.com/DevDizzle/gammarips-harness`, not gammarips.com.
+   Harness README was fixed 08-08 (PR #2 merged): it led with "Subscribe $39/mo" and
+   never mentioned the free tier. Now opens with the anonymous one-liner and a per-tool
+   table. **The harness loop genuinely CANNOT run anonymously** (`get_liquidity`,
+   `get_signal`, `query_outcomes`, `replay_contract` are all pro) — never claim it can.
+   FIRE ONLY AFTER THE VIDEO. One shot per project; reposting burns goodwill.
 4. **Ads review ~09-01** on measured CVR from video+HN traffic; $10-20/day on the exact
    "claude mcp options trading" cluster only if CVR nonzero.
 
@@ -41,6 +47,13 @@ after stripping brand + `site:`). GA4 is ~97% bot (Singapore, 1.001 sessions/use
 report pages are the surface that ranks (pos 3.0, 9.0, 9.3 on analyst-shaped queries).
 `options flow api` at pos 24 is the one query with real buyer intent (#24 targets it).
 Never quote a GSC/GA4 aggregate here without stripping brand, `site:`, and bot traffic.
+The report archive turned out to be **116 pages back to 2026-02-13**, ~2x the estimate;
+43+ of them had been orphaned (no sitemap entry, no internal link) but still indexed.
+Acquire on CURRENT vocabulary (`options flow api`, `unusual whales alternative`), not on
+the category vocabulary — you rank 7.7 for `llm stock options data` and it drew 3
+impressions in 90 days. Being early means the demand does not exist yet, not that you
+are losing. LLM-mediated discovery is the compounding channel: the longest-engaged US
+session of the month (379s) came from copilot.com.
 
 ## Owner queue
 - 🟡 **WATCH Mon 08-10 09:52 ET — first pick under a print floor that actually fires.**
@@ -78,11 +91,12 @@ Never quote a GSC/GA4 aggregate here without stripping brand, `site:`, and bot t
   refresh. Stripe MCP not installed (hosted OAuth, owner action).
 
 ## Watch / dated checkpoints
-- **After the webapp deploy:** `/reports/archive` lists ~90 reports back to ~2026-04;
-  an April report shows prev/next; `/signals/NVDA` links its scan-date briefing; one
-  trial checkout confirms `purchase` attaches to a real session, not `(not set)`.
-  Then (give Google 1-2 weeks) re-run `scripts/seo/gsc_inspect.py` on the orphaned
-  reports to confirm the new crawl paths took.
+- 🔴 **One trial checkout** to confirm `purchase` now attaches to a real session rather
+  than `(not set)`. The ONLY unverified item from the 08-08 deploy: it needs a real
+  Stripe checkout, cannot be curl'd. Do this before HN, or the spike is unmeasurable.
+- **~08-22 (give Google 1-2 weeks to recrawl):** re-run
+  `scripts/seo/gsc_inspect.py --file <orphaned reports>` to confirm the new crawl paths
+  took, and re-check `options flow api` position (was 24.2 pre-FAQ).
 - **08-10 Mon 07:00 ET:** first `dbt-source-freshness` run that CAN go red.
 - **08-09 Sun 08:00 ET:** first scheduled universe weekly refresh — spot-check it fired.
 - **~08-13:** owner's trial converts — first real-card charge; verify `invoice.paid` fires
