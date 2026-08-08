@@ -7,7 +7,23 @@ Search Console properties.
 | Script | Source API | What it pulls |
 |---|---|---|
 | `gsc_query.py` | Search Console API | top queries/pages by clicks, impressions, CTR, position |
+| `gsc_inspect.py` | Search Console URL Inspection API | per-URL index verdict, coverage state, Google's chosen canonical vs ours |
 | `ga4_query.py` | GA4 Data API | sessions/users/engagement by landing page or source-medium |
+
+`gsc_query.py` answers "what ranks"; `gsc_inspect.py` answers "is it indexed
+at all, and did Google honor our canonical" — the only programmatic way to
+verify a GSC "issue fixed" validation actually held. Inspection quota is
+2,000/day and 600/min per property, so it defaults to 25 URLs per run.
+
+## Auth — read this before debugging a 403
+
+**Invoke the `seo-auth` skill.** It carries the diagnostic table (three different
+403s look identical), the permanent service-account fix, and the traps. The
+sections below are the historical user-credential path, kept for reference —
+prefer `SEO_IMPERSONATE_SA` over re-consenting ADC.
+
+`reauth.sh` requires a real terminal. Without a TTY it exits 2 with instructions
+rather than crashing on gcloud's stdin prompt.
 
 ## One-time setup
 
@@ -56,6 +72,11 @@ export GSC_SITE_URL=sc-domain:gammarips.com   # or https://gammarips.com/
 PY=scripts/seo/.venv/bin/python
 $PY scripts/seo/gsc_query.py --days 28 --dim query --limit 50
 $PY scripts/seo/gsc_query.py --days 28 --dim page
+$PY scripts/seo/gsc_inspect.py --url https://gammarips.com/signals/AAPL -v
+$PY scripts/seo/gsc_inspect.py --sitemap --limit 25
 $PY scripts/seo/ga4_query.py --days 28 --report landing
 $PY scripts/seo/ga4_query.py --report source --channel "Organic Search"
 ```
+
+`gsc_inspect.py` exits non-zero when any URL fails or Google overrode our
+canonical, so it drops straight into a check script.
