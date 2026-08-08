@@ -3,14 +3,17 @@ name: dbt CI
 # Runs `dbt build` (models + tests, DAG order) on every PR that touches the dbt
 # project, against an ISOLATED CI dataset so PR builds never touch prod marts.
 #
-# One-time setup before this passes:
-#   1. Create the CI dataset:  bq mk --location=us-central1 profitscout-fida8:profitscout_dbt_ci
+# Setup (done 2026-07-08 — recorded here in case it needs rebuilding):
+#   1. CI dataset:  bq mk --location=us-central1 profitscout-fida8:profitscout_dbt_ci
 #      (must match the source dataset profit_scout, which is us-central1 — a US
 #       multiregion CI dataset fails at the cross-location read of the sources.)
-#   2. Add a GitHub secret GCP_SA_KEY = a service-account JSON with
-#      BigQuery Data Editor + BigQuery User on profitscout_dbt_ci AND
-#      BigQuery Data Viewer on profit_scout (to read the source tables).
-# Until both exist, the workflow runs but the build step fails at auth — expected.
+#   2. GitHub secret GCP_SA_KEY = service-account JSON key for
+#      github-deployer@profitscout-lx6bb.iam.gserviceaccount.com, granted:
+#        - roles/bigquery.jobUser on PROJECT profitscout-fida8 (bigquery.jobs.create
+#          is project-level — a dataset-level grant can never provide it)
+#        - WRITER on dataset profitscout_dbt_ci (dataset ACL; bq add-iam-policy-binding
+#          needs allowlisting, use `bq update --source` on the access list instead)
+#        - READER on dataset profit_scout (source tables)
 
 on:
   pull_request:
@@ -18,6 +21,7 @@ on:
       - 'dbt/**'
       - 'requirements.txt'
       - '.github/workflows/dbt-ci.yml'
+  workflow_dispatch:
 
 jobs:
   build:
