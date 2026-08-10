@@ -427,8 +427,35 @@ def render_html(fresh: dict, cov: dict, sched: dict, life: dict, overall: str) -
     else:
         bad = fresh.get("not_fresh") or {}
         if bad:
+            # The badge and this list are computed from DIFFERENT thresholds and
+            # used to contradict each other on screen (2026-08-10: header OK
+            # over ten WARN rows, which cost a consumer 15 minutes deciding
+            # whether the pool-trust rule had fired). The badge is dbt's exit
+            # code — only an `error_after` breach is non-zero — while the list
+            # is every source past `warn_after`. Both are right; neither said
+            # so. Print the severity on each row and, when they disagree, say
+            # why in one line, HERE, where the wrong conclusion gets drawn.
+            errs = {k: v for k, v in bad.items() if v == "ERROR"}
+            warns = {k: v for k, v in bad.items() if v != "ERROR"}
+            if errs and fresh["status"] != UNKNOWN:
+                out.append('<div style="color:#b00;margin:4px 0"><b>Past error_after '
+                           f'({len(errs)}):</b> these are what make this section red.</div>')
             out.append("<ul style='margin:4px 0'>" + "".join(
-                f"<li><b>{k}</b>: {v}</li>" for k, v in sorted(bad.items())) + "</ul>")
+                f'<li><b>{k}</b>: <span style="color:{"#b00" if v == "ERROR" else "#a60"}">'
+                f"{v}</span></li>"
+                for k, v in sorted(errs.items()) + sorted(warns.items())) + "</ul>")
+            # Guard on the BADGE, not merely on the absence of errors. ATTENTION
+            # is driven by `rc != 0`, and dbt can exit non-zero for reasons other
+            # than an error_after breach while still parsing sources — that would
+            # print "which is why this section is still OK" under a red badge,
+            # i.e. this fix's own contradiction, inverted.
+            if warns and not errs and fresh["status"] == OK:
+                out.append('<div style="color:#666;font-size:12px;margin:-2px 0 0">'
+                           f'The {len(warns)} WARN row(s) above are past <code>warn_after</code> '
+                           'but inside <code>error_after</code>, which is why this section is '
+                           'still OK. Every weekday-written source reads ~60h old at Monday '
+                           '07:00 ET, so a Monday warn is expected. Only an '
+                           '<code>error_after</code> breach turns it red.</div>')
         else:
             out.append(f'<div>All {len(fresh.get("sources", {}))} sources fresh.</div>')
 

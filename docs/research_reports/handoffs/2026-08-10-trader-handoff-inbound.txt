@@ -1,0 +1,227 @@
+TRADER HANDOFF -> gammarips-engine
+2026-08-10 (Mon, midday)
+From: gammarips-trader (the harness that consumes the pool; user zero of the MCP)
+
+====================================================================
+BOTTOM LINE
+====================================================================
+
+One job on your side has stopped, and it is now the gate on the harness's
+entire evidence base. Two smaller asks ride behind it.
+
+  P1  The life-surface labeler has stopped. Your own 07:15 digest says so.
+      query_outcomes(view="surface") has not advanced past scan_date
+      2026-08-03. THIS IS THE CRITICAL PATH -- everything below and
+      everything the harness wants to do next is downstream of it.
+
+  P2  view="surface" has no aggregate mode and its raw payload is
+      unreadable inside a decision window. One-line fix: honor the
+      aggregate_only flag that view="labels" already has.
+
+  P3  GAP-018 (_fetch_live_oi date validation) is root-caused but still
+      unshipped. It did NOT recur today -- that is luck, not a fix.
+
+  P4  Cosmetic but it cost us real time this morning: the health digest
+      badges a section "OK" while listing ten WARN rows under it.
+
+Why the urgency changed. The owner is scoping this product toward a
+capacity-capped paid tier ($99-$199, a few hundred seats). At that price
+the deliverable is the track record, and the track record is computed off
+YOUR surface. The harness's own P&L is N=7 and statistically worthless;
+the funnel log is N=411 and is the real asset. We cannot score it while
+the labeler is down. That is the whole reason P1 is P1.
+
+====================================================================
+P1. THE LABELER HAS STOPPED (GAP-019, escalated)
+====================================================================
+
+MEASURED TODAY, 12:40 ET:
+
+  query_outcomes(view="surface", days=30)
+    -> row_count 200
+    -> scan_date range 2026-07-28 .. 2026-08-03
+    -> distinct dates: 5
+
+Scan dates 08-04, 08-05, 08-06 are absent. All three are inside your own
+fill frontier (window's last session strictly before today), so all three
+should be filled. 08-03 IS now present -- it served 0 rows on 08-07 when
+we first reported this -- so the frontier advanced exactly one date and
+then stalled.
+
+YOUR OWN DIGEST INDEPENDENTLY FLAGS IT. From the 2026-08-10 07:15 ET
+health email, section "Public life surface", badged ATTENTION:
+
+  OK 2192 · NO_ENTRY 1285 · PARTIAL_SPLIT_ADJUSTED 27 ·
+  PARTIAL_NO_PATH 4 · PARTIAL_NO_EXPIRY 2
+  last labeled 64.4h ago · unlabeled backlog 78
+
+  "78 expired rows unlabeled for 2+ days: the labeler itself may have
+   stopped -- counts freeze without stranding anything, so the cohort
+   silently stops growing."
+
+That diagnosis is almost certainly correct. We are reporting it as
+confirmation from the consumer side, not as news.
+
+NOT A ONE-OFF. This is the same failure GAP-015 documented on 2026-08-05
+(WINDOW_OPEN served as a live verdict on windows that had demonstrably
+closed). That was adjudicated at the time as a normal 4-trading-day fill
+frontier. Today's measurement says it was not -- the population job
+stalls, recovers a date, and stalls again. Please treat it as a liveness
+bug in the job, not as backlog.
+
+ALSO NOTE: "Scheduled jobs" is badged OK, 31 jobs checked, none in a
+system-error state -- and it explicitly lists "Never attempted:
+freshness-digest". So a job can be dead while the jobs section reads OK.
+If the labeler is registered the same way, your monitoring cannot see it
+stop. That is probably the actual root cause of the 64-hour detection lag.
+
+ACCEPTANCE CRITERIA (what makes this closed for us):
+  1. query_outcomes(view="surface") returns rows for every scan_date up
+     to the frontier, on a rolling basis, verified two consecutive days.
+  2. The digest's "Public life surface" reads OK with unlabeled backlog 0.
+  3. The labeler is covered by whatever check would have caught
+     "Never attempted" -- so the next stall is reported in hours, not 64.
+
+BACKFILL NEEDED: scan dates 2026-08-04, 08-05, 08-06 (and 08-07 once its
+window closes). We have 50 funnel rows for entry day 08-05 that cannot be
+scored until 08-04 lands.
+
+====================================================================
+P2. view="surface" NEEDS AN AGGREGATE MODE (GAP-020, new)
+====================================================================
+
+MEASURED TODAY: query_outcomes(view="surface", days=30) returned
+104,805 characters for 200 rows. That exceeds the tool-result token
+ceiling outright. The call had to be spilled to a file and queried with
+jq, mid-consult, to extract three scalars (row count, min/max scan_date).
+
+view="labels" already solves exactly this with aggregate_only=True.
+view="surface" has no equivalent. So the one view whose entire purpose is
+exit design is the one view that cannot be consumed inside a morning
+decision window.
+
+What we actually need from it: MFE/MAE quantiles over a delta band and a
+date range. Roughly 15 numbers. What we have to move to get them: every
+row of every contract for 30 days. Narrowing `days` does not help --
+shrinking the window is precisely what destroys the sample size the exit
+design rests on.
+
+ASK, cheapest first:
+  a) Honor aggregate_only=True on view="surface" with the same semantics
+     it has on view="labels": MFE/MAE quantiles + n, no rows.
+  b) Failing that, a fields=[...] projection so we can drop the
+     identity/narrative columns.
+
+This is the same shape as the replay_contract summary_only note we filed
+on 08-07 (a 42-contract scoring pass moved ~600KB of bars to use ~2KB).
+Pattern worth naming: the MCP serves research-grade row dumps to a caller
+that needs decision-grade aggregates. On a $39-$199 product the payload
+is the cost.
+
+====================================================================
+P3. GAP-018 IS STILL UNSHIPPED (and today it got lucky)
+====================================================================
+
+Root cause from 08-07 stands: signal-notifier/main.py _fetch_live_oi
+(~L1361) reads day.volume from the Polygon option snapshot but never
+reads day.last_updated, so on a contract with no prints today Polygon
+serves the PRIOR session's day bar and yesterday's volume is stamped
+"confirmed" as this morning's prints.
+
+TODAY IT DID NOT MISFIRE. The 2026-08-10 card (PLTR, 09:53 ET) claimed
+"Liquidity: 1009 prints by ~09:52 (confirmed)" and the claim held up:
+get_liquidity showed day_volume accumulating on a day.last_updated of
+today, and the Robinhood book independently showed 4,668 prints by 12:33
+against OI 7,354.
+
+We are reporting the clean day so the record is symmetric. It is not
+evidence the bug is gone -- PLTR was a heavily-traded name on a strong
+tape, which is precisely the case the bug cannot manifest in. The failure
+needs a zero-print name to show up, and one will come.
+
+Still asking for the bar-date validation (a timestamp check, not price
+leakage). With PRINT_FLOOR_MIN=1 already in place, validating the date
+drops zero-print names before the tournament ever ranks them.
+
+====================================================================
+P4. THE HEALTH DIGEST'S SECTION BADGES ARE UNREADABLE
+====================================================================
+
+Small, but it cost us fifteen minutes this morning and it undermines the
+digest's whole purpose as a go/no-go.
+
+The 08-10 email badges "Table freshness" as OK, and then lists ten tables
+underneath it, EVERY ONE of them WARN -- including overnight_signals and
+pool_liquidity_snapshot, the two the harness was explicitly told to treat
+as pool-trust signals. So the section header and its contents contradict
+each other, and a consumer following the documented rule ("ATTENTION
+naming overnight_signals / pool_liquidity_snapshot -> screen harder")
+cannot tell whether the rule fired.
+
+We resolved it as: the ATTENTION badge belongs to "Public life surface",
+and the table WARNs are within tolerance and roll up to OK. If that is
+right, then either the rollup should not be OK when ten children are WARN,
+or the WARN rows need a threshold printed next to them so a reader can see
+why they are tolerable. Right now the only way to interpret it is to
+already know the answer.
+
+====================================================================
+WHAT THE HARNESS DOES ONCE P1 AND P2 LAND
+====================================================================
+
+Stated so you can see the dependency and push back if we have it wrong.
+
+  1. Re-score the funnel log off the correct 10:00 anchor by joining to
+     view="surface" (which is already correctly anchored -- your own meta
+     says "returns are FRACTIONS of the 10:00 ET entry cost basis").
+     We are NOT recomputing the anchor ourselves; 411 replay_contract
+     calls to extract two numbers each is exactly the payload problem
+     in P2.
+
+     Current funnel-log state, 411 rows:
+       143  minute_10am_anchor      (correct: 08-04, 08-06, 08-07)
+        49  day_ohlc_open_to_close  (wrong basis, all entry day 07-31)
+       200  never scored
+        11  basis missing
+         8  unlabeled_illiquid
+
+     ~150 of the unscored are scoreable the moment the surface is whole;
+     50 (entry day 08-05) are blocked on the 08-04 backfill specifically.
+
+  2. Run edge.py on honest numbers for the first time. Every base rate
+     we have quoted to date is inflated by the anchor defect (ABT 07-31
+     reads +89.2% against a real +62.8%).
+
+  3. Capacity census across the full funnel history -- how many
+     subscribers each pool name's book can absorb. One day's sample
+     (2026-08-10, 50 names) reads: median 88 contracts/day, 27 of 50
+     under 100/day, and the day's top-ranked name supported ~79
+     subscribers at 1 contract before demand hit 10% of its daily volume.
+     If that holds across a month it sets the seat cap and the price, and
+     it is a number no competitor in this category publishes.
+
+Nothing in step 1 or 2 can start until the labeler is back. Step 3 is
+unblocked and we are starting it now.
+
+====================================================================
+REPRODUCTION
+====================================================================
+
+  # P1 -- confirm the stall
+  query_outcomes(view="surface", days=30)
+    -> check max(scan_date); expect 2026-08-03 until fixed
+
+  # P2 -- confirm the payload
+  same call; measure response size (104,805 chars on 2026-08-10)
+  compare: query_outcomes(view="labels", aggregate_only=True)
+
+  # P3 -- the bug needs a zero-print contract
+  get_liquidity(contract=<any pool name with no tape today>, live=true)
+    -> compare day.volume against day.last_updated
+
+Everything above is reproducible from the MCP alone, no harness code.
+
+Contact: this file is the ask. Reply in
+docs/research_reports/handoffs/ as with 2026-08-05, and the harness will
+pick it up. Prior handoffs have all been answered same-day; thank you for
+that, it is why this channel is the one we use.
