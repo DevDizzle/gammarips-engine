@@ -11,30 +11,23 @@
 `docs/DECISIONS/2026-08-06-growth-sequence-video-hn-ads.md` is the plan of record.
 07-07 directory sprint = 30-day null result; passive listings don't move this, don't
 re-propose. Steps, in order:
-1. ✅ **DONE 08-08 — all 5 webapp PRs merged, deployed, verified live.** #21 GA4
-   attribution (only fixes checkouts made AFTER deploy) · #20 lowercase-ticker 308 ·
-   #22 reports archive · #23 head hygiene · #24 options-flow-API FAQ + report chain +
-   ticker→report links. Verified in prod: 15/15 pages emit og:image, all titles carry
-   one brand suffix, all descriptions 129-150 chars, `/signals/aapl` 308s,
-   `/reports/archive` lists **116 reports back to 2026-02-13**, `/developers` carries
-   FAQPage schema with "options flow api" x18, the oldest report links forward, and
-   `/signals/NVDA` links its 08-03 briefing.
-2. **🔴 NEXT: the video — CONCEPT CHANGED BY OWNER 08-08.** Not a trading clip: a
-   **zero-to-contracts install demo**. Empty directory → `git clone` the harness → the
-   one-line MCP connect → `/trade` → contract candidates out of the curated data.
-   Spec rewritten to v2 in `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md` (acts, the
-   start-from-nothing rule, the beats that must survive the cut). Owner records, then
-   coordinates the edit with **Gemini**. Fresh demo key, revoke after the shoot. A
-   "nothing today" outcome SHIPS, it does not get re-recorded. Embed: webapp
-   `landing/video-led` branch (READY, iframe swap, `/ship`).
-3. **Show HN — fully planned in `docs/GTM-DISTRIBUTION-PLAYBOOK.md`** (durable; the
-   scratch copy at `~/workspace/HN-SUBMISSION.txt` is for copy-paste only). Title, URL,
-   full submission text, gates, the ban-triggering mistakes, the 3 questions. Submit the
-   **repo** `github.com/DevDizzle/gammarips-harness`, not gammarips.com — same artifact
-   the video demos. Harness README fixed 08-08 (PR #2): it led with "Subscribe $39/mo"
-   and never mentioned the free tier. **The harness loop genuinely CANNOT run
-   anonymously** (`get_liquidity`, `get_signal`, `query_outcomes`, `replay_contract` are
-   all pro) — never claim it can. FIRE ONLY AFTER THE VIDEO + the GA4 purchase check.
+1. ✅ **DONE 08-08 — webapp PRs #20-24 merged, deployed, verified in prod.** GA4
+   attribution (fixes checkouts made AFTER deploy only), ticker 308, reports archive
+   (116 reports back to 02-13), head hygiene (og:image 15/15, titles, descriptions
+   129-150 chars), options-flow-API FAQ + report chain + ticker→report links.
+2. **🔴 NEXT: the video. CONCEPT CHANGED BY OWNER 08-08** to a **zero-to-contracts
+   install demo**: empty dir → `git clone` harness → one-line MCP connect → `/trade` →
+   contract candidates. Spec v2 (acts, start-from-nothing rule, beats that must survive
+   the cut) in `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Owner records, edits with
+   **Gemini**. Fresh demo key, revoke after. A "nothing today" outcome SHIPS.
+   Embed: webapp `landing/video-led` (READY, iframe swap, `/ship`).
+3. **Show HN. Fully planned in `docs/GTM-DISTRIBUTION-PLAYBOOK.md`** (title, URL, the
+   verbatim submission text, gates, hard rules, the 3 questions he will be asked).
+   `~/workspace/HN-SUBMISSION.txt` is a copy-paste scratch duplicate. Submit the **repo**,
+   not gammarips.com: same artifact the video demos. README fixed 08-08 (PR #2) so it no
+   longer opens with "Subscribe $39/mo". **The loop CANNOT run anonymously**
+   (`get_liquidity`, `get_signal`, `query_outcomes`, `replay_contract` are pro) — never
+   claim it can. FIRE ONLY AFTER the video AND the GA4 purchase check.
 4. **Ads review ~09-01** on measured CVR from video+HN traffic; $10-20/day on the exact
    "claude mcp options trading" cluster only if CVR nonzero.
 
@@ -44,19 +37,12 @@ dry-run `POST /generate {"slug":"best-mcp-servers-for-trading-and-finance","dry_
 whether the 08-03 Mon cron fired or 500'd (wk15 slug).
 
 ## SEO posture (measured 08-08)
-Full detail: memory `reports-are-the-seo-asset-not-ticker-pages` +
-`docs/GTM-DISTRIBUTION-PLAYBOOK.md`. The four facts that change decisions:
-- Real external organic demand is **~2 impressions/day** (75 queries / 184 impr per 90d
-  after stripping brand + `site:`). GA4 is **~97% bot**. Never quote a GSC/GA4 aggregate
-  for this property without stripping brand, `site:`, and bot traffic first.
-- **Ticker pages are a dead asset: 452 pages, 3 clicks/90d. Do not build more.** Dated
-  report pages are what ranks (pos 3.0/9.0/9.3 on analyst-shaped queries); the archive is
-  116 pages back to 2026-02-13, 43+ of which had been orphaned but still indexed.
-- Acquire on CURRENT vocabulary (`options flow api` pos 24, `unusual whales alternative`),
-  not category vocabulary: we rank 7.7 for `llm stock options data` and it drew 3
-  impressions in 90 days. Early means the demand does not exist yet, not that we lose.
-- LLM-mediated discovery is the compounding channel: the longest-engaged US session of
-  the month (379s) came from copilot.com.
+GRADUATED to memory `reports-are-the-seo-asset-not-ticker-pages` +
+`docs/GTM-DISTRIBUTION-PLAYBOOK.md`. Read one of those before any SEO/GTM decision.
+Two facts too costly to rediscover: **ticker pages are a dead asset (452 pages,
+3 clicks/90d) — do not build more**, and **never quote a GSC/GA4 aggregate for this
+property without first stripping brand, `site:`, and bot traffic** (that is 53% of
+impressions and ~97% of sessions).
 
 ## Owner queue
 - 🟡 **WATCH Mon 08-10 09:52 ET — first pick under a print floor that actually fires.**
@@ -102,11 +88,9 @@ Full detail: memory `reports-are-the-seo-asset-not-ticker-pages` +
   took, and re-check `options flow api` position (was 24.2 pre-FAQ).
 - **08-10 Mon 07:00 ET:** first `dbt-source-freshness` run that CAN go red.
 - **08-09 Sun 08:00 ET:** first scheduled universe weekly refresh — spot-check it fired.
-- **Thu 08-13:** owner's own trial converts — first real-card charge. The T-3 warning email
-  fired correctly 08-08 (right amount, date, sender, manage link), so the dunning path is
-  proven; what remains is `invoice.paid` firing the newly-registered webhook and refreshing
-  `proUntil`. NOTE: this is the owner's own subscription, never a subscriber count.
-  Memory `billing-lifecycle-verified-on-real-card`.
+- **Thu 08-13:** owner's OWN trial converts (never a subscriber count). T-3 warning email
+  verified correct 08-08, so dunning is proven; what remains is `invoice.paid` firing the
+  new webhook path + refreshing `proUntil`. Memory `billing-lifecycle-verified-on-real-card`.
 - **08-17 / 10-05 kill-switch gates** — memory `mcp-monetization-killswitch`.
 - **~08-27:** re-fit print/liq thresholds on ~30 more days of `pool_liquidity_snapshot`
   (review hard requirement — 15-day in-sample fits). NOT a re-run of the 07-28 study,
