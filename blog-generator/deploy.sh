@@ -23,6 +23,19 @@
 # Mailgun secrets (same names as signal-notifier — no new GCP secrets needed):
 #   MAILGUN_API_KEY  Secret Manager  MAILGUN_API_KEY:latest
 #   MAILGUN_DOMAIN   Secret Manager  MAILGUN_DOMAIN:latest
+#
+# SEO_ADMIN_TOKEN (added 2026-07-30) gates /admin/site_verify + /seo_query
+# (SA-authed GSC access — see app/tools.py). As of 2026-08-07 it is a MOUNTED
+# SECRET (Secret Manager `SEO_ADMIN_TOKEN:latest`), not a --set-env-vars value.
+#   * It was the only credential on this service NOT in Secret Manager, on the
+#     service's only privileged routes.
+#   * The old carry-forward recipe told the operator to `grep` the live value
+#     out of `gcloud run services describe`, which PRINTS the token to stdout,
+#     shell history, and scrollback. Deleted.
+#   * As a mount it survives --set-env-vars replacement, so the deploy trap that
+#     silently 503'd these routes is gone.
+# Mounted secrets arrive with a trailing newline — _require_seo_token() strips
+# before comparing. Rotate with: gcloud secrets versions add SEO_ADMIN_TOKEN.
 set -e
 
 # Stage shared gammarips_content lib into build context.
@@ -41,22 +54,48 @@ MAX_RECIPIENTS="${MAX_RECIPIENTS:-1000}"
 # properties (same ids the read-only scripts/seo/ tooling uses):
 #   GA4_PROPERTY_ID  534472819 is the live property; 506898594 is an empty
 #                    duplicate — do NOT use it.
-#   GSC_SITE_URL     'sc-domain:gammarips.com' (or 'https://gammarips.com/').
+#   GSC_SITE_URL     MUST be 'https://gammarips.com/' (the URL-prefix property).
+#                    'sc-domain:gammarips.com' is NOT interchangeable: the SA's
+#                    access comes from META verification of the URL-prefix form
+#                    (2026-07-30), which does not cover the domain property.
 # NOTE: the env var is necessary but not sufficient — the runtime SA
 # (406581297632-compute@) must also be granted GA4 Viewer + a GSC user, or the
 # API calls 403 and the endpoint still reports "unavailable".
 GA4_PROPERTY_ID="${GA4_PROPERTY_ID:-534472819}"
-GSC_SITE_URL="${GSC_SITE_URL:-sc-domain:gammarips.com}"
+# URL-prefix property, not sc-domain: the SA's access comes from META
+# verification of https://gammarips.com/ (2026-07-30), which does not cover
+# the domain property.
+GSC_SITE_URL="${GSC_SITE_URL:-https://gammarips.com/}"
 
 # Runs as the project default compute SA — same as x-poster, has Vertex AI +
 # logging + Firestore + GCS via project-level inheritance. The earlier
 # firebase-adminsdk-fbsvc binding required per-role IAM grants for every
 # capability the service touched (Vertex AI, logging, ...) which got tedious.
+#
+# IAM-LOCKED since 2026-08-07 (--no-allow-unauthenticated). It was public, and
+# `POST /blast_latest {"audience":"all","dry_run":false}` needed NO guessed
+# arguments: it auto-discovers the latest draft and fans the real newsletter to
+# every non-anonymous user (cap MAX_RECIPIENTS). The only brake was the
+# blast_history/{date} idempotency lock, which capped an unauthorized send at
+# one per draft date, not zero. /blast_email, /generate, /draft_reddit and
+# /weekly_intel were equally open. Adding a token gate to each route would have
+# been a LARGER change than closing the front door.
+#
+# Callers now need an identity token:
+#   * The 5 Cloud Scheduler jobs (blog-generator-weekly,
+#     content-drafter-weekly-email, content-blast-mon-0530,
+#     weekly-intel-mon-0700, content-drafter-weekly-reddit) use OIDC as
+#     406581297632-compute@developer.gserviceaccount.com, which holds
+#     roles/run.invoker on this service.
+#   * Ad-hoc / operator calls (e.g. /seo_query, a manual /generate):
+#       curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" ...
+#     The X-Seo-Token header is now a SECOND factor on the SEO routes, not the
+#     only one.
 gcloud run deploy blog-generator \
   --project=profitscout-fida8 \
   --region=us-central1 \
   --source=. \
-  --allow-unauthenticated \
+  --no-allow-unauthenticated \
   --memory=2Gi \
   --timeout=900 \
   --cpu=1 \
@@ -64,7 +103,7 @@ gcloud run deploy blog-generator \
   --max-instances=2 \
   --service-account="406581297632-compute@developer.gserviceaccount.com" \
   --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,N_TRADES_UNLOCK=30,DRY_RUN=${DRY_RUN},OPERATOR_EMAIL=${OPERATOR_EMAIL},EMAIL_DRAFTS_BUCKET=${EMAIL_DRAFTS_BUCKET},MAX_RECIPIENTS=${MAX_RECIPIENTS},GA4_PROPERTY_ID=${GA4_PROPERTY_ID},GSC_SITE_URL=${GSC_SITE_URL}" \
-  --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest"
+  --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,SEO_ADMIN_TOKEN=SEO_ADMIN_TOKEN:latest"
 
 # ---------------------------------------------------------------------------
 # Cloud Scheduler — DOCUMENTATION ONLY. DO NOT auto-run from this script.

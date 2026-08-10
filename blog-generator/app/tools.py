@@ -9,13 +9,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
 from google.cloud import bigquery, firestore, storage
 
-from gammarips_content import compliance, firestore_helpers, voice_rules
+from gammarips_content import cohort, compliance, firestore_helpers, voice_rules
 
 logger = logging.getLogger(__name__)
 
@@ -203,8 +204,14 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         }
 
     date_iso = scan_date or _today_et_iso()
-    # V6 only — prior cohorts are historical noise that would falsely trip the
-    # 30-trade unlock gate. Drop INVALID_LIQUIDITY/SKIPPED non-trades.
+    # LIVE COHORT ONLY — prior cohorts are historical noise that would falsely
+    # trip the 30-trade unlock gate. Drop INVALID_LIQUIDITY/SKIPPED non-trades.
+    # 2026-08-07: this comment was already correct and the SQL was not. Filtering
+    # on `policy_version` ALONE let disowned cohorts back in (resets are
+    # date-filter, not truncations), so this gate read 30 all-time closes under
+    # the V7.1 label and would have tripped on 2026-08-10 — publishing a
+    # "30 trades in the books" milestone on a repudiated cohort. The floor is
+    # now the (label, start date) PAIR from the shared lib.
     query = f"""
         SELECT
             COUNT(*) AS closed_trade_count,
@@ -214,7 +221,7 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         FROM `{LEDGER_TABLE}`
         WHERE exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V7_1_TILTED_GIGO'
+          AND {cohort.LIVE_COHORT_SQL}
           AND DATE(exit_timestamp) <= @scan_date
     """
     try:
@@ -228,8 +235,19 @@ def fetch_live_context(post_type: str, scan_date: str = "") -> dict:
         )
         row = next(iter(job.result()), None)
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"fetch_live_context BQ failed: {exc}")
-        return {"status": "error", "message": str(exc)}
+        # FAIL CLOSED (2026-08-07). This used to return status="error", but the
+        # writer/reviewer prompts branch on status == "blocked" and nothing
+        # else, so an "error" handed the writer a numbers-requiring post type
+        # with NO suppression instruction — a BigQuery hiccup could publish
+        # unverified performance claims. "blocked" is the only safe default for
+        # a gate whose job is to forbid win-rate / P&L claims.
+        logger.error(f"fetch_live_context BQ failed (treating as BLOCKED): {exc}")
+        return {
+            "status": "blocked",
+            "reason": "ledger_read_failed",
+            "message": str(exc),
+            "data": {"closed_trade_count": 0, "unlock_at": N_TRADES_UNLOCK},
+        }
 
     if row is None:
         return {
@@ -679,11 +697,18 @@ def send_email_via_mailgun(
 def get_closed_trade_count(table: str | None = None) -> int:
     """Count trades that actually closed in the live ledger.
 
-    Filters: policy_version='V7_1_TILTED_GIGO' AND exit_reason valid (not
-    INVALID_LIQUIDITY / SKIPPED). Other policy versions (V3, V4) are
-    historical and not part of the public track record. Without this
-    filter the count includes prior-cohort noise (ledger truncated 2026-06-04; V6 cohort
-    starts fresh), which falsely trips the 30-trade unlock gate.
+    Filters: the LIVE COHORT PAIR (`gammarips_content.cohort.LIVE_COHORT_SQL` =
+    policy_version AND entry on/after LIVE_COHORT_START_DATE) AND exit_reason
+    valid (not INVALID_LIQUIDITY / SKIPPED). Earlier policy versions are
+    historical and not part of the public track record.
+
+    The policy label ALONE is NOT sufficient, and the older wording here said
+    otherwise ("ledger truncated 2026-06-04; V6 cohort starts fresh"). Since
+    2026-07-28 cohort resets are DATE-FILTER resets, NOT truncations — disowned
+    cohorts stay in the ledger carrying the same label. Filtering on the label
+    alone let them back in and falsely tripped the 30-trade unlock gate (it read
+    30 on 2026-08-07 against a cohort the engine had just repudiated). See
+    docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
 
     Args:
         table: Fully-qualified table id; defaults to LEDGER_TABLE.
@@ -696,7 +721,7 @@ def get_closed_trade_count(table: str | None = None) -> int:
         SELECT COUNT(*) AS n FROM `{table_id}`
         WHERE exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V7_1_TILTED_GIGO'
+          AND {cohort.LIVE_COHORT_SQL}
     """
     try:
         job = _bq().query(sql)
@@ -763,7 +788,7 @@ def get_recent_v53_closes(days: int = 7) -> list[dict]:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V7_1_TILTED_GIGO'
+          AND {cohort.LIVE_COHORT_SQL}
         ORDER BY exit_timestamp DESC
     """
     try:
@@ -1166,6 +1191,128 @@ def fetch_gsc_search_summary(days: int = 7) -> dict:
         return {"status": "error", "reason": str(exc)}
 
 
+# --- SA-authed GSC access (2026-07-30) -------------------------------------
+#
+# Google blocked the analytics/webmasters OAuth scopes on gcloud's default
+# client ID, so local user-ADC can no longer reach Search Console. This
+# service already runs as the compute SA, so it becomes the project's GSC
+# access path: a one-time Site Verification claim of https://gammarips.com/
+# (the webapp serves the meta token) makes the SA a verified owner, and
+# /seo_query proxies searchanalytics for the gammarips-seo agent. Both routes
+# are gated by the SEO_ADMIN_TOKEN env var (deploy-time value, never in git).
+
+# Reads GSC_SITE_URL so this path cannot silently desync from
+# fetch_gsc_search_summary, which already reads it. Previously hardcoded: an
+# operator flipping the env var to the domain property would have fixed
+# /weekly_intel and left /seo_query pointed at the URL-prefix property, with no
+# error to show for it. Default matches deploy.sh (META verification of
+# https://gammarips.com/ on 2026-07-30 does NOT cover the sc-domain property).
+_GSC_SITE = os.environ.get("GSC_SITE_URL", "https://gammarips.com/").strip() or "https://gammarips.com/"
+# The only properties /seo_query may touch. If the SA ever gains access to
+# other GSC properties, a token-holder must not be able to read them here.
+# Both forms stay allowlisted so flipping GSC_SITE_URL between them is a config
+# change, not a code change — but nothing outside these two is reachable.
+_GSC_ALLOWED_SITES = frozenset({_GSC_SITE, "https://gammarips.com/", "sc-domain:gammarips.com"})
+
+
+def _sa_requested_scopes(scopes: list[str]):
+    """SA credentials with REQUESTED scopes. NOT a security boundary.
+
+    Named for what it does. On Cloud Run the GCE metadata server cannot mint a
+    token narrower than the instance's granted scopes (cloud-platform), and
+    every other path returns the default credential unchanged — so no branch
+    here actually narrows anything. The real control on what a token-holder can
+    reach is `_GSC_ALLOWED_SITES` plus the fact that only these two functions
+    are exposed; do not mistake this call for scope enforcement.
+    """
+    import google.auth
+
+    creds, _ = google.auth.default()
+    try:
+        from google.auth import compute_engine
+
+        if isinstance(creds, compute_engine.Credentials):
+            return compute_engine.Credentials(scopes=scopes)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"_sa_requested_scopes fallback to default: {exc}")
+    return creds
+
+
+def site_verification(action: str) -> dict:
+    """READ-ONLY Site Verification helper for _GSC_SITE as the runtime SA.
+
+    action="get_token": returns the META tag token the webapp must serve.
+
+    The `action="verify"` branch was REMOVED 2026-08-07. It called
+    `webResource().insert()`, which MUTATES external state (claims ownership of
+    gammarips.com against Google) from a service deployed
+    --allow-unauthenticated, with a single shared header token as the only
+    control. Its job was already finished: the META verification completed
+    2026-07-30, so the route was a standing, network-reachable, state-mutating
+    liability with no remaining operational value. If a re-claim is ever needed,
+    run it behind Cloud Run IAM (`gcloud run services proxy` + OIDC invoke),
+    not behind a shared secret on a public endpoint.
+    """
+    from googleapiclient.discovery import build
+
+    creds = _sa_requested_scopes(["https://www.googleapis.com/auth/siteverification"])
+    svc = build("siteVerification", "v1", credentials=creds, cache_discovery=False)
+    site = {"site": {"type": "SITE", "identifier": _GSC_SITE}, "verificationMethod": "META"}
+    try:
+        if action == "get_token":
+            resp = svc.webResource().getToken(body=site).execute()
+            return {"status": "ok", "token": resp.get("token"), "method": "META"}
+        return {
+            "status": "error",
+            "reason": f"unsupported action '{action}' (only 'get_token' is available)",
+        }
+    except Exception as exc:  # noqa: BLE001
+        # Never return exception text to the caller. HttpError.__str__ renders
+        # the full request URI plus the API error body, which names the runtime
+        # service account and the property. Log it, hand back a correlation id.
+        cid = uuid.uuid4().hex[:12]
+        logger.warning(f"site_verification({action}) failed [cid={cid}]: {exc}")
+        return {"status": "error", "reason": "site_verification failed", "cid": cid}
+
+
+def gsc_searchanalytics(
+    start_date: str,
+    end_date: str,
+    dimensions: list[str],
+    row_limit: int = 100,
+    start_row: int = 0,
+    site_url: str | None = None,
+) -> dict:
+    """Raw Search Console searchanalytics.query passthrough as the SA."""
+    from googleapiclient.discovery import build
+
+    site = (site_url or _GSC_SITE).strip()
+    if site not in _GSC_ALLOWED_SITES:
+        return {"status": "error", "reason": f"site_url '{site}' not in allowlist"}
+    creds = _sa_requested_scopes(["https://www.googleapis.com/auth/webmasters.readonly"])
+    svc = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
+    body = {
+        "startDate": start_date,
+        "endDate": end_date,
+        "dimensions": dimensions,
+        "rowLimit": max(1, min(int(row_limit or 100), 25000)),
+        "startRow": max(0, int(start_row or 0)),
+    }
+    try:
+        resp = svc.searchanalytics().query(siteUrl=site, body=body).execute()
+        return {
+            "status": "ok",
+            "site": site,
+            "rows": resp.get("rows", []) or [],
+            "aggregation": resp.get("responseAggregationType"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        # See site_verification: no exception text over the wire.
+        cid = uuid.uuid4().hex[:12]
+        logger.warning(f"gsc_searchanalytics failed [cid={cid}]: {exc}")
+        return {"status": "error", "reason": "search analytics query failed", "cid": cid}
+
+
 def fetch_recent_blast_history(weeks: int = 4) -> list[dict]:
     """Last N weeks of newsletter blast history. Reverse-chronological."""
     from datetime import timedelta as _td
@@ -1211,7 +1358,7 @@ def fetch_ledger_intel_summary(days: int = 30) -> dict:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V7_1_TILTED_GIGO'
+          AND {cohort.LIVE_COHORT_SQL}
     """
     try:
         job = _bq().query(

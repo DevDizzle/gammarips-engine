@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 
 import google.auth
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from google.adk.cli.fast_api import get_fast_api_app
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -1341,6 +1341,71 @@ class DraftRedditResponse(BaseModel):
     drafts: list[DraftRedditDraftItem] = []
     operator_send_status: Optional[str] = None
     error: Optional[str] = None
+
+
+# --- /admin/site_verify + /seo_query -- SA-authed GSC access (2026-07-30) --
+#
+# This service is deployed --allow-unauthenticated, so these two routes carry
+# their own gate: the X-Seo-Token header must match the SEO_ADMIN_TOKEN env
+# var (a deploy-time value, never committed; fail-closed when unset). See the
+# matching comment block in app/tools.py for why this service is the GSC path.
+
+
+def _require_seo_token(x_seo_token: Optional[str]) -> None:
+    # NOTE: .strip() is load-bearing on `expected` — SEO_ADMIN_TOKEN is now a
+    # MOUNTED SECRET, and Secret Manager mounts arrive with a trailing newline.
+    expected = os.environ.get("SEO_ADMIN_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="SEO routes not enabled (no token configured)")
+    import hmac
+
+    supplied = (x_seo_token or "").strip().encode("utf-8", "ignore")
+    if not (supplied and hmac.compare_digest(supplied, expected.encode("utf-8"))):
+        # These are the only privileged routes on an --allow-unauthenticated
+        # service; a brute-force attempt must not be invisible. Never log the
+        # supplied value.
+        # NB: module-level `logger` is a Cloud Logging client (log_struct only,
+        # no .warning) — use the stdlib one.
+        _py_logger.warning("SEO route auth REJECTED (bad or missing X-Seo-Token)")
+        raise HTTPException(status_code=403, detail="bad or missing X-Seo-Token")
+
+
+class SiteVerifyRequest(BaseModel):
+    # "verify" REMOVED 2026-08-07 — see tools.site_verification. It mutated
+    # external state (claimed GSC ownership) from an --allow-unauthenticated
+    # service behind only a shared header token, and the verification it
+    # performed was already completed on 2026-07-30. Read-only from here.
+    action: Literal["get_token"]
+
+
+@app.post("/admin/site_verify")
+def admin_site_verify(req: SiteVerifyRequest, x_seo_token: Optional[str] = Header(default=None)) -> dict:
+    """READ-ONLY: fetch the META verification token for https://gammarips.com/."""
+    _require_seo_token(x_seo_token)
+    return tools.site_verification(req.action)
+
+
+class SeoQueryRequest(BaseModel):
+    start_date: str  # YYYY-MM-DD
+    end_date: str  # YYYY-MM-DD
+    dimensions: list[str] = Field(default_factory=lambda: ["query"])
+    row_limit: int = 100
+    start_row: int = 0
+    site_url: Optional[str] = None
+
+
+@app.post("/seo_query")
+def seo_query(req: SeoQueryRequest, x_seo_token: Optional[str] = Header(default=None)) -> dict:
+    """Search Console searchanalytics passthrough for the gammarips-seo agent."""
+    _require_seo_token(x_seo_token)
+    return tools.gsc_searchanalytics(
+        start_date=req.start_date,
+        end_date=req.end_date,
+        dimensions=req.dimensions,
+        row_limit=req.row_limit,
+        start_row=req.start_row,
+        site_url=req.site_url,
+    )
 
 
 @app.post("/draft_reddit", response_model=DraftRedditResponse)

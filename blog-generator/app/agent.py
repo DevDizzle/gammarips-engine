@@ -155,9 +155,11 @@ Responsibilities:
 3. If the schedule_slot's `type` is one of:
      weekly_engine_recap, performance_post, post_mortem, video_demo
    then call `fetch_live_context(post_type=<that type>, scan_date=<today ET>)`.
-   If the returned `live_context.status == "blocked"` (closed_trade_count < 30),
+   If the returned `live_context.status` is ANYTHING OTHER THAN "success"
+   (e.g. "blocked" when closed_trade_count < 30, or a ledger read failure),
    the outline must EXPLICITLY remove any win-rate/P&L claim and label the post
-   as structural-only. Do NOT fabricate numbers.
+   as structural-only. Treat only an explicit "success" as permission to use
+   numbers. Do NOT fabricate numbers.
 4. Produce the final `post_outline` dict. CRITICAL: embed the raw
    `schedule_slot` and `live_context` tool results as nested keys —
    downstream agents (writer, reviewer) read them from here, not from
@@ -288,7 +290,8 @@ Forbidden (retired aliases — hard-fail if present):
 - "premium signal"
 - "interactive dashboard"
 
-If `post_outline.live_context.status == "blocked"`, DO NOT include any
+If `post_outline.live_context.status` is anything other than "success"
+(including "blocked" and any error status), DO NOT include any
 win-rate, closed trades, or P&L numbers. Pivot to structural claims only
 (e.g. "every candidate clears a hard bullish gate and an earnings-window
 exclusion before it reaches the pool").
@@ -345,8 +348,9 @@ Decision rules — walk them in order:
        "today's pick"/"daily pick", "premium signal", "interactive dashboard".
      - Tone: disciplined, numbers-first, short declarative sentences.
      - Disclaimer block present AND unmodified (exact wording from voice_rules).
-     - If schedule_slot.type requires live data and live_context is blocked,
-       post must NOT claim win rates or P&L.
+     - If schedule_slot.type requires live data and live_context.status is
+       anything other than "success" (blocked, or any error), the post must
+       NOT claim win rates or P&L. Only "success" permits numbers.
 
 3. If all holistic checks pass → status = APPROVE, notes = "".
    Otherwise → status = REVISE, notes = specific fixes.
