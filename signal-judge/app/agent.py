@@ -141,6 +141,22 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
     # tournament_v1_1 (2026-07-28): ONE added instruction — the liquidity
     # directive below. Everything else is byte-identical to tournament_v1.
     # See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
+    #
+    # tournament_v1_2 (2026-08-07): TWO added sentences, everything else
+    # byte-identical to v1_1 (same discipline as the v1 -> v1_1 bump; enforced by
+    # signal-judge/tests/unit/test_prompt_v1_2.py against the stored v1_1 golden).
+    #   (a) the "early_volume of 0" sentence — until 2026-08-07 a zero print count
+    #       could not physically reach this prompt (Polygon never serves a
+    #       zero-volume day bar, so the notifier's floor never fired). Now that
+    #       the notifier date-validates the bar, 0 is a real, common value and
+    #       the fail-soft restore path deliberately puts sub-floor names back in
+    #       front of the judge — this sentence is the SECOND wall behind the
+    #       floor, and it is load-bearing on most days, not a corner case.
+    #   (b) the numbers-in-the-why clause — the 08-07 GCT rationale ("massive
+    #       early volume (2045) confirming actionable liquidity") flowed into the
+    #       operator email as if verified. A why that carries its numbers makes a
+    #       bad number visible and auditable downstream.
+    # See docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
     return (
         "Your goal: make money buying a single option and selling it for a profit within 3 trading days.\n"
         "Buying the right stock is not enough — the option must capture the move within 3 days, "
@@ -154,10 +170,14 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
         "Candidates may include early_volume (contracts traded so far this morning), "
         "oi_build (overnight open-interest change), and expected_liquidity (CLEAN/THIN). "
         "A pick that cannot be traded is a loss regardless of thesis: among comparable "
-        "setups, prefer the one showing real early trading activity.\n\n"
+        "setups, prefer the one showing real early trading activity. "
+        "An early_volume of 0 means the contract had not printed at all as of the "
+        "pick-time read; treat it as untradeable unless no candidate shows prints.\n\n"
         f"{rulebook_directive}"
         'Rank the contracts you would buy, best first. Return ONLY JSON: '
         '{"picks":["<ticker>","<ticker>",...],"why":"<one sentence on your #1 pick>"}'
+        ". If liquidity influenced your ranking, the why must state the "
+        "early_volume and oi_build values you relied on."
     )
 
 

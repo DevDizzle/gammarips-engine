@@ -54,16 +54,22 @@ MIN_SCORER_SUCCESS_FRAC = float(os.getenv("MIN_SCORER_SUCCESS_FRAC", "0.5"))
 # in signal_ranker_runs (mode=REQUIRED columns can't be nulled), so the
 # post-collapse cohort is cleanly separable from the v5 two-stage cohort.
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", PICKER_MODEL)
-# version 8 = tournament_v1_1 (2026-07-28 liquidity directive: early_volume /
+# version 9 = tournament_v1_2 (2026-08-07 stale-day-bar fix: two sentences added
+# to _build_prompt — the "early_volume of 0 = untradeable" second wall and the
+# numbers-in-the-why clause — otherwise byte-identical to v1_1);
+# 8 = tournament_v1_1 (2026-07-28 liquidity directive: early_volume /
 # oi_build / expected_liquidity line added to _build_prompt — otherwise
 # byte-identical); 7 = bracket tournament tournament_v1 (2026-06-04);
 # 6 = judge_v6 single call; 5 = two-stage. Mirrored into BOTH
 # scorer_/picker_prompt_version (REQUIRED cols) so cohorts stay separable.
+# NOTE: this is an INT (the ledger provenance column); the human-readable
+# "tournament_v1_N" string is JUDGE_PROMPT_LABEL below — bump BOTH together.
 # NOTE: production pins these via deploy.sh --set-env-vars — keep code default,
 # deploy.sh, and this comment in sync. No version-8 rows existed in
-# signal_ranker_runs before 2026-07-28 (verified), so 8 cleanly labels v1_1.
-JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "8"))
-JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1_1")
+# signal_ranker_runs before 2026-07-28 (verified), so 8 cleanly labels v1_1;
+# version 9 is unused before 2026-08-07 for the same reason.
+JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "9"))
+JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1_2")
 # Bounded retry for the single fused call — one malformed structured output no
 # longer forfeits the whole slate (replaces the gather+MIN_SCORER_SUCCESS_FRAC
 # partial-failure tolerance lost in the collapse).

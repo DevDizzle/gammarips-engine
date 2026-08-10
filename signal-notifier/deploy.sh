@@ -45,7 +45,7 @@ gcloud run deploy $SERVICE_NAME \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=1 \
-  --set-env-vars="SIGNAL_JUDGE_URL=https://signal-judge-406581297632.us-central1.run.app,OI_FLOOR=1000,TOURNEY_MIN=8,LIQUIDITY_TILT=true,PRINT_FLOOR_ENABLED=true,PRINT_FLOOR_MIN=1" \
+  --set-env-vars="SIGNAL_JUDGE_URL=https://signal-judge-406581297632.us-central1.run.app,OI_FLOOR=1000,TOURNEY_MIN=8,LIQUIDITY_TILT=true,PRINT_FLOOR_ENABLED=true,PRINT_FLOOR_MIN=1,PRINT_VALID_AFTER_ET_MIN=590,PRINT_BAR_MAX_AGE_DAYS=10" \
   --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,FMP_API_KEY=FMP_API_KEY:latest,POLYGON_API_KEY=POLYGON_API_KEY:latest,POOL_LIQ_REFRESH_TOKEN=POOL_LIQ_REFRESH_TOKEN:latest" \
   --service-account="firebase-adminsdk-fbsvc@$PROJECT_ID.iam.gserviceaccount.com"
 

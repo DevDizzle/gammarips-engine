@@ -55,7 +55,7 @@ The enriched BULLISH slate goes to **signal-judge** (`tournament_v1`, `gemini-3.
 - If EV < 0 → pause, re-run the research angle
 
 ## Services (reference only)
-`overnight-scanner (23:00 ET) → enrichment-trigger (05:30 ET) → overnight-report-generator → signal-notifier (09:45 ET; moving to 09:52 with the 2026-07-28 liquidity upgrade, deploy pending review) ← signal-judge (V7.1 tournament_v1_1) → email + Firestore todays_pick → forward-paper-trader (ledger)`
+`overnight-scanner (23:00 ET) → enrichment-trigger (05:30 ET) → overnight-report-generator → signal-notifier (09:52 ET, VERIFIED `52 9 * * 1-5` America/New_York) ← signal-judge (V7.1 tournament_v1_2) → email + Firestore todays_pick → forward-paper-trader (ledger)`
 
 ## Source of truth
 This file + `docs/TRADING-STRATEGY.md` + `docs/GLOSSARY.md`. Everything else in `docs/archive/` is historical.

@@ -91,7 +91,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 # the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
 #   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
-LIVE_COHORT_START_DATE = "2026-07-29"  # TOURNAMENT-LIQUIDITY cohort (reset 2026-07-28, gammarips-review adjudication): first ENTRY under the two-tier print/OI slate floor + tournament_v1_1 judge (scan 07-28 -> entry 07-29). Unlike the 06-25 reset the ledger is NOT truncated — the 22 prior live-OI-floor rows stay in forward_paper_ledger, excluded from the public cohort by this date filter (archival over deletion). policy_version STAYS V7_1_TILTED_GIGO (exit mechanics unchanged; only selection is liquidity-aware). Precedent: the 06-25 live-OI floor reset (docs/DECISIONS/2026-06-25-cohort-reset-live-oi.md); this change is strictly larger (slate floor + judge information set + prompt v1_1 + 09:52 pick time). See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
+LIVE_COHORT_START_DATE = "2026-08-10"  # WORKING-PRINT-FLOOR cohort (reset 2026-08-07, owner call): first ENTRY under a print floor that actually fires (scan 08-07 -> entry Mon 08-10; cron is 52 9 * * 1-5 ET). The 2026-07-29 cohort it replaces was selected under tournament_v1_1 MINUS its primary floor: _fetch_live_oi read day.volume without day.last_updated, Polygon never serves a zero-volume day bar, so the early-print floor dropped ZERO candidates for that cohort's entire life and the judge's early_volume was a prior-session total on ~40% of each slate (2 of 7 entries — HUT 07-31, TGT 08-04 — were picked on a phantom count and would not have survived the fixed floor). The deployed policy was never the approved policy, hence the reset. Same shape as the 07-28 and 06-25 resets: NO truncation — the 7 rows of the 07-29 cohort and the 22 before them stay in forward_paper_ledger, excluded from the public cohort by this date filter (archival over deletion); cohort_stats/current is fully recomputed from this constant, so no Firestore state to clear (the public panel legitimately shows 0 closed until the first 08-10+ trade closes). policy_version STAYS V7_1_TILTED_GIGO (exit mechanics unchanged; only selection is liquidity-aware). See docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
 
 # Fixed-dollar position sizing for the public cohort_stats panel.
 # The ledger records actual per-contract premium + percent return; the public
@@ -266,6 +266,34 @@ LIQUIDITY_TILT = os.environ.get("LIQUIDITY_TILT", "true").strip().lower() in ("1
 # accrues.
 PRINT_FLOOR_ENABLED = os.environ.get("PRINT_FLOOR_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 PRINT_FLOOR_MIN = int(os.environ.get("PRINT_FLOOR_MIN", "1"))
+
+# DAY-BAR DATE VALIDATION (2026-08-07, see
+# docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md). Polygon's v3 option
+# snapshot serves the PRIOR SESSION's `day` bar when a contract has not printed
+# yet today; it NEVER reports a zero-volume bar (49,285 pool_liquidity_snapshot
+# reads: day.volume is never 0 and never NULL). The raw volume field therefore
+# CANNOT express "no prints today" — yesterday's session total masquerades as
+# this morning's print count whenever the tape is silent. Consequence: the
+# early-print floor above never dropped a single candidate between its
+# 2026-07-29 go-live and 2026-08-07 (a structural no-op, not an intermittent
+# miss), the judge's `early_volume` was a prior-session total for ~50% of each
+# slate, and the operator email stamped those phantom counts "(confirmed)".
+# The fix: read `day.last_updated` and treat a bar dated before the read day
+# (ET) as a KNOWN ZERO, which the existing floor then drops. No new gate.
+#   * PRINT_VALID_AFTER_ET_MIN: minutes past ET midnight before which a stale
+#     bar is UNKNOWN (None) rather than a known zero. Pre-open — and in the
+#     first minutes after the open on a 15-min-DELAYED feed — every bar is
+#     legitimately the prior session's, so calling those "0 prints" would empty
+#     the whole slate into the fail-soft restore. The 09:52 cron reads prints
+#     through ~09:37; the 07-28 study measured 09:45 as showing NOTHING.
+#     Default 590 = 09:50 ET, i.e. only the post-09:50 read may assert a zero.
+#   * PRINT_BAR_MAX_AGE_DAYS: a parsed bar date further back than this (or in the
+#     future) is treated as UNDATABLE rather than as evidence of a zero. Guards
+#     against a vendor timestamp-unit change silently inverting the interlock
+#     from fail-open into drop-everything. 10 covers the longest exchange
+#     holiday gap with room to spare.
+PRINT_VALID_AFTER_ET_MIN = int(os.environ.get("PRINT_VALID_AFTER_ET_MIN", "590"))
+PRINT_BAR_MAX_AGE_DAYS = int(os.environ.get("PRINT_BAR_MAX_AGE_DAYS", "10"))
 
 # Per-candidate Polygon option-snapshot timeout (seconds). Matches the
 # compute_active_days_20d single-attempt / 8s fail-soft pattern. The whole
@@ -576,6 +604,27 @@ def write_todays_pick_doc(
             # forward_paper_ledger load job). None on liquidity-tilt-off / failed
             # refresh / FALLBACK days (the col only exists post-_liquidity_refresh).
             "live_oi": _int("live_oi") if "live_oi" in top else None,
+            # Print-validation provenance (2026-08-07). The 08-07 GCT incident was
+            # not "a number was wrong" but "the artifact could not tell you the
+            # number was phantom" — Cloud Run logs were the only trace and they
+            # age out. Same argument the vix_source field already accepts below.
+            # C5-safe for the same reason as live_oi: Firestore is schemaless and
+            # this never touches the forward_paper_ledger load job.
+            #   early_volume        — the DATE-VALIDATED print count (0 = known no
+            #                         tape; null = UNKNOWN, i.e. fetch failed).
+            #   day_bar_stale       — True when the snapshot served a PRIOR-session
+            #                         day bar (the condition that used to render as
+            #                         a phantom "confirmed" count).
+            #   print_floor_restored— True when the fail-soft floor put this pick
+            #                         back on the slate after it failed a floor.
+            "early_volume": _int("_today_volume") if "_today_volume" in top else None,
+            "day_bar_stale": (
+                bool(_known_prints(top) == 0) if "_today_volume" in top else None
+            ),
+            "print_floor_restored": (
+                bool(top.get("_print_floor_restored"))
+                if "_print_floor_restored" in top else None
+            ),
             "vol_oi_ratio": _num("volume_oi_ratio"),
             "moneyness_pct": _num("moneyness_pct"),
             "call_dollar_volume": _num("call_dollar_volume"),
@@ -1298,25 +1347,133 @@ def _edge_rank_and_cap(df: pd.DataFrame, k: int) -> pd.DataFrame:
     return scored
 
 
-def _fetch_live_oi(underlying: str, contract: str) -> tuple[int | None, int | None, str]:
+def _day_bar_et_date(last_updated_ns) -> date | None:
+    """Polygon ``day.last_updated`` (epoch NANOseconds) -> its ET calendar date.
+
+    Mirrors the ns->UTC conversion idiom in ``pool_liquidity._ns_to_iso``, then
+    localizes to ET. Returns None when the field is absent, zero, or
+    unparseable — callers treat that as UNDATABLE (fail-open), never as zero.
+    """
+    if not last_updated_ns:
+        return None
+    try:
+        return (
+            datetime.fromtimestamp(int(last_updated_ns) / 1e9, tz=pytz.UTC)
+            .astimezone(est)
+            .date()
+        )
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _validate_day_bar_volume(
+    today_volume: int | None,
+    last_updated_ns,
+    contract: str,
+    read_dt_et: datetime | None = None,
+) -> int | None:
+    """Date-validate a snapshot day-bar volume into a usable print count.
+
+    Polygon serves the PRIOR session's day bar for a contract that has not
+    printed today, so a raw ``day.volume`` read cannot distinguish "traded 2,045
+    times this morning" from "traded 2,045 times yesterday and not at all today".
+    This resolves that using ``day.last_updated``:
+
+      * bar dated TODAY (ET)            -> pass the volume through (real prints).
+      * bar dated EARLIER + read after
+        PRINT_VALID_AFTER_ET_MIN        -> **KNOWN ZERO** (int 0): the contract
+                                           has not traded today. The existing
+                                           print floor drops it.
+      * bar dated EARLIER + read BEFORE
+        PRINT_VALID_AFTER_ET_MIN        -> None (UNKNOWN). Pre-open / early-open
+                                           on a delayed feed, every bar is
+                                           legitimately stale; asserting zero
+                                           there would empty the slate.
+      * undatable bar (no last_updated) -> None (UNKNOWN, fail-open). Never
+                                           observed in 49,285 real reads; if
+                                           Polygon ever drops the field we
+                                           degrade to the pre-fix keep, not to a
+                                           mass drop. Logged at WARNING.
+
+    The KNOWN-ZERO vs UNKNOWN distinction is the whole point (``_known_prints``
+    and C4 fail-open depend on it) — a genuine fetch failure must stay None.
+    """
+    if today_volume is None:
+        return None
+    read_dt = read_dt_et if read_dt_et is not None else datetime.now(est)
+    bar_date = _day_bar_et_date(last_updated_ns)
+
+    # SANITY BOUND: only a bar dated within the last PRINT_BAR_MAX_AGE_DAYS (and
+    # not in the future) is trusted enough to assert a zero. If Polygon ever
+    # changes `last_updated` units (ns -> ms is the obvious one, and a silent
+    # vendor-semantics change is exactly what caused this incident), every
+    # contract would parse to a 1970 date and the interlock would invert from
+    # fail-open to drop-everything. Out-of-range = UNDATABLE = fail-open.
+    if bar_date is not None:
+        age_days = (read_dt.date() - bar_date).days
+        if age_days < 0 or age_days > PRINT_BAR_MAX_AGE_DAYS:
+            logger.warning(
+                f"Option snapshot {contract}: day.last_updated parses to "
+                f"{bar_date} ({age_days}d from read date {read_dt.date()}) — "
+                f"outside the trusted window. Treating print count as UNKNOWN "
+                f"(fail-open). If this fires broadly, suspect a Polygon "
+                f"timestamp-unit change and check before trusting the floor."
+            )
+            return None
+        if bar_date == read_dt.date():
+            return today_volume
+
+    if (read_dt.hour * 60 + read_dt.minute) < PRINT_VALID_AFTER_ET_MIN:
+        # Too early on a 15-min-delayed feed for "no prints" to carry meaning.
+        return None
+    if bar_date is None:
+        logger.warning(
+            f"Option snapshot {contract}: day.volume={today_volume} with no "
+            f"parseable day.last_updated — treating print count as UNKNOWN "
+            f"(fail-open), NOT as a validated count."
+        )
+        return None
+    logger.info(
+        f"Stale day bar {contract}: bar dated {bar_date} (ET) < read date "
+        f"{read_dt.date()}; day.volume={today_volume} is the PRIOR session's "
+        f"total, not today's prints -> known 0."
+    )
+    return 0
+
+
+def _fetch_live_oi(
+    underlying: str, contract: str, read_dt_et: datetime | None = None
+) -> tuple[int | None, int | None, str]:
     """Re-fetch LIVE open interest for one option contract at pick time.
 
     Returns ``(live_oi, today_volume, status)`` where:
       * ``live_oi``      — ``results.open_interest`` (int) or None.
-      * ``today_volume`` — ``results.day.volume`` (int) or None. Stored under the
-        INTERNAL ``_today_volume`` key (raw key popped before the /rank payload);
-        as of 2026-07-28 it reaches the judge ONLY via the sanctioned
-        ``early_volume`` alias (owner-approved, same pre-entry leakage class as
-        live_oi — see docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md).
-        NOTE: on the 15-min-delayed feed this is ~always 0/None before ~09:52 ET —
-        the print floor requires the 09:52 cron to be meaningful.
+      * ``today_volume`` — the DATE-VALIDATED entry-day print count (int) or None
+        when UNKNOWN. Stored under the INTERNAL ``_today_volume`` key (raw key
+        popped before the /rank payload); as of 2026-07-28 it reaches the judge
+        ONLY via the sanctioned ``early_volume`` alias (owner-approved, same
+        pre-entry leakage class as live_oi — see
+        docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md).
+        NOTE (corrected 2026-08-07): the raw ``results.day.volume`` is NOT
+        "~always 0/None before ~09:52" — Polygon never serves a zero-volume day
+        bar. Before the contract prints today it serves YESTERDAY's bar with
+        yesterday's non-zero total. ``_validate_day_bar_volume`` converts that
+        case to a known 0; see docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
       * ``status``       — "ok" | "polygon_empty" | "polygon_error".
+
+    ``read_dt_et`` is the ET datetime the read is attributed to (defaults to
+    now). Injected by tests; the live path always reads "now" because the
+    snapshot endpoint only ever returns current data.
 
     C1 (LEAKAGE, non-negotiable): the v3/snapshot/options response also carries
     ``implied_volatility``, ``greeks`` (delta/gamma/theta/vega), ``day`` OHLC,
     ``last_trade`` and ``last_quote`` — all entry-day-LIVE (10:00+ window). This
-    function extracts ONLY open_interest and day.volume and lets the rest of the
-    response go out of scope here. NOTHING else crosses the function boundary.
+    function extracts ONLY open_interest, day.volume and day.last_updated, and
+    lets the rest of the response go out of scope here. NOTHING else crosses the
+    function boundary. ``day.last_updated`` is a TIMESTAMP used solely to
+    validate the volume field — no price / greek / IV information rides along,
+    and it is strictly pre-entry (read ~09:52 vs 10:00 entry), the same leakage
+    class as the already-permitted live_oi and day.volume reads.
 
     Single attempt, 8s timeout, fail-soft — never raises (mirrors
     compute_active_days_20d). On any failure the caller keeps the candidate with
@@ -1353,14 +1510,17 @@ def _fetch_live_oi(underlying: str, contract: str) -> tuple[int | None, int | No
         # 200 with no results = contract not found / no snapshot. Fail-soft.
         return None, None, "polygon_empty"
 
-    # --- C1: extract ONLY open_interest + day.volume; discard everything else ---
+    # --- C1: extract ONLY open_interest + day.volume + day.last_updated; ---
+    # --- discard everything else -------------------------------------------
     # `res.get("greeks")`, `res.get("implied_volatility")`, `res.get("day")` OHLC,
     # `res.get("last_trade")`, `res.get("last_quote")` are all entry-day-live and
-    # are DELIBERATELY NOT read. `oi` and `vol` below are the only two scalars
-    # that survive past this point.
+    # are DELIBERATELY NOT read. `oi`, `vol` and the bar TIMESTAMP below are the
+    # only three scalars that survive past this point, and the timestamp exists
+    # solely to date-validate `vol` (2026-08-07).
     oi_raw = res.get("open_interest")
     day = res.get("day") if isinstance(res.get("day"), dict) else {}
     vol_raw = day.get("volume")
+    bar_last_updated = day.get("last_updated")
     try:
         live_oi = int(oi_raw) if oi_raw is not None else None
     except (TypeError, ValueError):
@@ -1369,6 +1529,9 @@ def _fetch_live_oi(underlying: str, contract: str) -> tuple[int | None, int | No
         today_volume = int(vol_raw) if vol_raw is not None else None
     except (TypeError, ValueError):
         today_volume = None
+    today_volume = _validate_day_bar_volume(
+        today_volume, bar_last_updated, contract, read_dt_et
+    )
     return live_oi, today_volume, "ok"
 
 
@@ -1473,6 +1636,13 @@ def _refresh_live_oi_batch(df: pd.DataFrame) -> pd.DataFrame:
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    # ONE read clock for the whole batch (2026-08-07). Each worker would
+    # otherwise evaluate datetime.now(est) independently, so a batch straddling
+    # PRINT_VALID_AFTER_ET_MIN could validate part of a slate as UNKNOWN and part
+    # as KNOWN-ZERO. Not reachable at the 09:52 cron, but it would make a run
+    # non-replayable, and this whole defect class is about unreproducible reads.
+    read_dt_et = datetime.now(est)
+
     out = df.copy()
     out["live_oi"] = None
     out["_today_volume"] = None
@@ -1495,7 +1665,7 @@ def _refresh_live_oi_batch(df: pd.DataFrame) -> pd.DataFrame:
     workers = max(1, min(LIVE_OI_MAX_WORKERS, len(work)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         fut_to_idx = {
-            pool.submit(_fetch_live_oi, u, c): idx for (idx, u, c) in work
+            pool.submit(_fetch_live_oi, u, c, read_dt_et): idx for (idx, u, c) in work
         }
         for fut in as_completed(fut_to_idx):
             idx = fut_to_idx[fut]
@@ -1819,6 +1989,14 @@ def _liquidity_email_line(row: pd.Series) -> str:
     columns don't exist). Thresholds from the tradeability study: >=5 prints at
     the ~09:52 delayed read -> 96.3% tradeable day; a floor-passing pick shows
     >=PRINT_FLOOR_MIN prints by construction unless fail-soft restored it.
+
+    HONESTY CONTRACT (2026-08-07): every count rendered here is DATE-VALIDATED
+    upstream in ``_validate_day_bar_volume`` — "(confirmed)" can only ever
+    describe prints that actually happened today. Before that fix, a stale
+    prior-session day bar rendered as "N prints by ~09:52 (confirmed)" on a
+    contract with no tape at all (the GCT 2026-08-07 card said 2045). A KNOWN
+    zero and an UNKNOWN count are reported differently and must never be
+    collapsed: "no tape" is a measurement, "UNVERIFIED" is the absence of one.
     """
     prints = _known_prints(row)
     restored_raw = row.get("_print_floor_restored")
@@ -1827,8 +2005,15 @@ def _liquidity_email_line(row: pd.Series) -> str:
         and not pd.isna(restored_raw)
         and bool(restored_raw)
     )
-    if restored and (prints is None or prints < PRINT_FLOOR_MIN):
+    if restored and prints is None:
         return "Liquidity: UNVERIFIED - restored by fail-soft floor"
+    if restored and prints < PRINT_FLOOR_MIN:
+        # KNOWN zero (or sub-floor) that the fail-soft restore put back on the
+        # slate. We measured it: say so, don't hide it behind "UNVERIFIED".
+        return (
+            f"Liquidity: {prints} prints by ~09:52 "
+            f"(NO TAPE - restored by fail-soft floor)"
+        )
     if prints is None:
         if "_today_volume" in row.index:
             # Refresh ran but this contract's fetch failed (kept fail-open).
@@ -1839,8 +2024,11 @@ def _liquidity_email_line(row: pd.Series) -> str:
         return f"Liquidity: {prints} prints by ~09:52 (confirmed){restored_tag}"
     if prints >= 1:
         return f"Liquidity: {prints} prints by ~09:52 (CAUTION - thin tape){restored_tag}"
-    # Known 0 without restore: only reachable with PRINT_FLOOR_ENABLED=false.
-    return f"Liquidity: 0 prints by ~09:52 (CAUTION - no tape yet){restored_tag}"
+    # Known 0 WITHOUT restore: only reachable with PRINT_FLOOR_ENABLED=false
+    # (the floor otherwise drops it, and a restore is caught above). Pre-2026-08-07
+    # this branch was dead in every configuration — a known 0 could not exist,
+    # because the raw day.volume was never 0. It is real data now.
+    return f"Liquidity: 0 prints by ~09:52 (CAUTION - no tape){restored_tag}"
 
 
 def format_email_html(

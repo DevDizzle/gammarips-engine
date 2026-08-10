@@ -1,0 +1,134 @@
+HANDOFF: tournament pick liquidity fix (stale day-bar volume)
+From: gammarips-trader harness session, 2026-08-07
+Owner: Evan Parra. Implement + test, but DO NOT DEPLOY without his explicit go.
+
+== WHAT HAPPENED (live evidence, 2026-08-07) ==
+
+Tournament pick GCT (O:GCT260918C00055000, confidence HIGH) emailed at 09:53 ET with
+"Liquidity: 2045 prints by ~09:52 (confirmed)". Reality at 10:40 ET:
+
+- Robinhood book: volume 0 for the session, bid 2.65x56 / ask 2.95x15
+  (10.7% spread on a 2.80 mark).
+- Polygon option snapshot (checked twice, including a force-fresh read): day bar
+  frozen at 2026-08-06T16:15 ET with volume 2045. That 2045 is the PRIOR session's
+  total volume, not prints today.
+- The card's entry $3.20 / limit $3.25 sat ABOVE the live ask (2.95) at 10:40.
+- oi_build was real and is NOT part of the bug: OI 44 at scan -> 2,077 next
+  morning (yesterday's sweep became today's OI).
+
+Logged trader-side as GAP-018 in gammarips-trader/docs/GAP-LOG.md (GAP-017 is the
+related stale-card defect from 2026-08-06).
+
+== ROOT CAUSE ==
+
+signal-notifier/main.py, _fetch_live_oi (approx L1301-1372):
+extracts res.day.volume but never reads res.day.last_updated. The C1 leakage wall
+deliberately discards the rest of the day bar. Polygon's v3 option snapshot serves
+the PRIOR session's day bar when a contract has no prints yet today, so yesterday's
+total volume masquerades as this morning's print count whenever the tape is silent.
+This is exactly the failure the print floor was built to catch, inverted into a pass.
+
+Blast radius (all three consumers of the same poisoned number):
+1. Print floor (main.py approx L1637-1650): zero-print contracts pass
+   PRINT_FLOOR_MIN on phantom prints.
+2. Judge input: _candidate_for_ranker (main.py approx L1236-1241) attaches the
+   number as early_volume. The tournament prompt's only liquidity directive is
+   "prefer the one showing real early trading activity", so all three brackets saw
+   GCT as the most-traded name in the pool. Winning rationale led with "massive
+   early volume (2045) confirming actionable liquidity".
+3. Operator email: _liquidity_email_line (main.py approx L1839) stamps the phantom
+   count "(confirmed)".
+
+== FIX 1 (core, one function): date-validate the day bar ==
+
+In _fetch_live_oi:
+- Also read res.day.last_updated (nanosecond epoch; see pool_liquidity.py _ns_to_iso
+  for the conversion idiom).
+- Convert to ET and compare its DATE to the entry day's ET date.
+- If the bar date != today (ET): return today_volume = 0 (a KNOWN zero), not the
+  stale count.
+- Keep today_volume = None ONLY for genuine fetch failures / missing day dict, so
+  the C4 fail-open semantics ("fetch failure = no live data, NOT a drop") are
+  unchanged. Known-zero and unknown must stay distinct: _known_prints relies on it.
+- Leakage note for the decision doc: day.last_updated is a timestamp used solely to
+  validate the volume field. No price/greek/IV information crosses the C1 wall. Same
+  pre-entry leakage class as the already-permitted live_oi and day.volume reads.
+
+With known-zero flowing, the EXISTING floor (PRINT_FLOOR_MIN=1) drops these names
+before the tournament sees them. No new gate. Do not add selection logic elsewhere.
+
+Also update the docstring of _fetch_live_oi (it currently documents the volume read
+as "~always 0/None before ~09:52" which is false on stale-bar days: it is
+yesterday's total).
+
+== FIX 2 (prompt, tournament_v1_2): two surgical lines in signal-judge ==
+
+signal-judge/app/agent.py _build_prompt (approx L144-161). Keep everything else
+byte-identical, same discipline as the v1 -> v1_1 bump. Add:
+
+a) After the existing early_volume sentence:
+   "An early_volume of 0 means the contract has not traded at all this morning;
+   treat it as untradeable unless no candidate shows prints."
+   Reason: the fail-soft restore path (main.py approx L1673-1686) can put a
+   floor-failing name back in front of the judge when the floor empties the slate.
+   The prompt is the second wall.
+
+b) Extend the output instruction so the why must carry its numbers:
+   when liquidity influenced the ranking, the one-sentence why must state the
+   early_volume and oi_build values relied on.
+   Reason: today's rationale prose ("confirming actionable liquidity") flowed into
+   the subscriber email as if verified. If the why carries the number, a bad number
+   is visible and auditable downstream.
+
+Bump JUDGE_PROMPT_VERSION to tournament_v1_2 (it is persisted per run; the ledger
+must show which picks came from which prompt).
+
+== FIX 3 (email template honesty) ==
+
+_liquidity_email_line: with Fix 1 the phantom-confirmed case disappears, but make
+the template robust anyway: the "confirmed" wording should only ever describe a
+date-validated count. The known-0 branch already prints "CAUTION - no tape yet";
+after Fix 1 that branch becomes reachable in normal operation, which is correct.
+
+== FOLLOW-ONS (do not skip) ==
+
+1. Re-run the tradeability threshold study behind ">=5 prints at ~09:52 -> 96.3%
+   tradeable day" (docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md) on
+   date-validated prints. Its cohort carried the same contamination in both
+   directions; PRINT_FLOOR_MIN and the >=5 email threshold both rest on it.
+2. Audit any other reader of snapshot day.volume on the selection or email path for
+   the same missing date check. Known clean: pool_liquidity.py (persists
+   day_last_updated and its MCP consumers are told to judge staleness themselves).
+3. GAP-017 companion (already queued product ask): gap-guard line on the card, auto
+   void if the live mark/underlying at send time is beyond +/-N% of the card's
+   basis. Today's card limit was above the live ask; yesterday's FIG card was
+   invalidated by the open. Same disease, price axis.
+4. Decision doc under docs/DECISIONS/ (2026-08-07-stale-day-bar-early-volume.md or
+   similar): root cause, leakage argument for reading day.last_updated, prompt bump
+   to v1_2, and an explicit owner call on whether the live cohort
+   (LIVE_COHORT_START_DATE=2026-07-29) continues or resets. Surface the cohort
+   question to the owner; do not decide it. Argument both ways: selection inputs
+   were corrupted on stale-bar days (favors reset), but the fix restores intended
+   v1_1 behavior rather than changing policy (favors continue, with affected picks
+   flagged). Either way, identify which cohort picks since 07-29 had a stale-bar
+   early_volume (recompute from pool_liquidity_snapshot day_last_updated) and
+   annotate them in the ledger.
+
+== TESTS ==
+
+- Unit: _fetch_live_oi with (a) fresh bar today -> volume passes through,
+  (b) stale bar (last_updated = prior session) -> today_volume == 0, status ok,
+  (c) missing day dict -> None, (d) fetch error -> None. Mock the snapshot payload;
+  include a GCT-shaped fixture: volume 2045, last_updated 2026-08-06T16:15 ET,
+  open_interest 2077.
+- Floor integration: known-zero row is dropped at PRINT_FLOOR_MIN=1; None row is
+  kept (fail-open); fail-soft restore still marks _print_floor_restored.
+- Prompt: assert v1_2 contains both new lines and version string updated; assert
+  everything else unchanged vs v1_1 (byte-diff discipline).
+
+== ACCEPTANCE ==
+
+A contract with zero prints today can no longer (1) pass the print floor, (2) reach
+the judge with nonzero early_volume, or (3) appear in an email as "confirmed"
+liquidity. GCT 2026-08-07 replayed through the fixed path must be dropped at the
+floor. No deploy without the owner's explicit go.
