@@ -44,6 +44,11 @@ build/
 _archive/*
 !_archive/research_reports_2026-04/
 
+# Firebase CLI debug log — regenerable local noise, root only. Anchored with a
+# leading slash on purpose: an unanchored pattern would also swallow the copy
+# archived under docs/archive/assets/ (2026-08-10 root cleanup).
+/firebase-debug.log
+
 # Cache dirs
 .mypy_cache/
 .pytest_cache/
