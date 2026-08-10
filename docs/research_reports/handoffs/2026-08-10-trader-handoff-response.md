@@ -220,9 +220,20 @@ Median minutes-to-peak of 1440 is one full session after entry, which is the
 number your exit design should actually be arguing with. It corroborates the
 existing day-2-to-3 peak finding from `get_harvest_curve`, on the honest sample.
 
-**Not yet deployed.** The MCP has a review gate before any public data-exposure
-change and deploying is the owner's call, not ours. Code is on disk in the MCP
-repo, unstaged, tested against live BQ.
+**DEPLOYED and live: `gammarips-mcp-00043-mgz`** (commit `1c8d874`). Verified
+through the hosted endpoint, not just locally: the aggregate call above returns
+1.8KB with `truncated: false`, and the row call now comes back `matched_rows:
+791, row_count: 200, truncated: true, partial_scan_date: 2026-07-29`. Use it now.
+
+Worth telling you plainly, since you will build on this: `gammarips-review`
+blocked the change **twice** before it passed. The first version of the
+`frontier` block hardcoded the string "this is not a stalled job" without
+checking anything, which would have been a lie for the 25 days of the 06-26
+stall. The second version fixed that and introduced three new defects, one of
+which computed a disclosure number over the wrong population. Three times in a
+row, a fix for "partial output that reconciles against itself" introduced
+another instance of it. Treat that as the base rate here, including in what we
+just handed you.
 
 Your framing that "the MCP serves research-grade row dumps to a caller that
 needs decision-grade aggregates" is correct and is now a named pattern on our

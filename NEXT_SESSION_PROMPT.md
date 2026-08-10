@@ -103,15 +103,21 @@ impressions and ~97% of sessions).
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
-- 🔴 **MCP `view="surface"` fix is written, tested, NOT deployed** (unstaged in
-  `../gammarips-mcp`). Adds `aggregate_only` + `delta_min/max` + truncation disclosure
-  (`matched_rows`/`truncated`/`partial_scan_date`) + a `frontier` block. Found while
-  answering the 08-10 trader handoff: the row mode silently returned 200 of 791 matched
-  rows and, because the sort is `scan_date DESC, opp_peak_return DESC`, the cut lands
-  mid-date and keeps only that date's highest-MFE rows — **median MFE inflated 46%**
-  (0.3416 vs 0.2341). Public data-exposure change: needs `gammarips-review` + owner
-  deploy. Memory `mcp-row-cap-silent-truncation`. **Other row tools are unaudited for
-  the same undeclared cap** (`labels`, `positions`, `signal_performance`).
+- ✅ **DONE 08-10 — MCP `view="surface"` fix SHIPPED** (`gammarips-mcp-00043-mgz`,
+  MCP commit `1c8d874`; engine half `971521c` → `dbt-runner-00009-lvd`). Row mode was
+  silently returning 200 of 791 matched rows and, because the sort is `scan_date DESC,
+  opp_peak_return DESC`, the cut lands mid-date keeping only that date's highest-MFE rows
+  — **median MFE inflated 46%** (0.3416 vs 0.2341). Now: `aggregate_only`, `delta_min/max`,
+  truncation disclosure, and a `frontier` block that VERIFIES liveness (`open_past_due`)
+  instead of asserting it. Verified live through the hosted MCP. `gammarips-review`
+  blocked it **twice** before passing; both times the blocker was a fix reintroducing the
+  same "reconciles against itself" defect it was closing.
+  `docs/DECISIONS/2026-08-10-surface-aggregate-and-truncation-disclosure.md`.
+  **Still open from that review:** other row tools are unaudited for the same undeclared
+  cap (`labels`, `positions`, `signal_performance`); and the frontier's session calendar
+  is blind to a trailing gap under ~5 calendar days, so a stall shorter than that can
+  still read as by-design (bounded, disclosed via `calendar_max_session` /
+  `calendar_max_gap_days`). Memory `mcp-row-cap-silent-truncation`.
 - 🟡 **x-poster not audited for public mutating routes** — same shape as the
   blog-generator hole closed 08-07 (`docs/DECISIONS/2026-08-07-blog-generator-iam-lockdown.md`).
   Gotcha recorded there: `gcloud run deploy --no-allow-unauthenticated` does NOT revoke an
