@@ -32,12 +32,22 @@ PERFORMANCE_TABLE = f"{PROJECT_ID}.{DATASET}.signal_performance"
 LEDGER_TABLE = f"{PROJECT_ID}.{DATASET}.forward_paper_ledger"
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip()
 
-# Park watchdog — one-shot Mailgun alerts on engine lifecycle gates.
-# Currently watches the 30-trade gate (Evan's documented return trigger).
-MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "").strip()
-MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "").strip()
-PARK_RECIPIENT = os.getenv("PARK_RECIPIENT", "evan@gammarips.com").strip()
-PARK_GATE_30_TRADES = 30
+# Park watchdog REMOVED 2026-08-07. It was a relic of the "GammaRips is parked"
+# era: a one-shot Mailgun alert on a 30-closed-trade "return trigger", with an
+# email body still advertising V5.4 Agent Ranker (retired 2026-06-04), a 90-day
+# plan, and a newsletter funnel. It fired 2026-08-07 and was wrong on every
+# count — the project is not parked and the operator trades live capital.
+# It was also an instance of the exact defect this repo spent 2026-08-07 fixing
+# elsewhere: it counted DISTINCT scan_date over `policy_version =
+# 'V7_1_TILTED_GIGO'` with NO cohort filter, so it summed across every cohort
+# that label has ever spanned — including the 2026-07-29 cohort that the
+# stale-day-bar reset disowned.
+# A correct cohort-filtered N>=30 trigger may be rebuilt once the owner decides
+# whether the real-money counter anchors to LIVE_COHORT_START_DATE — see the
+# OPEN OWNER CALL in docs/TRADING-STRATEGY.md and
+# docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md. Do not resurrect the
+# label-only count. The Firestore flag `park_watchdog/gate_30_alerted` is now
+# orphaned and harmless (left in place; deleting it would only re-arm nothing).
 
 # X posting moved to `x-poster/` service (2026-04-24). This service now
 # only tracks signal performance to BQ/Firestore. No X credentials needed.
@@ -114,87 +124,6 @@ def classify_win(peak_return_pct: float, direction: str) -> str:
         return "no_decision"
     else:
         return "loss"
-
-
-def send_park_email(subject: str, body_text: str) -> bool:
-    """Mailgun send to operator for park-mode lifecycle alerts. Returns True on success."""
-    if not (MAILGUN_API_KEY and MAILGUN_DOMAIN):
-        logger.info("Mailgun not configured; skipping park alert send.")
-        return False
-    url = f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages"
-    auth = ("api", MAILGUN_API_KEY)
-    data = {
-        "from": f"GammaRips Park Watchdog <mailgun@{MAILGUN_DOMAIN}>",
-        "to": [PARK_RECIPIENT],
-        "subject": subject,
-        "text": body_text,
-    }
-    try:
-        resp = requests.post(url, auth=auth, data=data, timeout=10)
-        resp.raise_for_status()
-        logger.info(f"Park alert sent: {subject}")
-        return True
-    except Exception as e:
-        logger.error(f"Park alert email failed: {e}")
-        return False
-
-
-def check_park_gates(bq_client, fs_client):
-    """One-shot park alerts. Idempotent via Firestore flags.
-
-    Currently watches the 30-trade gate — the user's documented return trigger.
-    Reset by deleting the Firestore flag at park_watchdog/gate_30_alerted.
-    """
-    flag_ref = fs_client.collection("park_watchdog").document("gate_30_alerted")
-    flag_snap = flag_ref.get()
-    if flag_snap.exists and flag_snap.to_dict().get("alerted"):
-        return  # one-shot — already fired
-
-    try:
-        # 30-pick gate (V5.4 cohort, post-2026-05-08 retirement of V5.3).
-        # The trader simulates EVERY enriched signal as V7_1_TILTED_GIGO for
-        # research; counting raw closed rows would fire spuriously (~80/day).
-        # Approximation: COUNT(DISTINCT scan_date) where the ledger has at
-        # least one closed V5.4 row. One scan_date == one V5.4 pick day.
-        # Better fix is on the EXEC-PLAN backlog: signal-notifier writes a
-        # todays_pick_history BQ table that this query JOINs against.
-        query = f"""
-            SELECT COUNT(DISTINCT scan_date) AS n
-            FROM `{LEDGER_TABLE}`
-            WHERE realized_return_pct IS NOT NULL
-              AND policy_version = 'V7_1_TILTED_GIGO'
-        """
-        row = next(iter(bq_client.query(query).result()))
-        count = int(row["n"])
-    except Exception as e:
-        logger.warning(f"30-trade gate count query failed (non-fatal): {e}")
-        return
-
-    logger.info(f"V5.4 closed-trade count: {count}/{PARK_GATE_30_TRADES}")
-    if count < PARK_GATE_30_TRADES:
-        return
-
-    subject = "[GammaRips] 30-trade gate reached — return trigger active"
-    body_text = (
-        f"V5.4 ledger has crossed the {PARK_GATE_30_TRADES} closed paper trades threshold.\n\n"
-        f"Closed count: {count}\n"
-        f"Policy: V5.4 Agent Ranker\n\n"
-        f"You parked GammaRips with this as your return trigger. The track-record\n"
-        f"narrative is ready to ship. Time to come back and:\n\n"
-        f"1. Pull aggregate stats from forward_paper_ledger.\n"
-        f"2. Publish the 30-trade-in-the-books blog post (Wk 9 of the 90-day plan).\n"
-        f"3. Open the paid funnel hard via the newsletter to 211+ users.\n"
-        f"4. Move the @gammarips X cadence into recap-led mode.\n\n"
-        f"This email fires exactly once. Reset the flag in Firestore at\n"
-        f"park_watchdog/gate_30_alerted to re-arm.\n"
-    )
-
-    if send_park_email(subject, body_text):
-        flag_ref.set({
-            "alerted": True,
-            "count_at_alert": count,
-            "alerted_at": firestore.SERVER_TIMESTAMP,
-        })
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -314,13 +243,6 @@ def track_signal_performance():
     }
 
     logger.info(f"Performance tracking complete: {json.dumps(summary)}")
-
-    # Park watchdog — non-blocking. One-shot lifecycle alerts (30-trade gate etc.).
-    # Lives here because win-tracker already runs daily and reads the same ledger.
-    try:
-        check_park_gates(bq_client, fs_client)
-    except Exception as e:
-        logger.warning(f"Park gate check failed (non-fatal): {e}")
 
     return jsonify(summary), 200
 
@@ -705,7 +627,19 @@ def compute_pool_outcomes():
         # Fixed bucket edges are part of the public contract: the webapp renders
         # these bucket labels verbatim from the doc.
         life_sim = "LIFE_TO_EXPIRY_V1"
-        life_match = f"life_sim_version = '{life_sim}'"
+        # Status EXCLUSION list (2026-08-07). This aggregate deliberately spans
+        # more than life_status='OK' — a PARTIAL_NO_EXPIRY row still has a valid
+        # peak/trough (only its settlement leg is missing), so it belongs in the
+        # peak distribution. PARTIAL_SPLIT_ADJUSTED does NOT: the underlying
+        # split after selection, OCC re-issued the contract, and Polygon stops
+        # printing the original OCC symbol at the split — so that row's
+        # life_peak_return covers only the pre-split FRACTION of the contract's
+        # life and would silently drag the public peak percentiles down.
+        # See docs/DECISIONS/2026-08-07-freshness-canary-and-bars-loader.md.
+        _POOL_LIFE_STATUS_EXCLUDE = ("PARTIAL_SPLIT_ADJUSTED",)
+        _excl = ", ".join(f"'{s}'" for s in _POOL_LIFE_STATUS_EXCLUDE)
+        life_match = (f"life_sim_version = '{life_sim}' AND "
+                      f"(life_status IS NULL OR life_status NOT IN ({_excl}))")
         peak_edges = [(None, 0.05), (0.05, 0.20), (0.20, 0.40), (0.40, 0.70),
                       (0.70, 1.00), (1.00, 2.00), (2.00, None)]
         expiry_edges = [(None, -0.90), (-0.90, -0.50), (-0.50, 0.0), (0.0, 0.50),

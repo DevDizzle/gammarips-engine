@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from google.cloud import bigquery
 
-from gammarips_content import brand, compliance, firestore_helpers, tweepy_helper
+from gammarips_content import brand, cohort, compliance, firestore_helpers, tweepy_helper
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ def fetch_closing_trades(scan_date: str, restrict_tickers: str = "") -> dict:
         WHERE DATE(exit_timestamp) = @scan_date
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V7_1_TILTED_GIGO'
+          AND {cohort.LIVE_COHORT_SQL}
           AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
     """
     try:
@@ -467,7 +467,7 @@ def fetch_weekly_ledger(week_ending: str, restrict_tickers: str = "") -> dict:
         WHERE DATE(exit_timestamp) BETWEEN @start AND @end
           AND exit_reason IS NOT NULL
           AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
-          AND policy_version = 'V7_1_TILTED_GIGO'
+          AND {cohort.LIVE_COHORT_SQL}
           AND (ARRAY_LENGTH(@tickers) = 0 OR ticker IN UNNEST(@tickers))
         ORDER BY exit_timestamp
     """
