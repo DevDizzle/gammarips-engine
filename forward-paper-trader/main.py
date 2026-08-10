@@ -115,6 +115,26 @@ ENRICHED_OUTCOMES_TABLE = f"{PROJECT_ID}.profit_scout.enriched_option_outcomes"
 # only (the live strategy's universe), not the raw all-direction scan pool.
 ENRICHED_OUTCOMES_BULLISH_ONLY = True
 
+# ---- Underlying daily-bars cache (settlement marks) ----------------------------
+# The adjusted-close cache _underlying_closes_at_expiry reads to resolve each
+# expired contract's hold-to-settlement mark. Built 2026-07 as a one-shot
+# backfill whose forward wiring was deferred — and then never wired, so it went
+# stale at 2026-07-01 and stayed stale for 37 days. Nothing failed: the labeler
+# just stamped life_status='PARTIAL_NO_EXPIRY' on every contract expiring after
+# 2026-07-06, silently freezing the PUBLIC full-life cohort at 1,495 rows.
+# /load_underlying_bars (weekdays 17:05 ET, five minutes before
+# label-life-surface) is that missing forward loader.
+# See docs/DECISIONS/2026-08-07-freshness-canary-and-bars-loader.md.
+UNDERLYING_BARS_TABLE = f"{PROJECT_ID}.profit_scout.underlying_daily_bars"
+UNDERLYING_BARS_SOURCE = "polygon_grouped_daily_adj"  # must match the backfill script's tag
+# Rolling re-load window. >1 session because delete-then-load is idempotent, so
+# re-reading the last few days self-heals a day that was fetched during a
+# Polygon outage without needing a separate repair path.
+BARS_WINDOW_SESSIONS = int(os.getenv("BARS_WINDOW_SESSIONS", "5"))
+# Completeness floor on a grouped-daily payload. A full US session returns
+# ~10-11k results; anything near-empty is a degraded response, not a quiet tape.
+GROUPED_DAILY_MIN_RESULTS = int(os.getenv("GROUPED_DAILY_MIN_RESULTS", "3000"))
+
 # ---- OPPORTUNITY-SURFACE + 3-DAY RESEARCH LABEL (substrate must-fix #6) --------
 # The substrate previously carried ONLY the same-day GIGO bracket label, but the
 # flagship finding is a 3-DAY hold and — more generally — profitability depends on
@@ -156,6 +176,16 @@ if not os.getenv("FILL_WINDOWS_TOKEN", "").strip():
     logger.warning(
         "FILL_WINDOWS_TOKEN is unset — POST /fill_closed_windows will run UNGATED "
         "on a public service; set the env var to fail-close the endpoint."
+    )
+# Same alarm for the OTHER shared secret. POOL_LIQ_REFRESH_TOKEN now fail-closes
+# THREE Polygon-burning endpoints (/persist_minute_paths, /label_life_surface,
+# /load_underlying_bars) and had no equivalent warning. deploy.sh's --set-secrets
+# REPLACES the whole secret set, so dropping this one is a plausible slip.
+if not os.getenv("POOL_LIQ_REFRESH_TOKEN", "").strip():
+    logger.warning(
+        "POOL_LIQ_REFRESH_TOKEN is unset — POST /persist_minute_paths, "
+        "/label_life_surface and /load_underlying_bars will run UNGATED on a "
+        "public service; set the env var to fail-close them."
     )
 
 # ---- ENRICHED_OUTCOMES research columns — EXPLICIT type creation (must-fix #2/#5/#6)
@@ -1269,7 +1299,13 @@ def _simulate_opportunity_surface(row, entry_day: date, n_days: int = OPP_WINDOW
         return out
 
 
-def _simulate_life_surface(row, entry_day: date, underlying_close_at_exp: float | None) -> dict:
+def _simulate_life_surface(row, entry_day: date, underlying_close_at_exp: float | None,
+                           *, split_adjusted: bool) -> dict:
+    # `split_adjusted` is REQUIRED and keyword-only, deliberately. It is a safety
+    # guard, and a guard that defaults to "unguarded" is not a guard: with a
+    # default of False, any caller that forgot it (backfill_life_surface.py did,
+    # via three positional args) would silently overwrite PARTIAL_SPLIT_ADJUSTED
+    # rows back to OK carrying the fabricated -100%. Forgetting it now raises.
     """RESEARCH-ONLY full-life surface: what the option premium did from the
     10:00 ET surfacing fill to EXPIRATION (scorecard redesign, 2026-07-08).
     Powers the public pool-level distributions (via win-tracker /pool_outcomes
@@ -1362,6 +1398,30 @@ def _simulate_life_surface(row, entry_day: date, underlying_close_at_exp: float 
                 out["life_peak_day"] = max(
                     int(len(nyse.schedule(start_date=entry_day, end_date=peak_date).index)), 1
                 )
+
+        if split_adjusted:
+            # The underlying split AFTER this contract was selected, so the
+            # stored strike (pre-split, fixed at scan time) and the settlement
+            # close are in DIFFERENT UNITS — post-split natively if the split
+            # preceded expiration, or restated by our adjusted=true fetch if it
+            # followed. max(0, close - strike) then silently returns 0 and
+            # publishes a fabricated -100% expiry return. OCC also re-issues the
+            # contract on a split, so `recommended_contract` no longer names a
+            # live deliverable and no single-column close can be made to agree
+            # with it. Refuse to compute rather than compute wrong.
+            # TERMINAL status: the row leaves the work queue (never re-queued
+            # like PARTIAL_NO_EXPIRY) and is excluded from the public
+            # life_status='OK' cohort.
+            # Peak/trough above are RETAINED but are NOT trustworthy for this
+            # row, and the difference matters: fetch_daily_bars queries the
+            # ORIGINAL OCC symbol, and OCC re-issues the contract on a split, so
+            # the old symbol stops printing and `bars` is truncated at the split
+            # date. life_peak_return/life_trough_return therefore cover only the
+            # pre-split fraction of the life. They are kept for forensics, not
+            # for publication — any consumer aggregating peak stats must filter
+            # this status out (win-tracker does; see _POOL_LIFE_STATUS_EXCLUDE).
+            out["life_status"] = "PARTIAL_SPLIT_ADJUSTED"
+            return out
 
         if underlying_close_at_exp is not None:
             strike = float(row["recommended_strike"])
@@ -2525,6 +2585,227 @@ def run_label_enriched_pool(target_date: date = None) -> tuple[bool, dict | str]
         raise
 
 
+# ---- Underlying daily-bars forward loader (2026-08-07) -------------------------
+
+
+def _fetch_grouped_daily_adj(d: date) -> list[dict]:
+    """Polygon grouped-daily ADJUSTED for one session — every US stock's bar in
+    a single call. Returns [] on failure; the CALLER must treat [] as "fetch
+    failed", never as "the session was empty" (see _replace_bars_for_date)."""
+    if not POLYGON_API_KEY:
+        logger.error("POLYGON_API_KEY is not set — cannot load underlying bars.")
+        return []
+    url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{d.isoformat()}"
+    params = {"adjusted": "true", "apiKey": POLYGON_API_KEY}
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                time.sleep(2 ** attempt)
+                continue
+            resp.raise_for_status()
+            return resp.json().get("results", []) or []
+        except Exception as e:  # noqa: BLE001
+            if attempt == 2:
+                logger.warning(f"grouped-daily fetch failed for {d}: {e}")
+                return []
+            time.sleep(2 ** attempt)
+    return []
+
+
+def _splits_by_ticker(start: date, end: date) -> dict[str, list[date]] | None:
+    """{ticker: [split execution dates]} over [start, end], all US tickers.
+    Returns **None** if the enumeration failed, `{}` if it genuinely found no
+    splits. These MUST stay distinguishable: collapsing them into one sentinel
+    is the same defect shape as the `PARTIAL_NO_EXPIRY` overload this whole
+    change exists to fix (bars-missing vs unmarkable-contract), and that one
+    cost 37 days. `{}` is a normal, common answer for a short window.
+
+    Deliberately NOT paged via `next_url`: Polygon's cursor pagination is known
+    to silently skip rows on bulk enumerations, and a MISSED split here is the
+    dangerous direction — it lets a unit-mismatched contract into the public
+    cohort. Instead we walk the window in 21-day slices with limit=1000 and
+    subdivide any slice that comes back at the cap, so completeness is a
+    property of the date partition rather than of a cursor we cannot audit.
+
+    """
+    if not POLYGON_API_KEY:
+        logger.error("POLYGON_API_KEY is not set — cannot check splits.")
+        return None
+    out: dict[str, list[date]] = {}
+
+    def _slice(lo: date, hi: date, depth: int = 0) -> bool:
+        url = "https://api.polygon.io/v3/reference/splits"
+        params = {"execution_date.gte": lo.isoformat(), "execution_date.lte": hi.isoformat(),
+                  "limit": 1000, "apiKey": POLYGON_API_KEY}
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, params=params, timeout=30)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    time.sleep(2 ** attempt)
+                    continue
+                resp.raise_for_status()
+                results = resp.json().get("results", []) or []
+                break
+            except Exception as e:  # noqa: BLE001
+                if attempt == 2:
+                    logger.warning(f"splits fetch failed for {lo}..{hi}: {e}")
+                    return False
+                time.sleep(2 ** attempt)
+        else:
+            return False
+        # At the cap the slice may be truncated — halve it rather than trust it.
+        # A SINGLE day at the cap cannot be subdivided further, so it is the one
+        # case where "complete" is not provable from the partition. Refuse it
+        # rather than silently ingest a possibly-truncated day.
+        if len(results) >= 1000 and lo >= hi:
+            logger.error(f"splits: single day {lo} returned at the 1000 cap — cannot prove completeness")
+            return False
+        if len(results) >= 1000 and lo < hi and depth < 8:
+            mid = lo + (hi - lo) / 2
+            return _slice(lo, mid, depth + 1) and _slice(mid + timedelta(days=1), hi, depth + 1)
+        for s in results:
+            t = str(s.get("ticker") or "").strip().upper()
+            d = s.get("execution_date")
+            if not t or not d:
+                continue
+            out.setdefault(t, []).append(datetime.strptime(d, "%Y-%m-%d").date())
+        return True
+
+    cur, ok = start, True
+    while cur <= end:
+        chunk_end = min(cur + timedelta(days=20), end)
+        ok = _slice(cur, chunk_end) and ok
+        cur = chunk_end + timedelta(days=1)
+    if not ok:
+        logger.error("splits enumeration incomplete — returning None so the caller fails closed.")
+        return None
+    return out
+
+
+def _bars_substrate_tickers(client: bigquery.Client) -> set[str]:
+    """Tickers worth caching: everything the substrate references. Bounds the
+    table to ~860 names instead of the full ~11k grouped-daily universe. Same
+    scope rule as scripts/ledger_and_tracking/load_underlying_daily_bars.py."""
+    sql = f"""
+    SELECT DISTINCT ticker FROM `{ENRICHED_OUTCOMES_TABLE}` WHERE ticker IS NOT NULL
+    UNION DISTINCT
+    SELECT DISTINCT ticker FROM `{PROJECT_ID}.profit_scout.overnight_signals_enriched`
+      WHERE ticker IS NOT NULL
+    """
+    return {str(r["ticker"]).strip().upper() for r in client.query(sql).result() if r["ticker"]}
+
+
+def _replace_bars_for_date(client: bigquery.Client, d: date, rows: list[dict]) -> int:
+    """Idempotent per-date replace via a load job (not streaming).
+
+    Refuses to run on an empty row list. The ancestor backfill script deletes
+    unconditionally, which means a Polygon outage would WIPE a previously-good
+    session and leave no trace — on a daily cron that turns one bad fetch into
+    permanent data loss. Here an empty fetch is a no-op and the rolling window
+    retries the same session tomorrow."""
+    if not rows:
+        return 0
+    client.query(
+        f"DELETE FROM `{UNDERLYING_BARS_TABLE}` WHERE date = @d",
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("d", "DATE", d),
+        ]),
+    ).result()
+    jsonl = "\n".join(json.dumps(r) for r in rows)
+    job = client.load_table_from_file(
+        io.BytesIO(jsonl.encode("utf-8")),
+        UNDERLYING_BARS_TABLE,
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+        ),
+    )
+    job.result()
+    return job.output_rows or 0
+
+
+def run_load_underlying_bars(sessions: int = None) -> tuple[bool, dict]:
+    """Daily forward loader for the settlement-mark cache.
+
+    Horizon is T-1: only NYSE sessions STRICTLY BEFORE today ET are loaded, so
+    we never race Polygon's end-of-day settlement for a session that just
+    closed. That is exactly sufficient for the consumer — /label_life_surface
+    only labels contracts whose expiration is already < today, so it only ever
+    needs closes for dates < today.
+
+    Fail-loud contract: the newest session in the window is the one the 17:10
+    labeler is about to need, so failing to load it returns False (endpoint
+    500s, Scheduler goes red). Older sessions failing is reported in
+    `failed_sessions` but not fatal — the rolling window retries them tomorrow.
+    """
+    # Clamped: `sessions` comes off an HTTP body, and a fat-fingered 500 in a
+    # Scheduler payload would mean 500 Polygon calls and 500 DELETE+load pairs.
+    sessions = max(1, min(int(sessions or BARS_WINDOW_SESSIONS), 30))
+    client = bigquery.Client(project=PROJECT_ID)
+    today_et = datetime.now(est).date()
+
+    # Look back generously in calendar days, then keep the last N SESSIONS —
+    # holidays make a fixed calendar window yield too few trading days.
+    sched = nyse.schedule(
+        start_date=today_et - timedelta(days=sessions * 3 + 14),
+        end_date=today_et - timedelta(days=1),
+    )
+    days = [d.date() for d in sched.index][-sessions:]
+    if not days:
+        return True, {"sessions": 0, "note": "no closed sessions in window"}
+
+    keep = _bars_substrate_tickers(client)
+    per_day, failed, total = {}, [], 0
+    for d in days:
+        raw = _fetch_grouped_daily_adj(d)
+        # Completeness floor on the RAW payload, before the ticker filter. A
+        # non-empty guard alone is not enough: a truncated or degraded response
+        # yields a small-but-non-empty result, which would pass, DELETE a good
+        # ~860-row session and replace it with a subset. Nothing downstream
+        # could catch that — `loaded_at` would look perfectly fresh to the
+        # canary — so it has to die here. A complete US session returns ~10-11k.
+        if len(raw) < GROUPED_DAILY_MIN_RESULTS:
+            if raw:
+                logger.warning(f"grouped-daily {d}: only {len(raw)} results "
+                               f"(floor {GROUPED_DAILY_MIN_RESULTS}) — treating as a failed fetch")
+            failed.append(d.isoformat())
+            per_day[d.isoformat()] = 0
+            time.sleep(0.15)
+            continue
+        rows = []
+        loaded_at = datetime.now(pytz.utc).isoformat()
+        for bar in raw:
+            t = str(bar.get("T") or "").strip().upper()
+            if not t or t not in keep:
+                continue
+            rows.append({
+                "date": d.isoformat(), "ticker": t,
+                "open": bar.get("o"), "high": bar.get("h"),
+                "low": bar.get("l"), "close": bar.get("c"),
+                "volume": bar.get("v"), "adjusted": True,
+                "source": UNDERLYING_BARS_SOURCE, "loaded_at": loaded_at,
+            })
+        n = _replace_bars_for_date(client, d, rows)
+        per_day[d.isoformat()] = n
+        total += n
+        time.sleep(0.15)  # polite pacing
+
+    newest = days[-1].isoformat()
+    summary = {
+        "sessions": len(days), "rows_upserted": total, "per_day": per_day,
+        "failed_sessions": failed, "tickers_in_scope": len(keep),
+        "newest_session": newest,
+    }
+    if newest in failed:
+        logger.error(f"underlying bars: newest session {newest} FAILED to load — {summary}")
+        return False, summary
+    if failed:
+        logger.warning(f"underlying bars: {len(failed)} older session(s) failed, will retry: {failed}")
+    logger.info(f"underlying bars loaded {total} rows over {len(days)} sessions")
+    return True, summary
+
+
 _LIFE_COLS = [
     "life_status", "life_peak_return", "life_trough_return",
     "life_expiry_return", "life_peak_day", "life_daily_bar_count",
@@ -2626,11 +2907,27 @@ def _merge_life_rows(client: bigquery.Client, computed: list[dict]) -> int:
 def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
     """Daily full-life finalizer: label every enriched_option_outcomes row whose
     contract has EXPIRED (strictly before today ET, so the final session is
-    complete) and that has no life_status yet. NULL life_status = the work
-    queue; NO_ENTRY is stamped for rows with no opp entry anchor so they leave
-    the queue. Idempotent (deterministic MERGE) — no claim/lock needed, a
+    complete) and that is still unresolved. The work queue is NULL life_status
+    PLUS any PARTIAL_NO_EXPIRY row whose settlement bar has since landed in the
+    bars cache (see the queue SQL) — so a bars gap is now recoverable instead of
+    permanent. NO_ENTRY is stamped for rows with no opp entry anchor so they
+    leave the queue. Idempotent (deterministic MERGE) — no claim/lock needed, a
     double-run recomputes identical values. Fail-loud: labeling zero of a
-    non-empty queue is a failure, not a quiet success."""
+    non-empty queue is a failure, not a quiet success.
+
+    NOTE the fail-loud guard cannot catch a bars outage: stamping every
+    candidate PARTIAL_NO_EXPIRY is a successful merge of a useless label. The
+    guard against THAT is the dbt freshness canary on underlying_daily_bars.
+
+    Two further exits added 2026-08-07:
+    - The run ABORTS (returns False, endpoint 500s) if the Polygon splits
+      enumeration fails. Fail-closed is correct here because the failure modes
+      are asymmetric in permanence: labelling unguarded writes the TERMINAL
+      status OK with a fabricated -100% into the public cohort and nothing ever
+      revisits it, whereas failing costs one night and every candidate stays
+      queued. Note this couples the labeler to a THIRD Polygon endpoint.
+    - A third terminal status, PARTIAL_SPLIT_ADJUSTED, for contracts whose
+      underlying split after selection (strike and close in different units)."""
     limit = int(limit or LIFE_DAILY_LIMIT)
     client = bigquery.Client(project=PROJECT_ID)
     today_et = datetime.now(est).date()
@@ -2649,12 +2946,36 @@ def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
            recommended_strike, recommended_expiration,
            opp_entry_price, opp_peak_return, opp_trough_return,
            opp_minutes_to_peak, opp_status
-    FROM `{ENRICHED_OUTCOMES_TABLE}`
+    FROM `{ENRICHED_OUTCOMES_TABLE}` o
     WHERE recommended_expiration IS NOT NULL
       AND recommended_strike IS NOT NULL
       AND recommended_contract IS NOT NULL
       AND recommended_expiration < @today
-      AND life_status IS NULL
+      AND (
+            life_status IS NULL
+            OR (
+              -- SELF-HEAL (2026-08-07). PARTIAL_NO_EXPIRY means the settlement
+              -- mark was missing when the row was first labeled — almost always
+              -- a gap in underlying_daily_bars, not a property of the contract.
+              -- The old queue was `life_status IS NULL` alone, so a row stamped
+              -- PARTIAL_NO_EXPIRY left the queue FOREVER: refilling the bars
+              -- cache healed nothing, and 726 rows sat permanently excluded
+              -- from the public life_status='OK' cohort. Re-queue them, but
+              -- ONLY once the bar they need actually exists, so a genuinely
+              -- unmarkable contract (delisted ticker, no print near expiry)
+              -- cannot churn the queue and burn Polygon quota every night.
+              life_status = 'PARTIAL_NO_EXPIRY'
+              AND EXISTS (
+                SELECT 1 FROM `{UNDERLYING_BARS_TABLE}` b
+                WHERE b.ticker = o.ticker
+                  AND b.close IS NOT NULL
+                  -- same 7-day lookback _underlying_closes_at_expiry applies,
+                  -- so "a bar exists" here means the same thing it means there
+                  AND b.date BETWEEN DATE_SUB(o.recommended_expiration, INTERVAL 7 DAY)
+                                 AND o.recommended_expiration
+              )
+            )
+          )
     QUALIFY ROW_NUMBER() OVER (
       PARTITION BY scan_date, ticker, recommended_contract
       ORDER BY labeled_at DESC) = 1
@@ -2670,6 +2991,23 @@ def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
 
     closes = _underlying_closes_at_expiry(client, [r for r in rows if r.get("opp_entry_price") is not None])
 
+    # Split guard (2026-08-07). `recommended_strike` is frozen at scan time;
+    # the settlement close is post-split whenever the underlying split after
+    # selection — natively if the split preceded expiration, or restated by our
+    # adjusted=true fetch if it followed. Comparing them yields a fabricated
+    # -100%. Enumerate every split from the oldest candidate's scan_date to
+    # today and mark the affected (ticker, scan_date) pairs.
+    # FAIL-CLOSED: an empty map from a FAILED enumeration is indistinguishable
+    # from "no splits", and guessing wrong publishes bad numbers — so on failure
+    # we abort the run rather than label a batch with the guard silently off.
+    scan_dates = [r["scan_date"] for r in rows if r.get("scan_date")]
+    splits = _splits_by_ticker(min(scan_dates), today_et) if scan_dates else {}
+    if splits is None:  # None = enumeration FAILED; {} = genuinely no splits (common)
+        msg = ("life surface: split enumeration failed — refusing to label, since "
+               "an unguarded batch can publish fabricated -100% expiry returns.")
+        logger.error(msg)
+        return False, {"candidates": len(rows), "labeled": 0, "error": msg}
+
     # Merge every 200 rows INSIDE the compute loop (not all-compute-then-merge):
     # each row costs a Polygon call, so on a big backlog an end-only merge could
     # lose the entire run to the Cloud Run request timeout with zero rows
@@ -2680,7 +3018,14 @@ def run_label_life_surface(limit: int = None) -> tuple[bool, dict]:
         entry_day = r["entry_day"] or get_next_trading_day(r["scan_date"])
         exp = r["recommended_expiration"]
         exp_date = exp.date() if isinstance(exp, (datetime, pd.Timestamp)) else exp
-        life = _simulate_life_surface(r, entry_day, closes.get((r["ticker"], exp_date.isoformat())))
+        # Strictly AFTER scan_date: a split effective ON the scan date is
+        # already reflected in the prices the scanner saw, so the strike it
+        # picked is in post-split units and agrees with the close.
+        split_hit = any(sd > r["scan_date"] for sd in splits.get(r["ticker"], ()))
+        life = _simulate_life_surface(
+            r, entry_day, closes.get((r["ticker"], exp_date.isoformat())),
+            split_adjusted=split_hit,
+        )
         statuses[life["life_status"]] = statuses.get(life["life_status"], 0) + 1
         computed.append({
             "scan_date": r["scan_date"],
@@ -3358,6 +3703,43 @@ def trigger_persist_minute_paths():
         return jsonify(summary), code
     except Exception as e:
         logger.error(f"Error in persist_minute_paths endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/load_underlying_bars", methods=["POST", "GET"])
+def trigger_load_underlying_bars():
+    """Daily loader for the underlying settlement-mark cache (2026-08-07).
+
+    Refreshes `underlying_daily_bars` for the last few CLOSED NYSE sessions
+    (T-1 horizon, idempotent delete-then-load per date). Hit by the
+    `load-underlying-bars` Cloud Scheduler cron at 17:05 ET — five minutes
+    BEFORE label-life-surface at 17:10, which is the whole point: the labeler
+    reads this table to resolve each expired contract's hold-to-settlement mark,
+    and without it stamps PARTIAL_NO_EXPIRY.
+
+    Writes ONLY to underlying_daily_bars — never forward_paper_ledger,
+    enriched_option_outcomes, or any live surface. Adds NO trader-side gate.
+
+    Token-gated exactly like /persist_minute_paths and /label_life_surface
+    (fail-closed when POOL_LIQ_REFRESH_TOKEN is set): values are deterministic
+    and unpoisonable, but an open endpoint is a free Polygon-quota burner.
+    Body (optional): {"sessions": N}.
+    """
+    import hmac as _hmac
+
+    expected_token = os.environ.get("POOL_LIQ_REFRESH_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    if expected_token and not _hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"status": "denied"}), 403
+
+    try:
+        req = request.get_json(silent=True) or {}
+        success, result = run_load_underlying_bars(sessions=req.get("sessions"))
+        if success:
+            return jsonify({"status": "success", **result}), 200
+        return jsonify({"status": "error", **result}), 500
+    except Exception as e:
+        logger.error(f"Error in load_underlying_bars endpoint: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

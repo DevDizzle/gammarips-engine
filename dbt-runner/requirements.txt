@@ -2,3 +2,10 @@ dbt-core==1.11.11
 dbt-bigquery==1.11.2
 Flask==3.0.3
 gunicorn==23.0.0
+# Daily health digest (2026-08-07): coverage/life-surface queries, the Cloud
+# Scheduler REST call, and the Mailgun send. dbt-bigquery already pulls
+# google-cloud-bigquery and google-auth transitively; pinned here because
+# digest.py imports them directly and must not depend on a transitive.
+google-cloud-bigquery==3.27.0
+requests==2.32.3
+pytz==2025.1

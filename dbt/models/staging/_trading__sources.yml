@@ -8,6 +8,28 @@ sources:
       Raw production tables written by the GammaRips Python Cloud Run pipeline.
       dbt reads these read-only; it never writes back here.
 
+    # FRESHNESS THRESHOLDS. Every source here is written on a WEEKDAY cadence,
+    # so the floor on any threshold is the weekend gap, not the write interval.
+    # `warn_after` was 48h until 2026-08-10, which is BELOW that gap: the last
+    # Friday write lands 16:30-17:40 ET, the digest reads Monday 07:15 ET, and
+    # the age is 61-64h. Every weekday-cadence source therefore warned every
+    # Monday while perfectly healthy (2026-08-10: ten of them at once), which
+    # is how an operator learns to skim past the digest.
+    # 72h clears the two-day gap with ~8h of margin. This is a READABILITY fix,
+    # not a detection change: `warn_after` is NOT status-bearing anywhere. `dbt
+    # source freshness` exits 0 on a warn, /freshness gates its 500 on rc alone,
+    # and digest.py derives the section badge from rc — so on 2026-08-10 ten
+    # WARNs still rendered as "Table freshness OK". At 48h a genuinely dead
+    # writer was 1 of 13 identical Monday warns and had no discriminating power;
+    # at 72h a warn is unusual enough to mean something.
+    # `error_after` is deliberately UNCHANGED — it is the only status-bearing
+    # boundary here, and a noise fix does not get to move it.
+    # RESIDUAL, stated so it does not read as a regression when it happens: a
+    # three-day weekend puts Tuesday's age near 86h, so a market-holiday Monday
+    # still produces one warn on the Tuesday digest. That is ~6-9 mornings a
+    # year rather than 52, and lifting the threshold past it would crowd
+    # error_after. Cross-check a holiday-Tuesday warn against the coverage grid
+    # before treating it as real.
     tables:
       - name: forward_paper_ledger
         description: >
@@ -18,7 +40,7 @@ sources:
         config:
           loaded_at_field: "CAST(exit_timestamp AS TIMESTAMP)"
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -38,7 +60,7 @@ sources:
         config:
           loaded_at_field: "CAST(snapshot_ts AS TIMESTAMP)"
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -59,7 +81,7 @@ sources:
         config:
           loaded_at_field: enriched_at
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -81,7 +103,7 @@ sources:
         config:
           loaded_at_field: scan_timestamp
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -101,8 +123,18 @@ sources:
           contracts), one row per (contract, as_of), written every ~10 min
           during RTH by signal-notifier/pool_liquidity.py. TELEMETRY — never a
           feature; entry-day-live tape keyed by explicit as_of. bid/ask/mid/
-          spread_pct are NULL placeholders pending RM-001b. Declared minimally
-          (no freshness) for agg_pool_tradeability.
+          spread_pct are NULL placeholders pending RM-001b.
+        config:
+          # Freshness ADDED 2026-08-07. This source was declared "minimally (no
+          # freshness)", which left it in a blind spot between the two checks:
+          # the digest's coverage grid cannot flag a table that has NO data in
+          # its window (there is no newer data to make a hole a hole), and
+          # freshness never looked at all. If the ~41-snaps/day writer died, both
+          # checks would have read OK indefinitely.
+          loaded_at_field: "CAST(as_of AS TIMESTAMP)"
+          freshness:
+            warn_after: {count: 72, period: hour}
+            error_after: {count: 120, period: hour}
         columns:
           - name: scan_date
             tests: [not_null]
@@ -124,7 +156,7 @@ sources:
         config:
           loaded_at_field: labeled_at
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 120, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -146,9 +178,27 @@ sources:
           based, NOT option PnL — kept for context only. Has historical column
           drift across writer eras; staging is intentionally lossless `select *`.
         config:
-          loaded_at_field: performance_updated
+          # `performance_updated` does NOT exist on this table (it lives on
+          # overnight_signals_enriched) — the check hard-errored with
+          # "Unrecognized name: performance_updated" on every run from the
+          # canary's creation (2026-07-28) to 2026-08-07, so this source had
+          # ZERO freshness coverage while appearing to be covered.
+          # This table carries no load timestamp at all; `check_date` (the date
+          # win-tracker last re-checked the signal) is the only recency signal.
+          # It is DATE-granular, so thresholds must absorb both the missing
+          # intraday component and a weekend: Friday's write reads ~83h old at
+          # Monday 07:00 ET, ~107h after a Monday holiday. Hence warn at 120h.
+          # SAFE.PARSE_DATE, not PARSE_DATE: dbt runs max(<expr>) over the WHOLE
+          # unfiltered table, and this one has documented writer-era column
+          # drift. One legacy row with '' or an ISO datetime would make a bare
+          # PARSE_DATE raise -> rc=1 -> a canary permanently red for a reason
+          # that has nothing to do with freshness. That is the bug this change
+          # fixes, with the polarity flipped. (Verified 0 unparseable of 6,395
+          # rows on 2026-08-07 — SAFE is defence against the next writer, and a
+          # NULL from SAFE is simply ignored by max().)
+          loaded_at_field: "CAST(SAFE.PARSE_DATE('%Y-%m-%d', check_date) AS TIMESTAMP)"
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 120, period: hour}
             error_after: {count: 168, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -170,7 +220,7 @@ sources:
         config:
           loaded_at_field: created_at
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 168, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -194,7 +244,7 @@ sources:
         config:
           loaded_at_field: created_at
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 168, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -220,7 +270,7 @@ sources:
         config:
           loaded_at_field: created_at
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 168, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -248,7 +298,7 @@ sources:
         config:
           loaded_at_field: created_at
           freshness:
-            warn_after: {count: 48, period: hour}
+            warn_after: {count: 72, period: hour}
             error_after: {count: 168, period: hour}
         tests:
           - dbt_utils.unique_combination_of_columns:
@@ -264,4 +314,68 @@ sources:
           - name: evaluator
             tests: [not_null]
           - name: scan_date
+            tests: [not_null]
+
+      # ---- Vendor-data caches (added 2026-08-07) ----------------------------
+      # These three feed the substrate but were NOT registered as dbt sources,
+      # so nothing watched them. underlying_daily_bars silently went 37 days
+      # stale (2026-07-01 -> 2026-08-07), which froze the public full-life
+      # surface at 1,495 contracts. Freshness-only declarations: no staging
+      # model reads them yet, the point is that the canary now sees them.
+      # See docs/DECISIONS/2026-08-07-freshness-canary-and-bars-loader.md.
+
+      - name: underlying_daily_bars
+        description: >
+          Polygon grouped-daily ADJUSTED closes for substrate tickers — the
+          settlement-mark cache `/label_life_surface` reads to resolve each
+          expired contract's hold-to-expiration intrinsic value. A gap here does
+          NOT fail loudly: the labeler stamps `life_status='PARTIAL_NO_EXPIRY'`
+          and the contract silently drops out of the public `life_status='OK'`
+          cohort. Loaded weekdays 17:05 ET by forward-paper-trader
+          `/load_underlying_bars` (T-1 closed sessions, rolling 5-session window).
+          NOT the source of the live mom_60 tilt — enrichment-trigger calls
+          Polygon grouped-daily directly.
+        config:
+          loaded_at_field: loaded_at
+          freshness:
+            warn_after: {count: 72, period: hour}
+            error_after: {count: 120, period: hour}
+        columns:
+          - name: date
+            tests: [not_null]
+          - name: ticker
+            tests: [not_null]
+
+      - name: option_minute_paths
+        description: >
+          Per-contract minute bars over the pool's hold window (Polygon), the
+          substrate behind the opportunity/full-life excursion surfaces.
+          Partitioned by entry_day, clustered by contract. Written weekdays
+          17:40 ET by `option-minute-paths-refresh`.
+        config:
+          loaded_at_field: ingested_at
+          freshness:
+            warn_after: {count: 72, period: hour}
+            error_after: {count: 120, period: hour}
+        columns:
+          - name: entry_day
+            tests: [not_null]
+          - name: contract
+            tests: [not_null]
+
+      - name: polygon_iv_history
+        description: >
+          Daily ATM 30d implied-vol cache per ticker (Polygon), written weekdays
+          16:30 ET by forward-paper-trader `/cache_iv`. Feeds the IV-rank /
+          IV-percentile entry context. Partitioned by as_of_date, clustered by
+          ticker.
+        config:
+          loaded_at_field: fetched_at
+          freshness:
+            warn_after: {count: 72, period: hour}
+            error_after: {count: 120, period: hour}
+        columns:
+          - name: as_of_date
+            tests: [not_null]
+          - name: ticker
             tests: [not_null]

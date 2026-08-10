@@ -10,9 +10,16 @@ rows whose contracts have already expired so the distribution has day-one mass.
 
 BYTE-IDENTICAL by construction: IMPORTS the deployed collector functions
 (_simulate_life_surface, _underlying_closes_at_expiry, _merge_life_rows,
-_ensure_enriched_outcomes_columns) from forward-paper-trader/main.py rather than
-re-implementing anything — same source of truth as the daily pass. Same pattern
-as backfill_opportunity_surface.py.
+_ensure_enriched_outcomes_columns, _splits_by_ticker) from
+forward-paper-trader/main.py rather than re-implementing anything — same source
+of truth as the daily pass. Same pattern as backfill_opportunity_surface.py.
+
+CAVEAT (2026-08-07): "byte-identical" covers the COLLECTOR functions, not the
+orchestration around them. The split guard in particular lives in the CALLER —
+each call site must enumerate splits and pass `split_adjusted`. That is why
+`_simulate_life_surface` takes it as a REQUIRED keyword arg: this script once
+called it with three positional args, which silently ran unguarded. If you add a
+third call site, it will fail loudly rather than write fabricated -100% returns.
 
 LEAKAGE-SAFE: only contracts whose expiration is strictly before today ET are
 labeled (final session complete); the anchor is the stored opp_entry_price
@@ -63,6 +70,13 @@ sys.path.insert(0, _FPT_DIR)
 
 
 def _rows_to_process(client, today_et: date, force: bool, limit: int | None):
+    # NOTE (2026-08-07): the DAILY pass in forward-paper-trader no longer uses
+    # `life_status IS NULL` alone — it also re-queues PARTIAL_NO_EXPIRY rows
+    # whose settlement bar has since landed. This script deliberately keeps the
+    # narrower filter: it is a one-shot historical backfill, and --force already
+    # covers "recompute everything expired". If you need to heal PARTIAL rows
+    # from here, use --force. The two queues disagreeing is intentional, not
+    # drift. See docs/DECISIONS/2026-08-07-freshness-canary-and-bars-loader.md.
     fill_filter = "" if force else "AND life_status IS NULL"
     lim = f"LIMIT {int(limit)}" if limit else ""
     # QUALIFY dedup: ~145 documented duplicate identity keys in the table —
@@ -142,6 +156,21 @@ def main():
     print(f"    settlement marks found : "
           f"{sum(1 for v in closes.values() if v is not None)}/{len(closes)}")
 
+    # Split guard — MUST mirror the daily pass (2026-08-07). `recommended_strike`
+    # is frozen at scan time while the settlement close is split-adjusted, so a
+    # contract whose underlying split after selection yields a fabricated -100%.
+    # Fail closed: None means the enumeration failed, {} means genuinely no
+    # splits, and only the former is a reason to stop. This matters most under
+    # --force, which is the ONLY path that can overwrite an already-terminal
+    # PARTIAL_SPLIT_ADJUSTED row back to OK.
+    scan_dates = [r["scan_date"] for r in rows if r.get("scan_date")]
+    splits = fpt._splits_by_ticker(min(scan_dates), today_et) if scan_dates else {}
+    if splits is None:
+        print("FATAL: split enumeration failed — refusing to label. "
+              "An unguarded batch writes fabricated -100% expiry returns into "
+              "the PUBLIC life_status='OK' cohort, and OK is terminal.")
+        sys.exit(3)
+
     computed, statuses, total = [], {}, 0
     for i, r in enumerate(rows):
         entry_day = r["entry_day"] or fpt.get_next_trading_day(r["scan_date"])
@@ -149,8 +178,12 @@ def main():
         # datetime-first coercion (datetime IS a date subclass — the reversed
         # check would keep a time component and miss the closes dict key).
         exp_date = exp.date() if isinstance(exp, datetime) else exp
+        # Strictly after scan_date — a split effective ON the scan date is
+        # already in the prices the scanner saw.
+        split_hit = any(sd > r["scan_date"] for sd in splits.get(r["ticker"], ()))
         life = fpt._simulate_life_surface(
-            r, entry_day, closes.get((r["ticker"], exp_date.isoformat()))
+            r, entry_day, closes.get((r["ticker"], exp_date.isoformat())),
+            split_adjusted=split_hit,
         )
         statuses[life["life_status"]] = statuses.get(life["life_status"], 0) + 1
         computed.append({
