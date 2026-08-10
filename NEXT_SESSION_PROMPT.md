@@ -19,19 +19,22 @@ re-propose. Steps, in order:
    `/reports/archive` lists **116 reports back to 2026-02-13**, `/developers` carries
    FAQPage schema with "options flow api" x18, the oldest report links forward, and
    `/signals/NVDA` links its 08-03 briefing.
-2. **🔴 NEXT: Video: "How to Trade Options Using Claude."** Owner is recording a clip of
-   his real morning routine running `/trade` in the harness, then wants to coordinate
-   with **Gemini to cut and edit**. Rails + outline in
-   `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Use a fresh demo key, revoke after the
-   shoot. Embed: webapp `landing/video-led` branch (READY, iframe swap, `/ship`).
-3. **Show HN — submission is WRITTEN and ready: `~/workspace/HN-SUBMISSION.txt`**
-   (title, url, text, the ban-triggering mistakes, the 3 questions he will get).
-   Submit the **repo** `github.com/DevDizzle/gammarips-harness`, not gammarips.com.
-   Harness README was fixed 08-08 (PR #2 merged): it led with "Subscribe $39/mo" and
-   never mentioned the free tier. Now opens with the anonymous one-liner and a per-tool
-   table. **The harness loop genuinely CANNOT run anonymously** (`get_liquidity`,
-   `get_signal`, `query_outcomes`, `replay_contract` are all pro) — never claim it can.
-   FIRE ONLY AFTER THE VIDEO. One shot per project; reposting burns goodwill.
+2. **🔴 NEXT: the video — CONCEPT CHANGED BY OWNER 08-08.** Not a trading clip: a
+   **zero-to-contracts install demo**. Empty directory → `git clone` the harness → the
+   one-line MCP connect → `/trade` → contract candidates out of the curated data.
+   Spec rewritten to v2 in `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md` (acts, the
+   start-from-nothing rule, the beats that must survive the cut). Owner records, then
+   coordinates the edit with **Gemini**. Fresh demo key, revoke after the shoot. A
+   "nothing today" outcome SHIPS, it does not get re-recorded. Embed: webapp
+   `landing/video-led` branch (READY, iframe swap, `/ship`).
+3. **Show HN — fully planned in `docs/GTM-DISTRIBUTION-PLAYBOOK.md`** (durable; the
+   scratch copy at `~/workspace/HN-SUBMISSION.txt` is for copy-paste only). Title, URL,
+   full submission text, gates, the ban-triggering mistakes, the 3 questions. Submit the
+   **repo** `github.com/DevDizzle/gammarips-harness`, not gammarips.com — same artifact
+   the video demos. Harness README fixed 08-08 (PR #2): it led with "Subscribe $39/mo"
+   and never mentioned the free tier. **The harness loop genuinely CANNOT run
+   anonymously** (`get_liquidity`, `get_signal`, `query_outcomes`, `replay_contract` are
+   all pro) — never claim it can. FIRE ONLY AFTER THE VIDEO + the GA4 purchase check.
 4. **Ads review ~09-01** on measured CVR from video+HN traffic; $10-20/day on the exact
    "claude mcp options trading" cluster only if CVR nonzero.
 
@@ -116,6 +119,15 @@ session of the month (379s) came from copilot.com.
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
+- 🔴 **MCP `view="surface"` fix is written, tested, NOT deployed** (unstaged in
+  `../gammarips-mcp`). Adds `aggregate_only` + `delta_min/max` + truncation disclosure
+  (`matched_rows`/`truncated`/`partial_scan_date`) + a `frontier` block. Found while
+  answering the 08-10 trader handoff: the row mode silently returned 200 of 791 matched
+  rows and, because the sort is `scan_date DESC, opp_peak_return DESC`, the cut lands
+  mid-date and keeps only that date's highest-MFE rows — **median MFE inflated 46%**
+  (0.3416 vs 0.2341). Public data-exposure change: needs `gammarips-review` + owner
+  deploy. Memory `mcp-row-cap-silent-truncation`. **Other row tools are unaudited for
+  the same undeclared cap** (`labels`, `positions`, `signal_performance`).
 - 🟡 **x-poster not audited for public mutating routes** — same shape as the
   blog-generator hole closed 08-07 (`docs/DECISIONS/2026-08-07-blog-generator-iam-lockdown.md`).
   Gotcha recorded there: `gcloud run deploy --no-allow-unauthenticated` does NOT revoke an
@@ -127,7 +139,8 @@ session of the month (379s) came from copilot.com.
   re-check note — judge overclaimed on CSCO 08-05 (GAP-014).
 - Audit `next_url` pagination on remaining endpoints (`polygon_client.py:215`,
   `benchmark_context.py`); memory `polygon-next-url-cursor-skips-rows`.
-- MCP repo (own rules + review gate): `FILL_PENDING`/stale via window-close derivation;
+- MCP repo (own rules + review gate): ~~`FILL_PENDING`/stale via window-close
+  derivation~~ (done 08-10, the `frontier` block, in the same unstaged change above);
   QUALIFY dedup; `market_snapshot.py` `freshness_note` calls `day_volume` "the live
   (delayed) session", false on a stale bar (copy fix, not a defect).
 - Blog non-blocking (review 07-30): swallowed schedule-row-flip failure repeats Monday

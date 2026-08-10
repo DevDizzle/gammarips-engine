@@ -1,17 +1,30 @@
 # GTM: "How to Trade Options Using Claude" video
 
-Status: DRAFT v1 (2026-08-06). Owner records; this doc is the outline, script
-skeleton, and compliance rails. Companion to `docs/GTM-MCP-DIRECTORY-PLAN.md`.
+Status: **DRAFT v2 (2026-08-08) — CONCEPT CHANGED BY OWNER.** v1 specced an 8-12
+minute walkthrough of a Claude session with the MCP attached. v2 is a
+**zero-to-contracts install demo**: clone the open-source harness, run the one-line
+MCP connect, run `/trade`, and produce contract candidates out of the curated data.
+Nothing is pre-set-up on screen. Owner records; this doc is the outline, script
+skeleton, and compliance rails. Companion: `docs/GTM-DISTRIBUTION-PLAYBOOK.md`.
 Destination: YouTube (primary) + iframe embed on the webapp `landing/video-led`
-branch (already READY, waiting on this video) + X pin.
+branch (READY, waiting on this video) + X pin + the Show HN thread.
 
-## Why this video, in one paragraph
+## Why THIS video, in one paragraph
 
-"How to trade options using Claude" and its query cluster (Claude MCP trading,
-AI agent options trading, connect Claude to market data) have real search intent
-and almost no supply. The video demos the exact monetized product (MCP access,
-$39/mo Agent Access) end to end, feeds the organic CVR baseline the ads decision
-is gated on, and builds the agentic-trading category we claim as our hero angle.
+The thing on screen is the same artifact we submit to HN
+(`github.com/DevDizzle/gammarips-harness`), so the video and the launch point at
+one destination and a viewer can replicate exactly what they just watched. Going
+from an empty directory to contract candidates is the only way to show that the
+data is real and the workflow is not a mock. It also demos the monetized product
+($39/mo Agent Access) honestly end to end, and it feeds the organic CVR baseline
+the ads decision is gated on.
+
+## The one structural rule for v2
+
+**Start from nothing.** No pre-cloned repo, no pre-connected server, no warmed
+context. The whole point is that the viewer sees the distance from `git clone` to
+a contract candidate and knows it is short. If a step is slow, cut it in the edit,
+never fake it in the recording.
 
 ## Compliance rails (non-negotiable, from webapp forbidden-claims list)
 
@@ -38,65 +51,76 @@ final script before recording; any on-site copy for the embed goes through `/shi
 
 ## Format
 
-- Main video: 8 to 12 minutes, screen recording of a real Claude session with the
-  GammaRips MCP connected, owner voiceover. Dry, receipts-forward, zero hype.
-- Cut a 60 to 90 second vertical Short from Act 3 (the agent reasoning beat).
-- Thumbnail: terminal/Claude UI screenshot, plain claim ("I gave Claude my
-  options data. Here is what it did."), no rockets, no money imagery.
+- Main video: **6 to 10 minutes**, one continuous screen recording from an empty
+  directory to contract candidates, owner voiceover. Dry, receipts-forward, no hype.
+- Cut a **60 to 90 second vertical Short** from the connect + first output beat.
+  That Short is the highest-leverage asset: it is the whole promise in a minute.
+- Thumbnail: terminal mid-run, plain claim ("From `git clone` to contract
+  candidates"), no rockets, no money imagery.
+- Editing: owner is coordinating the cut with Gemini. Keep the raw recording;
+  the honest beats below must survive the edit, especially the "nothing today"
+  possibility and the paid-tier boundary.
 
 ## Script skeleton
 
-### Act 1: Hook + honest framing (0:00 to 1:00)
-- Cold open on a live Claude session already mid-analysis. 5 seconds.
-- Hook line (draft): "This is Claude reading last night's unusual options
-  activity and deciding, on its own, whether anything is worth trading today."
-- Immediately the honesty beat: "First, what this is not. Nobody here is
-  selling you picks or a win rate. This is a data pipeline and an AI agent that
-  reasons over it. Paper-trading data, educational, not investment advice."
-- One-line product frame: free website for humans, MCP server for agents.
+### Act 1: Hook + honest framing (0:00 to 0:45)
+- Cold open on an EMPTY terminal in an empty directory. That is the hook: nothing
+  is set up.
+- Hook line (draft): "In the next few minutes I am going to go from an empty folder
+  to a set of options contracts my agent picked out of last night's flow. Nothing
+  is pre-installed."
+- Immediately the honesty beat: "First, what this is not. Nobody is selling you
+  picks or a win rate. This is a data pipeline and an AI agent that reasons over
+  it. Paper-trading data, educational, not investment advice."
+- One-line product frame: free website for humans, MCP server for agents, harness
+  is open source.
 
-### Act 2: Setup (1:00 to 3:00)
-- What MCP is in one sentence (a standard port for plugging tools into Claude).
-- Live: connect the server. Show both paths on screen:
-  - Claude Code: `claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp`
-  - claude.ai custom connector (Settings > Connectors) for non-CLI users.
-- Show the 9 tools appearing. Name a few: get_pool, get_liquidity,
-  replay_contract, query_outcomes, get_playbook.
-- Note the free/pro split honestly: 5 tools free, 4 pro, trial exists.
+### Act 2: From nothing to connected (0:45 to 2:30)
+- `git clone https://github.com/DevDizzle/gammarips-harness.git` on screen. Real.
+- What MCP is, in one sentence (a standard port for plugging tools into an agent).
+- The free connect, typed live:
+  `claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp`
+- Show the tools appearing. Ask for a morning brief on the ANONYMOUS tier so the
+  viewer sees real data before any mention of paying. This beat is why the video
+  converts: value lands before the ask.
+- Then the honest boundary, said plainly: the harness loop needs the paid tools
+  (`get_liquidity`, `get_signal`, `query_outcomes`, `replay_contract`), so
+  export the demo key. "The harness is free. The data is what costs money."
+  **Do not imply the loop runs anonymously. It does not.**
 
-### Act 3: The workflow, agent-driven (3:00 to 8:00) THE CORE
+### Act 3: `/trade`, agent-driven (2:30 to 7:00) THE CORE
 Narrate what the ENGINE did overnight (scan 5,230+ tickers, score, curate to a
-small bullish pool, two safety rails), then hand the wheel to Claude. Show a
-real prompt that models correct use, for example:
+small bullish pool, two safety rails), then run `/trade` and get out of the way.
 
-    "Pull today's pool and the regime context. For anything that interests
-    you, check liquidity and replay how similar contracts actually moved.
-    Then tell me if YOU would trade any of these, at what terms, and what
-    would make you walk away. Assume I will disagree with you."
-
-- Let the agent visibly call: get_market_calendar_status, get_regime_context,
-  get_pool, get_liquidity on 1 or 2 names, replay_contract, query_outcomes,
-  get_playbook.
-- Critical beat: the agent declines some or most of the pool, sets its own
-  entry/exit logic, maybe concludes "nothing today." Keep that take. The
-  narration underlines it: "Different agent, different prompt, different
-  conclusion. That is the point. This is data, not a signal to follow."
+- Let the agent visibly work: screen the pool, grade tradeability BEFORE thesis,
+  check liquidity, replay how similar contracts actually moved, then reason to
+  contract candidates with its own entry and exit terms.
+- Critical beat, non-negotiable: the agent declines most of the pool, and the
+  narration says why that is the product. "It rejected almost everything. That is
+  the job. And a different agent with a different objective would land somewhere
+  else, which is exactly why there is no pick endpoint to call."
+- **If the honest outcome that day is "nothing today," KEEP IT and ship it.** A
+  no-trade day is the single most credible thing this video can show, and it is
+  on-message. Do not re-record for a prettier outcome.
 - Honesty beat #2 (lower-third disclosure on screen): "If you traded the whole
-  pool mechanically under one fixed exit, you would lose money. We publish
-  that. The opportunity surface is real; capturing it depends on how each
-  contract is traded, which is exactly the part the agent owns."
+  pool mechanically under one fixed exit, you would lose money. We publish that.
+  The opportunity surface is real; capturing it depends on how each contract is
+  traded, which is the part the agent owns."
 
-### Act 4: Close (8:00 to end)
-- Recap in two sentences. What the engine curates, what the agent decides.
-- CTA, in this order: the website is free (pool, research Lab, methodology);
-  if you want your agent plugged in, Agent Access is $39/mo with a 7-day trial.
-- Verbal + on-screen disclosure repeat. End card: gammarips.com.
+### Act 4: Close (7:00 to end)
+- Recap in two sentences: engine curates, agent decides, you disagree with it.
+- CTA in this order: clone the harness (free, link in description), browse the
+  site free, and Agent Access is $39/mo with a 7-day trial if you want the paid
+  tools the loop needs.
+- Verbal + on-screen disclosure repeat. End card: the GitHub repo AND
+  gammarips.com, repo first.
 
 ## SEO packaging (draft, copywriter pass required)
 
-- Title candidates (no em dashes):
-  1. "How to Trade Options Using Claude (Full AI Agent Workflow)"
-  2. "I Connected Claude to Live Options Flow Data. Here Is the Full Workflow."
+- Title candidates (no em dashes), now install-shaped to match the v2 concept:
+  1. "From git clone to options contracts: an AI agent on real options flow"
+  2. "How to Trade Options Using Claude (Full AI Agent Workflow)"
+  3. "I gave Claude last night's options flow. Watch it pick the contracts."
 - Description skeleton: what happens in the video, tool list, endpoint, free
   site link with UTM (`utm_source=youtube&utm_medium=video&utm_campaign=claude_workflow`),
   disclosures paragraph, timestamped chapters matching the four acts.
@@ -107,8 +131,13 @@ real prompt that models correct use, for example:
 - [ ] Script final pass through webapp `gammarips-copywriter` (compliance + voice)
 - [ ] Fresh demo account + demo API key for recording; REVOKE the key after the
       shoot (it will be on video). Never the owner's real key.
-- [ ] Record on a day with a real pool; a "nothing today" outcome is acceptable
-      and on-message if it happens.
+- [ ] Record on a day with a real pool; a "nothing today" outcome is acceptable,
+      on-message, and SHOULD be shipped rather than re-recorded.
+- [ ] Start from a genuinely empty directory. No pre-cloned repo, no warmed
+      context, no pre-connected server. The distance is the message.
+- [ ] Keep the raw file for the Gemini edit. The beats that must survive the cut:
+      the anonymous-tier data landing before any ask, the paid-boundary sentence,
+      the agent rejecting most of the pool, and the negative-composite disclosure.
 - [ ] Blur/skip anything showing the private tournament pick or operator email.
 - [ ] UTM links in description; confirm GA4 picks up `utm_source=youtube`.
 - [ ] After publish: iframe swap on `landing/video-led`, then `/ship` from
