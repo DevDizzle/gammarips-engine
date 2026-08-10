@@ -99,8 +99,11 @@ session of the month (379s) came from copilot.com.
   took, and re-check `options flow api` position (was 24.2 pre-FAQ).
 - **08-10 Mon 07:00 ET:** first `dbt-source-freshness` run that CAN go red.
 - **08-09 Sun 08:00 ET:** first scheduled universe weekly refresh — spot-check it fired.
-- **~08-13:** owner's trial converts — first real-card charge; verify `invoice.paid` fires
-  the newly-registered webhook path and proUntil refreshes.
+- **Thu 08-13:** owner's own trial converts — first real-card charge. The T-3 warning email
+  fired correctly 08-08 (right amount, date, sender, manage link), so the dunning path is
+  proven; what remains is `invoice.paid` firing the newly-registered webhook and refreshing
+  `proUntil`. NOTE: this is the owner's own subscription, never a subscriber count.
+  Memory `billing-lifecycle-verified-on-real-card`.
 - **08-17 / 10-05 kill-switch gates** — memory `mcp-monetization-killswitch`.
 - **~08-27:** re-fit print/liq thresholds on ~30 more days of `pool_liquidity_snapshot`
   (review hard requirement — 15-day in-sample fits). NOT a re-run of the 07-28 study,
