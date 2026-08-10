@@ -1,6 +1,6 @@
 # GTM: "How to Trade Options Using Claude" video
 
-Status: **DRAFT v2 (2026-08-08) — CONCEPT CHANGED BY OWNER.** v1 specced an 8-12
+Status: **DRAFT v2 (2026-08-08), CONCEPT CHANGED BY OWNER.** v1 specced an 8-12
 minute walkthrough of a Claude session with the MCP attached. v2 is a
 **zero-to-contracts install demo**: clone the open-source harness, run the one-line
 MCP connect, run `/trade`, and produce contract candidates out of the curated data.

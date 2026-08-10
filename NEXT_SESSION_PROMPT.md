@@ -43,20 +43,20 @@ dry-run `POST /generate {"slug":"best-mcp-servers-for-trading-and-finance","dry_
 (now needs `-H "Authorization: Bearer $(gcloud auth print-identity-token)"`); check
 whether the 08-03 Mon cron fired or 500'd (wk15 slug).
 
-## SEO posture (measured 08-08, memory `reports-are-the-seo-asset-not-ticker-pages`)
-Real external organic demand is **~2 impressions/day** (75 queries / 184 impr per 90d
-after stripping brand + `site:`). GA4 is ~97% bot (Singapore, 1.001 sessions/user).
-**Ticker pages are a dead asset: 452 pages, 3 clicks/90d — do not build more.** Dated
-report pages are the surface that ranks (pos 3.0, 9.0, 9.3 on analyst-shaped queries).
-`options flow api` at pos 24 is the one query with real buyer intent (#24 targets it).
-Never quote a GSC/GA4 aggregate here without stripping brand, `site:`, and bot traffic.
-The report archive turned out to be **116 pages back to 2026-02-13**, ~2x the estimate;
-43+ of them had been orphaned (no sitemap entry, no internal link) but still indexed.
-Acquire on CURRENT vocabulary (`options flow api`, `unusual whales alternative`), not on
-the category vocabulary — you rank 7.7 for `llm stock options data` and it drew 3
-impressions in 90 days. Being early means the demand does not exist yet, not that you
-are losing. LLM-mediated discovery is the compounding channel: the longest-engaged US
-session of the month (379s) came from copilot.com.
+## SEO posture (measured 08-08)
+Full detail: memory `reports-are-the-seo-asset-not-ticker-pages` +
+`docs/GTM-DISTRIBUTION-PLAYBOOK.md`. The four facts that change decisions:
+- Real external organic demand is **~2 impressions/day** (75 queries / 184 impr per 90d
+  after stripping brand + `site:`). GA4 is **~97% bot**. Never quote a GSC/GA4 aggregate
+  for this property without stripping brand, `site:`, and bot traffic first.
+- **Ticker pages are a dead asset: 452 pages, 3 clicks/90d. Do not build more.** Dated
+  report pages are what ranks (pos 3.0/9.0/9.3 on analyst-shaped queries); the archive is
+  116 pages back to 2026-02-13, 43+ of which had been orphaned but still indexed.
+- Acquire on CURRENT vocabulary (`options flow api` pos 24, `unusual whales alternative`),
+  not category vocabulary: we rank 7.7 for `llm stock options data` and it drew 3
+  impressions in 90 days. Early means the demand does not exist yet, not that we lose.
+- LLM-mediated discovery is the compounding channel: the longest-engaged US session of
+  the month (379s) came from copilot.com.
 
 ## Owner queue
 - 🟡 **WATCH Mon 08-10 09:52 ET — first pick under a print floor that actually fires.**
