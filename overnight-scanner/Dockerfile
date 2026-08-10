@@ -11,4 +11,4 @@ COPY main.py .
 ENV PYTHONPATH=/app
 ENV PORT=8080
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "540", "main:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "1200", "main:app"]

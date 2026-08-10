@@ -8,6 +8,7 @@ mkdir -p src/enrichment/core/clients
 
 cp ../src/enrichment/core/config.py src/enrichment/core/
 cp ../src/enrichment/core/pipelines/overnight_scanner.py src/enrichment/core/pipelines/
+cp ../src/enrichment/core/pipelines/universe_refresh.py src/enrichment/core/pipelines/
 cp ../src/enrichment/core/clients/polygon_client.py src/enrichment/core/clients/
 
 # Create __init__.py files
@@ -24,7 +25,7 @@ gcloud run deploy overnight-scanner \
   --source=. \
   --allow-unauthenticated \
   --memory=2Gi \
-  --timeout=540 \
+  --timeout=1200 \
   --cpu=2 \
   --min-instances=0 \
   --max-instances=2 \
