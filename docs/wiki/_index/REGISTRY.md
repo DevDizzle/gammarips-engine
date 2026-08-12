@@ -10,7 +10,8 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[bullish-only-hard-gate]] — policy-adopted — BULLISH-only is a HARD gate (env-toggleable, overrides the bearish-regime caveat for now)
 - [[tourney-pool-cap-edge-rank]] — policy-adopted — pool is soft-edge-ranked then capped to TOURNEY_POOL_CAP (12→50; fallback skips the edge-cap)
 - [[v7-gigo-same-day-exit]] — policy-adopted — live exit: 10:00 entry / +40% TP / −30% stop / flat 15:45 ET, no trail, no overnight; TIMEOUT>STOP>TARGET
-- [[live-oi-floor]] — policy-adopted — re-fetch live OI at ~09:45 ET, drop below OI_FLOOR=1000 (fail-soft to top-8)
+- [[live-oi-floor]] — policy-adopted — two-tier slate floor at ~09:52 ET (early prints, then OI_FLOOR=1000); a dropped candidate never comes back
+- [[no-liquid-candidates-no-pick]] — policy-adopted — when nothing clears the liquidity floors the engine stands down instead of ranking the reject pile
 - [[earnings-exclusion-rail]] — policy-adopted — safety rail 1: no earnings in the hold/exclusion window (literature-anchored)
 - [[regime-rail-vix-term]] — policy-adopted — safety rail 2: fail closed when VIX > VIX3M
 - [[entry-day-mark-and-limit]] — policy-adopted — published pick shows a FRESH entry-day mark + fair-value limit (display, not selection)

@@ -28,14 +28,15 @@ whole defect: the MCP said "since 2026-06-26" through two resets.
 
 Cohort history: 2026-06-26 (live-OI floor) -> 2026-07-29 (tournament liquidity
 upgrade) -> 2026-08-10 (stale-day-bar fix; the 07-29 cohort's primary print
-floor never actually fired). See
-`docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md`.
+floor never actually fired) -> 2026-08-13 (fail-soft restore closed; 2 of the
+08-10 cohort's 3 entries were sub-floor restores the new code cannot select).
+See `docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md`.
 """
 
 from __future__ import annotations
 
 LIVE_POLICY_VERSION = "V7_1_TILTED_GIGO"
-LIVE_COHORT_START_DATE = "2026-08-10"
+LIVE_COHORT_START_DATE = "2026-08-13"
 
 # SQL fragment for a ledger query that has already bound/most commonly filters
 # on `policy_version`. Entry-dated in ET to match the engine's own cohort

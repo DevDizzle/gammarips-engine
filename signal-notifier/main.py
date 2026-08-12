@@ -46,6 +46,7 @@ Unchanged across V5.3 → V5.4 → tournament — only the picker has changed.
 """
 
 import logging
+import math
 import os
 import time
 from datetime import date, datetime, timedelta
@@ -91,7 +92,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "").strip()
 # the trade record. See:
 #   docs/DECISIONS/2026-05-08-v5-3-retired-v5-4-promoted.md
 #   docs/DECISIONS/2026-05-19-cohort-start-and-position-sizing.md
-LIVE_COHORT_START_DATE = "2026-08-10"  # WORKING-PRINT-FLOOR cohort (reset 2026-08-07, owner call): first ENTRY under a print floor that actually fires (scan 08-07 -> entry Mon 08-10; cron is 52 9 * * 1-5 ET). The 2026-07-29 cohort it replaces was selected under tournament_v1_1 MINUS its primary floor: _fetch_live_oi read day.volume without day.last_updated, Polygon never serves a zero-volume day bar, so the early-print floor dropped ZERO candidates for that cohort's entire life and the judge's early_volume was a prior-session total on ~40% of each slate (2 of 7 entries — HUT 07-31, TGT 08-04 — were picked on a phantom count and would not have survived the fixed floor). The deployed policy was never the approved policy, hence the reset. Same shape as the 07-28 and 06-25 resets: NO truncation — the 7 rows of the 07-29 cohort and the 22 before them stay in forward_paper_ledger, excluded from the public cohort by this date filter (archival over deletion); cohort_stats/current is fully recomputed from this constant, so no Firestore state to clear (the public panel legitimately shows 0 closed until the first 08-10+ trade closes). policy_version STAYS V7_1_TILTED_GIGO (exit mechanics unchanged; only selection is liquidity-aware). See docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
+LIVE_COHORT_START_DATE = "2026-08-13"  # FAIL-SOFT-RESTORE-CLOSED cohort (reset 2026-08-12, owner call): first ENTRY under a selection where a candidate that failed a liquidity floor can never become the pick. The 2026-08-10 cohort it replaces held 3 entries and 2 of them (ALC 08-11, MDB 08-12) were fail-soft RESTORES that the new code cannot select: the restore put sub-floor names back on the slate and _print_floor_restored was popped before /rank, so the judge chose them blind (ALC 26.1% spread, real -$312; MDB 44.6%, the worst spread ever measured on a pick). Only PLTR 08-10 was a genuine survivor. Same criterion as the 08-07 reset in the same words: the deployed policy was never the approved policy. Same shape as 06-25 / 07-28 / 08-07: NO truncation — those rows stay in forward_paper_ledger and are excluded from the public cohort by this date filter (archival over deletion); cohort_stats/current recomputes from this constant, so there is no Firestore state to clear and the public panel legitimately shows 0 closed until the first 08-13+ trade closes. policy_version STAYS V7_1_TILTED_GIGO (exit mechanics unchanged; only selection got stricter). This is the FOURTH reset in seven weeks and the public panel has never held more than ~7 closed trades — that cost is real and compounding, and it is the reason to stop changing selection in small increments. See docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
 
 # Fixed-dollar position sizing for the public cohort_stats panel.
 # The ledger records actual per-contract premium + percent return; the public
@@ -266,6 +267,56 @@ LIQUIDITY_TILT = os.environ.get("LIQUIDITY_TILT", "true").strip().lower() in ("1
 # accrues.
 PRINT_FLOOR_ENABLED = os.environ.get("PRINT_FLOOR_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 PRINT_FLOOR_MIN = int(os.environ.get("PRINT_FLOOR_MIN", "1"))
+
+# FAIL-SOFT RESTORE MODE (2026-08-12, see
+# docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md). The 2026-08-07
+# date-validation fix made the early-print floor fire for real; the fail-soft
+# restore then fed the rejects straight back to the judge, which cannot see the
+# restore flag and so picked sub-floor names on 08-11 (ALC, 26.1% spread, -$312)
+# and 08-12 (MDB, 44.6% spread — worst ever measured on a pick). TOURNEY_MIN was
+# a floor on slate SIZE with no corresponding floor on slate QUALITY.
+#   * "none" (default): NEVER restore. A candidate that failed a liquidity floor
+#     never reaches the tournament. When ZERO candidates clear, the slate is
+#     empty and the caller emits skip_reason="no_liquid_candidates" — a no-pick
+#     day is the correct output when nothing is tradeable.
+#   * "empty_only": restore up to TOURNEY_MIN ONLY when zero candidates cleared
+#     (a pick, loudly marked SUB-FLOOR, instead of a no-pick day).
+#   * "always": pre-2026-08-12 behavior, restore whenever n_pass < TOURNEY_MIN.
+#     Kept solely as a no-redeploy rollback lever; it is the defect.
+# Measured impact (scripts/tests_and_diagnostics/dryrun_print_floor_datevalidated.py,
+# 15 sessions 2026-07-23 -> 2026-08-12, replayed against pool_liquidity_snapshot):
+# genuine survivors mean 5.7/12, and ZERO-print names handed to the judge falls
+# from 6/session at worst to 0. It is NOT free: 2026-07-24 had 0 survivors, so
+# that session becomes a no-pick day (1 of 15, ~7%) — the no_liquid_candidates
+# path is live machinery, not a theoretical branch. TOURNEY_MIN survives as a
+# SOFT target: it sizes the restore in the two non-default modes and nothing else.
+#
+# LIVE_FETCH_MIN_OK_FRAC is the EVIDENCE gate on that no-pick day (review BLOCK
+# finding 1, 2026-08-12). A total Polygon failure does NOT raise: _fetch_live_oi
+# returns (None, None, "polygon_error") per row and _refresh_live_oi_batch
+# try/excepts each future, so the batch completes with live_oi=None everywhere.
+# The print floor then drops nothing (None is UNKNOWN, fail-open per row) and the
+# OI floor silently judges the whole slate on FROZEN scan-time recommended_oi
+# against OI_FLOOR=1000. Scan-time OI runs far below live OI on this pool by
+# construction (the 08-07 fixture is 44 frozen vs 2,077 live; oi_build exists
+# because overnight build is large), so a blind read can sweep the slate to zero
+# and report "nothing was tradeable" when nothing was measured. That is the worst
+# artifact shape we ship: it reconciles perfectly against its own numbers and is
+# false, and `no_liquid_candidates` is read verbatim by MCP agents.
+# So: a run that gets live OI for fewer than this fraction of the slate is
+# DEGRADED. It never sets `measured`, never empties the slate, and never drives
+# selection on stale frozen OI — it returns the input pool exactly like the
+# exception path. 0.5 = at least half the slate must answer.
+LIVE_FETCH_MIN_OK_FRAC = float(os.environ.get("LIVE_FETCH_MIN_OK_FRAC", "0.5"))
+
+_RESTORE_MODES = ("none", "empty_only", "always")
+FAILSOFT_RESTORE_MODE = os.environ.get("FAILSOFT_RESTORE_MODE", "none").strip().lower()
+if FAILSOFT_RESTORE_MODE not in _RESTORE_MODES:
+    logger.error(
+        f"FAILSOFT_RESTORE_MODE={FAILSOFT_RESTORE_MODE!r} is not one of "
+        f"{_RESTORE_MODES}; falling back to 'none' (never restore)."
+    )
+    FAILSOFT_RESTORE_MODE = "none"
 
 # DAY-BAR DATE VALIDATION (2026-08-07, see
 # docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md). Polygon's v3 option
@@ -531,6 +582,7 @@ def write_todays_pick_doc(
     skip_reason: str | None = None,
     v5_4_meta: dict | None = None,
     policy_gate: str = "STRICT",
+    floor_stats: dict | None = None,
 ) -> dict | None:
     """Canonical writer for Firestore ``todays_pick/{scan_date}``.
 
@@ -620,6 +672,13 @@ def write_todays_pick_doc(
             "early_volume": _int("_today_volume") if "_today_volume" in top else None,
             "day_bar_stale": (
                 bool(_known_prints(top) == 0) if "_today_volume" in top else None
+            ),
+            #   liquidity_degraded  — True when the live read was too thin to
+            #     trust and the floors were SKIPPED for this pick. Cloud Run logs
+            #     age out; provenance for "this pick had no liquidity screen"
+            #     belongs on the doc, where a replay can still read it.
+            "liquidity_degraded": (
+                bool(floor_stats.get("degraded")) if floor_stats else None
             ),
             "print_floor_restored": (
                 bool(top.get("_print_floor_restored"))
@@ -1042,15 +1101,20 @@ def format_whatsapp_message(
     skip_reason: str | None = None,
     v5_4_meta: dict | None = None,
     entry_disp: dict | None = None,
+    skip_detail: str | None = None,
 ) -> str:
     """Plain-text WhatsApp message — mirrors the email content, concise.
 
     On happy path: single pick + routine. On skip: one-line rationale so the
     group sees the engine is standing down (and doesn't wonder if it's broken).
+    `skip_detail` appends the run's own numbers to that rationale — a standby
+    message that can't be told apart from a broken pipeline is a bad standby
+    message.
     """
     if not has_pick:
         reason_lines = {
             "no_candidates_passed_gates": "Nothing cleared the gates. Do nothing today.",
+            "no_liquid_candidates": "No candidate cleared the liquidity floors (early prints + live open interest). Nothing was tradeable, so the engine is standing down.",
             "regime_fail_closed": "VIX or VIX3M missing — engine is standing down.",
             "vix_backwardation": "VIX > VIX3M (backwardation). Engine skipped today.",
             "earnings_overlap_all_candidates": "All top candidates report earnings during the hold window. Engine skipped today.",
@@ -1060,6 +1124,8 @@ def format_whatsapp_message(
             "v5_4_mass_leakage": "Agent ranker detected leaked inputs across all candidates — engine is standing down (fail-closed).",
         }
         reason = reason_lines.get(skip_reason or "", f"No pick today ({skip_reason}).")
+        if skip_detail:
+            reason = f"{reason}\n{skip_detail}"
         return (
             f"*GammaRips — {target_date.isoformat()}*\n"
             f"No trade today.\n"
@@ -1295,6 +1361,17 @@ def _candidate_for_ranker(row: pd.Series, static_rank: int) -> dict:
             c["oi_build"] = int(lo) - int(ro)
         except (TypeError, ValueError):
             pass
+    # `liquidity_floor_restored` (2026-08-12) — SANCTIONED alias of the internal
+    # `_print_floor_restored`, same idiom as early_volume/_today_volume: the raw
+    # key is popped and blocklisted, this one is on the wire. It tells the judge
+    # the row FAILED a liquidity floor and is only present because the fail-soft
+    # restore put it back. Under FAILSOFT_RESTORE_MODE="none" it is False on
+    # every row (nothing is restored); it is the SECOND wall for the rollback
+    # modes, where the deterministic exclusion is off. Not leakage: derived from
+    # the same ~09:52 pre-entry read as live_oi and early_volume.
+    fr = row.get("_print_floor_restored")
+    if fr is not None and not pd.isna(fr):
+        c["liquidity_floor_restored"] = bool(fr)
     return c
 
 
@@ -1724,11 +1801,23 @@ def _known_prints(row: pd.Series) -> int | None:
         return None
 
 
-def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
+def _liquidity_refresh_and_rank(
+    candidates_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict]:
     """Deterministic TWO-TIER slate floor + soft tilt, run on the edge-capped
-    strict pool just before the tournament. See
-    docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md (OI floor) and
-    docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md (early-print floor).
+    strict pool just before the tournament. Returns ``(slate_df, stats)``. See
+    docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md (OI floor),
+    docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md (early-print floor)
+    and docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md (restore mode).
+
+    The returned slate MAY BE EMPTY under FAILSOFT_RESTORE_MODE="none" — that is
+    the honest answer when nothing cleared, and the caller turns it into a
+    ``no_liquid_candidates`` no-pick day. ``stats["measured"]`` is the interlock
+    that permits that stand-down. It requires EVIDENCE, not the absence of a
+    crash: the floors must have run to completion AND the live read must have
+    answered for at least ``LIVE_FETCH_MIN_OK_FRAC`` of the slate. Five paths
+    leave it False — an exception, either kill switch, an empty input pool, and
+    a degraded live read — and none of those can return an empty slate.
 
     Two-tier design (2026-07-28): the tradeability study showed prints at the
     ~09:52 delayed read are near-deterministic for entry-day tradeability
@@ -1745,35 +1834,76 @@ def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
          to step 3 (fail-open per-row, mirroring live-OI failure semantics).
       3. SECONDARY: DROP candidates with effective OI < OI_FLOOR (fill-rate
          cliff, not PnL) — applied exactly as before 2026-07-28.
-      4. FAIL-SOFT FLOOR: if fewer than TOURNEY_MIN survive BOTH floors, restore
-         dropped candidates ranked by (print count desc NULLS LAST, live_oi desc
-         NULLS LAST) up to TOURNEY_MIN so the tournament never starves to zero.
-         Restored rows are marked `_print_floor_restored=True` (internal; popped
-         before /rank, surfaced only in the operator email).
+      4. FAIL-SOFT RESTORE (FAILSOFT_RESTORE_MODE, 2026-08-12): "none" by
+         default — a candidate that failed either floor NEVER returns to the
+         slate, so it can never become the pick. "empty_only" restores up to
+         TOURNEY_MIN only when zero cleared; "always" is the pre-2026-08-12
+         defect (restore whenever n_pass < TOURNEY_MIN) kept as a rollback lever.
+         Restored rows are marked `_print_floor_restored=True` and
+         `_floor_failed` ∈ {"print","oi"} (internal: the raw keys are popped
+         before /rank, re-surfaced as the sanctioned `liquidity_floor_restored`
+         boolean, and rendered SUB-FLOOR — never "(confirmed)" — in the email).
       5. SOFT TILT: order floor-passing survivors by effective OI desc
          (fillability); fail-soft restores append below them.
 
-    C4 (total fail-soft): the whole body is wrapped — ANY exception returns the
-    INPUT df unchanged (frozen-OI / edge-rank order), never empty, never raising
-    into the live pick. Kill switches: LIQUIDITY_TILT=false short-circuits to
-    pre-2026-06-25 behavior (no refresh at all); PRINT_FLOOR_ENABLED=false runs
-    the legacy single-tier OI-floor path bit-identically (pre-2026-07-28).
+    C4 (fail-soft on ERROR, not on THINNESS): the whole body is wrapped — ANY
+    exception returns the INPUT df unchanged (frozen-OI / edge-rank order),
+    never raising into the live pick. What changed 2026-08-12 is that a
+    *successful* measurement of zero survivors is now allowed to return an empty
+    slate; a broken measurement still fails open. Kill switches: LIQUIDITY_TILT
+    =false short-circuits to pre-2026-06-25 behavior (no refresh at all);
+    PRINT_FLOOR_ENABLED=false runs the legacy single-tier OI-floor path
+    bit-identically (pre-2026-07-28). Neither can produce an empty slate.
 
     Wire contract: `live_oi` surfaces to /rank as-is; `_today_volume` is
     internal and popped before the payload — its SANCTIONED alias `early_volume`
     is attached in _candidate_for_ranker (2026-07-28), after this floor has
     already consumed the raw value.
     """
+    stats: dict = {
+        "measured": False,
+        "mode": FAILSOFT_RESTORE_MODE,
+        "n_total": int(len(candidates_df)) if candidates_df is not None else 0,
+        "n_pass": None,
+        "n_print_dropped": 0,
+        "n_oi_dropped": 0,
+        "n_restored": 0,
+    }
     if not LIQUIDITY_TILT:
-        return candidates_df
+        stats["skipped"] = "LIQUIDITY_TILT=false"
+        return candidates_df, stats
     if candidates_df is None or len(candidates_df) == 0:
-        return candidates_df
+        stats["skipped"] = "empty input pool"
+        return candidates_df, stats
     try:
         refreshed = _refresh_live_oi_batch(candidates_df)
+        n_total = len(refreshed)
+
+        # EVIDENCE GATE (review BLOCK finding 1, 2026-08-12). Count the rows the
+        # live read actually answered. A vendor outage completes without raising
+        # and leaves live_oi=None everywhere, which would otherwise hand the
+        # whole slate to the OI floor on stale frozen OI and let an empty result
+        # masquerade as "nothing was tradeable". Below the threshold the run is
+        # DEGRADED: fail open to the input pool, leave measured=False.
+        n_live_ok = (
+            int(refreshed["live_oi"].notna().sum())
+            if "live_oi" in refreshed.columns else 0
+        )
+        stats["n_live_ok"] = n_live_ok
+        min_live_ok = max(1, math.ceil(n_total * LIVE_FETCH_MIN_OK_FRAC))
+        if n_live_ok < min_live_ok:
+            stats["degraded"] = "live_fetch_unavailable"
+            logger.error(
+                f"DEGRADED live read: only {n_live_ok}/{n_total} candidates "
+                f"returned live OI (need {min_live_ok}). The liquidity floors "
+                f"would be judging stale scan-time OI, so they are SKIPPED and "
+                f"the edge-rank pool passes through unchanged. No stand-down "
+                f"today: an unmeasured slate must never read as untradeable."
+            )
+            return candidates_df, stats
 
         # Effective OI per row (live where available, frozen otherwise).
         eff = refreshed.apply(_effective_oi, axis=1)
-        n_total = len(refreshed)
 
         if not PRINT_FLOOR_ENABLED:
             # ---- LEGACY single-tier path (kill switch OFF ramp) ----
@@ -1800,11 +1930,20 @@ def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
                     f"Live-OI floor: {n_pass}/{n_total} cleared OI_FLOOR={OI_FLOOR}; "
                     f"tilted by effective OI (survivors: {list(survivors['ticker'])})"
                 )
-            return survivors.reset_index(drop=True)
+            # Legacy path is an OFF-RAMP: bit-identical to pre-2026-07-28,
+            # including its own always-on fail-soft. It never returns empty, so
+            # the caller's no-pick branch is unreachable from here by design.
+            stats.update(
+                measured=True, legacy_path=True, n_pass=n_pass,
+                n_oi_dropped=int(n_total - n_pass),
+                n_restored=int(max(0, len(survivors) - n_pass)),
+            )
+            return survivors.reset_index(drop=True), stats
 
         # ---- TWO-TIER path (2026-07-28) ----
         refreshed = refreshed.copy()
         refreshed["_print_floor_restored"] = False
+        refreshed["_floor_failed"] = ""
 
         # PRIMARY: early-print floor. Drop only KNOWN print counts below the
         # floor; None (fetch failure) is UNKNOWN -> keep, OI floor decides.
@@ -1828,14 +1967,30 @@ def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
             if idx not in print_drop_set and eff.loc[idx] < OI_FLOOR
         }
         drop_set = print_drop_set | oi_drop_set
+        if print_drop_set:
+            refreshed.loc[list(print_drop_set), "_floor_failed"] = "print"
+        if oi_drop_set:
+            refreshed.loc[list(oi_drop_set), "_floor_failed"] = "oi"
 
         survivors = refreshed.loc[~refreshed.index.isin(drop_set)].copy()
         n_pass = len(survivors)
 
-        # FAIL-SOFT FLOOR: restore dropped rows, best-tape-first, up to
-        # TOURNEY_MIN — the tournament never starves.
+        # FAIL-SOFT RESTORE (2026-08-12): gated on FAILSOFT_RESTORE_MODE. Under
+        # the default "none" nothing is ever restored, so a sub-floor contract
+        # cannot become the pick — the whole regression this fix closes.
+        want_restore = (
+            (FAILSOFT_RESTORE_MODE == "always" and n_pass < TOURNEY_MIN)
+            or (FAILSOFT_RESTORE_MODE == "empty_only" and n_pass == 0)
+        )
         restored_idx: list = []
-        if n_pass < TOURNEY_MIN and drop_set:
+        if not want_restore and n_pass < TOURNEY_MIN and drop_set:
+            logger.info(
+                f"Fail-soft restore SUPPRESSED (FAILSOFT_RESTORE_MODE="
+                f"{FAILSOFT_RESTORE_MODE}): {n_pass}/{n_total} cleared both "
+                f"floors and {len(drop_set)} sub-floor names stay OFF the slate. "
+                f"TOURNEY_MIN={TOURNEY_MIN} is a soft target, not a quality bar."
+            )
+        if want_restore and drop_set:
             dropped = refreshed.loc[refreshed.index.isin(drop_set)]
 
             def _restore_key(idx) -> tuple[int, float]:
@@ -1869,22 +2024,48 @@ def _liquidity_refresh_and_rank(candidates_df: pd.DataFrame) -> pd.DataFrame:
         restored = refreshed.loc[restored_idx]
         out = pd.concat([survivors, restored]) if len(restored) else survivors
 
+        stats.update(
+            measured=True, n_pass=n_pass,
+            n_print_dropped=len(print_drop_set),
+            n_oi_dropped=len(oi_drop_set),
+            n_restored=len(restored_idx),
+        )
         logger.info(
             f"Two-tier slate floor: {n_total} -> {len(out)} "
             f"(print-floor dropped {len(print_drop_set)}, "
             f"OI-floor dropped {len(oi_drop_set)}, "
-            f"fail-soft restored {len(restored_idx)}); "
+            f"fail-soft restored {len(restored_idx)}, "
+            f"mode={FAILSOFT_RESTORE_MODE}); "
             f"slate: {list(out['ticker'])}"
         )
-        return out.reset_index(drop=True)
+        if print_drop_set and len(print_drop_set) == n_total:
+            logger.error(
+                f"ALL {n_total} candidates showed ZERO prints at the delayed "
+                f"read. That is possible (a genuinely dead board) but rare. It "
+                f"is ALSO what a Polygon day.last_updated semantics change looks "
+                f"like, which PRINT_BAR_MAX_AGE_DAYS does not catch because the "
+                f"bar still parses to a plausible date. Two of these days in a "
+                f"row is a vendor hypothesis until disproven."
+            )
+        if len(out) == 0:
+            logger.error(
+                f"EMPTY SLATE: 0/{n_total} candidates cleared the liquidity "
+                f"floors (prints >= {PRINT_FLOOR_MIN}, effective OI >= "
+                f"{OI_FLOOR}). No pick today — this is the measured answer, not "
+                f"a failure."
+            )
+        return out.reset_index(drop=True), stats
     except Exception as e:
         # C4: never raise into the live pick. Fall back to the input df untouched
         # (edge-rank order, frozen OI). Worst case = today's exact behavior.
+        # measured stays False, so the caller can never read this as "nothing is
+        # tradeable" — a broken measurement must not manufacture a no-pick day.
         logger.error(
             f"Live-OI liquidity refresh failed ({e}); falling back to "
             f"edge-rank pool unchanged (fail-soft)."
         )
-        return candidates_df
+        stats["error"] = str(e)
+        return candidates_df, stats
 
 
 def call_signal_ranker(
@@ -1916,13 +2097,16 @@ def call_signal_ranker(
     # candidate before the payload is built. As of 2026-07-28 its SANCTIONED
     # alias `early_volume` (attached in _candidate_for_ranker, owner-approved)
     # IS on the wire — pre-entry information, same leakage class as `live_oi`
-    # (both read ~09:52, entry 10:00). `_print_floor_restored` is a fail-soft
-    # bookkeeping marker for the operator email — internal, popped too.
-    # `_candidate_for_ranker` copies all df columns verbatim, so this is where
-    # the internal columns are stripped from the wire format.
+    # (both read ~09:52, entry 10:00). `_print_floor_restored` / `_floor_failed`
+    # are fail-soft bookkeeping markers — the RAW keys stay internal and are
+    # popped here; `_print_floor_restored`'s sanctioned alias
+    # `liquidity_floor_restored` (2026-08-12) IS on the wire, attached in
+    # _candidate_for_ranker. `_candidate_for_ranker` copies all df columns
+    # verbatim, so this is where the internal columns are stripped from the wire.
     for cand in candidates:
         cand.pop("_today_volume", None)
         cand.pop("_print_floor_restored", None)
+        cand.pop("_floor_failed", None)
 
     # C3 leakage guard (2026-06-25): the live-OI snapshot also carries entry-day
     # IV / greeks / day OHLC / last trade / last quote. Those are discarded at
@@ -1982,7 +2166,30 @@ def call_signal_ranker(
         return None
 
 
-def _liquidity_email_line(row: pd.Series) -> str:
+def _is_no_liquid_candidates(slate_df, floor_stats: dict) -> bool:
+    """True ONLY when the liquidity floors ran, measured the slate, and nothing
+    cleared. This is the whole no-pick-day interlock in one predicate, extracted
+    so it can be tested directly (review BLOCK finding 5, 2026-08-12).
+
+    Every non-measured path must answer False, because an empty slate from an
+    unmeasured run means "we could not see", not "nothing was tradeable":
+    an exception, LIQUIDITY_TILT=false, PRINT_FLOOR_ENABLED=false (legacy path),
+    an empty input pool, and a degraded live read.
+    """
+    if not floor_stats.get("measured"):
+        return False
+    if floor_stats.get("legacy_path"):
+        # PRINT_FLOOR_ENABLED=false is the pre-2026-07-28 off-ramp. It sets
+        # measured=True and is safe only because its own always-on fail-soft
+        # cannot return empty — a DIFFERENT invariant, and one that breaks with
+        # TOURNEY_MIN=0 (keep_n=0 -> an empty measured slate). Exclude it here so
+        # "no non-measured path can stand the engine down" is true by
+        # construction rather than by a second argument.
+        return False
+    return slate_df is None or len(slate_df) == 0
+
+
+def _liquidity_email_line(row: pd.Series, floor_stats: dict | None = None) -> str:
     """One-line early-print liquidity readout for the operator email
     (2026-07-28 tournament liquidity upgrade). Returns '' when the run had no
     print data at all (FALLBACK path / LIQUIDITY_TILT off — the transient
@@ -1998,6 +2205,16 @@ def _liquidity_email_line(row: pd.Series) -> str:
     zero and an UNKNOWN count are reported differently and must never be
     collapsed: "no tape" is a measurement, "UNVERIFIED" is the absence of one.
     """
+    # DEGRADED read (2026-08-12 review follow-up): the floors were SKIPPED, so
+    # this pick had no liquidity screen at all. Without this line the card is
+    # byte-identical to a normal one and nothing downstream records it — the
+    # exact "reconciles against itself" shape this whole change exists to close.
+    if floor_stats and floor_stats.get("degraded"):
+        return (
+            f"Liquidity: NOT MEASURED - live read degraded "
+            f"({floor_stats.get('n_live_ok')}/{floor_stats.get('n_total')} "
+            f"candidates answered), liquidity floors SKIPPED for this pick"
+        )
     prints = _known_prints(row)
     restored_raw = row.get("_print_floor_restored")
     restored = (
@@ -2005,30 +2222,47 @@ def _liquidity_email_line(row: pd.Series) -> str:
         and not pd.isna(restored_raw)
         and bool(restored_raw)
     )
-    if restored and prints is None:
-        return "Liquidity: UNVERIFIED - restored by fail-soft floor"
-    if restored and prints < PRINT_FLOOR_MIN:
-        # KNOWN zero (or sub-floor) that the fail-soft restore put back on the
-        # slate. We measured it: say so, don't hide it behind "UNVERIFIED".
+    if restored:
+        # GAP-021 (2026-08-12): a restored row is a row that FAILED a floor, so
+        # it can never carry "(confirmed)". The 08-11 ALC and 08-12 MDB cards
+        # read "N prints by ~09:52 (confirmed) (restored by fail-soft floor)" —
+        # an attestation and its own refutation in one sentence, on the card the
+        # operator traded. Every restored branch below now names the floor it
+        # failed and says NOT confirmed.
+        which = str(row.get("_floor_failed") or "")
+        floor_name = {"print": "early-print", "oi": "live-OI"}.get(which, "liquidity")
+        if prints is None:
+            return (
+                f"Liquidity: UNVERIFIED - restored by fail-soft floor "
+                f"(failed the {floor_name} floor; NOT confirmed)"
+            )
+        if prints < PRINT_FLOOR_MIN:
+            # KNOWN zero that the fail-soft restore put back on the slate. We
+            # measured it: say so, don't hide it behind "UNVERIFIED".
+            return (
+                f"Liquidity: {prints} prints by ~09:52 "
+                f"(NO TAPE - restored by fail-soft floor)"
+            )
         return (
-            f"Liquidity: {prints} prints by ~09:52 "
-            f"(NO TAPE - restored by fail-soft floor)"
+            f"Liquidity: SUB-FLOOR - {prints} prints by ~09:52 but FAILED the "
+            f"{floor_name} floor; restored by fail-soft floor, NOT confirmed"
         )
     if prints is None:
         if "_today_volume" in row.index:
             # Refresh ran but this contract's fetch failed (kept fail-open).
             return "Liquidity: UNVERIFIED - live print count unavailable"
         return ""  # no refresh this run (fallback / kill switch): no line
-    restored_tag = " (restored by fail-soft floor)" if restored else ""
+    # Below here the row cleared both floors (every restored branch returned
+    # above), so "(confirmed)" describes a contract that actually passed.
     if prints >= 5:
-        return f"Liquidity: {prints} prints by ~09:52 (confirmed){restored_tag}"
+        return f"Liquidity: {prints} prints by ~09:52 (confirmed)"
     if prints >= 1:
-        return f"Liquidity: {prints} prints by ~09:52 (CAUTION - thin tape){restored_tag}"
+        return f"Liquidity: {prints} prints by ~09:52 (CAUTION - thin tape)"
     # Known 0 WITHOUT restore: only reachable with PRINT_FLOOR_ENABLED=false
     # (the floor otherwise drops it, and a restore is caught above). Pre-2026-08-07
     # this branch was dead in every configuration — a known 0 could not exist,
     # because the raw day.volume was never 0. It is real data now.
-    return f"Liquidity: 0 prints by ~09:52 (CAUTION - no tape){restored_tag}"
+    return "Liquidity: 0 prints by ~09:52 (CAUTION - no tape)"
 
 
 def format_email_html(
@@ -2037,6 +2271,7 @@ def format_email_html(
     entry_day: date,
     v5_4_meta: dict | None = None,
     entry_disp: dict | None = None,
+    floor_stats: dict | None = None,
 ) -> str:
     """V5.4 email: one signal, one routine + agent-ranker justification.
 
@@ -2102,7 +2337,7 @@ def format_email_html(
 
     # Early-print liquidity readout (2026-07-28) — rendered right under the
     # entry/limit block; '' when the run had no print data (no line).
-    liq_line = _liquidity_email_line(row)
+    liq_line = _liquidity_email_line(row, floor_stats)
     liq_html = f"<br>{liq_line}" if liq_line else ""
 
     eds = _entry_display_strings(entry_disp)
@@ -2611,6 +2846,13 @@ def run_notifier(target_date: date | None = None):
     # re-introduces a mass-leakage skip that would defeat the daily-cadence
     # guarantee. The regime and earnings filters above have already run on the
     # fallback pool. See docs/DECISIONS/2026-06-01-daily-cadence-fallback.md.
+    #
+    # `floor_stats` is initialized HERE, not in the STRICT branch, because the
+    # shared happy path below reads it on both branches. A FALLBACK day never
+    # enters the else, and an empty dict is the correct value there: the
+    # liquidity floors genuinely did not run (the fallback path bypasses
+    # _liquidity_refresh_and_rank entirely), so nothing claims they did.
+    floor_stats: dict = {}
     if gate_mode == POLICY_GATE_FALLBACK:
         top = df.iloc[0]
         v5_4_meta = {
@@ -2653,13 +2895,66 @@ def run_notifier(target_date: date | None = None):
             # LIQUIDITY_TILT=false). live_oi is injected here and surfaces to the
             # judge; _today_volume is internal and popped before the /rank payload.
             # See docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md.
-            df = _liquidity_refresh_and_rank(df)
-            v5_4_response = call_signal_ranker(
-                df, target_date, entry_day, report_md, ledger_summary
-            )
+            # 2026-08-12: the slate may come back EMPTY (nothing cleared the
+            # floors and the fail-soft restore is off) — don't rank an empty
+            # pool, fall through to the no_liquid_candidates branch below.
+            df, floor_stats = _liquidity_refresh_and_rank(df)
+            if len(df):
+                v5_4_response = call_signal_ranker(
+                    df, target_date, entry_day, report_md, ledger_summary
+                )
         except Exception as e:
             logger.error(f"V5.4 path raised: {e}")
             v5_4_response = None
+
+        # NO LIQUID CANDIDATES (2026-08-12). Only reachable when the floors
+        # actually RAN (`measured`) and dropped everything: a broken measurement
+        # returns the pool untouched, so a vendor outage can never manufacture a
+        # no-pick day. This is the case that used to be papered over by
+        # restoring rejects up to TOURNEY_MIN and handing them to a judge that
+        # could not see they were rejects. A no-pick day is the honest output.
+        # See docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
+        if _is_no_liquid_candidates(df, floor_stats):
+            detail = (
+                f"0 of {floor_stats.get('n_total')} candidates cleared the "
+                f"liquidity floors (prints >= {PRINT_FLOOR_MIN}, effective OI >= "
+                f"{OI_FLOOR}): print-floor dropped "
+                f"{floor_stats.get('n_print_dropped')}, OI-floor dropped "
+                f"{floor_stats.get('n_oi_dropped')}."
+            )
+            logger.error(f"No liquid candidates. Fail-closed: no pick today. {detail}")
+            write_todays_pick_doc(
+                target_date, has_pick=False, skip_reason="no_liquid_candidates"
+            )
+            # EMAIL the stand-down (review BLOCK finding 3, 2026-08-12).
+            # post_to_openclaw has been a hard no-op since 2026-07-03, so the
+            # WhatsApp call below delivers nothing — on a silent morning the
+            # operator cannot tell a deliberate stand-down from a dead cron.
+            # This is the one skip branch that fires on a market condition
+            # rather than an outage (about monthly), so it carries its counts to
+            # the operator. claim_email_send keeps a Scheduler retry from
+            # double-sending, exactly as on the happy path.
+            if claim_email_send(target_date):
+                send_email(
+                    f"GammaRips {entry_day}: NO PICK (nothing tradeable)",
+                    "<html><body style=\"font-family:sans-serif\">"
+                    "<h2>No trade today</h2>"
+                    "<p>No candidate cleared the liquidity floors, so the "
+                    "engine is standing down.</p>"
+                    f"<p><b>{detail}</b></p>"
+                    f"<p>Scan date {target_date.isoformat()}, entry day "
+                    f"{entry_day.isoformat()}.</p>"
+                    "<p>This is a market condition, not an error. The floors "
+                    "ran and measured the slate.</p>"
+                    "<hr><p style=\"font-size:12px;color:#666\">Paper-trading, "
+                    "educational only. Not investment advice.</p>"
+                    "</body></html>",
+                )
+            post_to_openclaw(format_whatsapp_message(
+                None, target_date, None, has_pick=False,
+                skip_reason="no_liquid_candidates", skip_detail=detail,
+            ))
+            return True, f"No liquid candidates. Fail-closed. {detail}"
 
         if v5_4_response is None:
             logger.error("V5.4 signal-judge unavailable. Fail-closed: no email, no WhatsApp pick.")
@@ -2722,14 +3017,15 @@ def run_notifier(target_date: date | None = None):
     # preventing with the single-source-of-truth contract).
     entry_disp = write_todays_pick_doc(
         target_date, has_pick=True, top=top, vix_now=vix_now, v5_4_meta=v5_4_meta,
-        policy_gate=gate_mode,
+        policy_gate=gate_mode, floor_stats=floor_stats,
     )
 
     # Single email path — OPERATOR ONLY (subscriber fan-out retired
     # 2026-07-03; the pick is the operator's private signal). V5.4
     # justification embedded under the contract card. Fallback picks are
     # marked in the subject so the recipient knows it's a low-conviction day.
-    html_content = format_email_html(top, target_date, entry_day, v5_4_meta=v5_4_meta, entry_disp=entry_disp)
+    html_content = format_email_html(top, target_date, entry_day, v5_4_meta=v5_4_meta,
+                                     entry_disp=entry_disp, floor_stats=floor_stats)
     subject = f"GammaRips {entry_day}: {top['ticker']} {top['direction']}"
     if gate_mode == POLICY_GATE_FALLBACK:
         subject += " [FALLBACK]"

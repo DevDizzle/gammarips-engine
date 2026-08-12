@@ -45,14 +45,16 @@ property without first stripping brand, `site:`, and bot traffic** (that is 53% 
 impressions and ~97% of sessions).
 
 ## Owner queue
-- 🟡 **WATCH Mon 08-10 09:52 ET — first pick under a print floor that actually fires.**
-  Shipped 08-07; cohort RESET to `LIVE_COHORT_START_DATE=2026-08-10`, `cohort_stats` 0
-  closed. Check the `Early-print floor: dropped N/12` and `Fail-soft floor: restored N`
-  log lines + the email's Liquidity line. Replay: fail-soft carries the slate ~11/15
-  sessions and hands zero-print names back to the judge 8/15 (max 6), so
-  `tournament_v1_2`'s "early_volume 0 = untradeable" sentence is the ONLY wall most days.
-  If picks return with `early_volume: 0`, raise `PRINT_FLOOR_MIN` or lower `TOURNEY_MIN`
-  — do NOT widen the floor. `docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md`.
+- 🔴 **DEPLOY DECISION — fail-soft restore fix (trader P1, 08-12).** Code + 48 tests +
+  15-session replay + docs DONE, uncommitted; gated on `gammarips-review` + you. The 08-07
+  print-floor fix worked and the fail-soft restore then fed the rejects to a judge blind to
+  the flag: ALC 08-11 (26.1% spread, **-$312**), MDB 08-12 (44.6%, worst ever). Now
+  `FAILSOFT_RESTORE_MODE=none`, zero clearing = `no_liquid_candidates` no-pick, judge sees
+  `liquidity_floor_restored` (`tournament_v1_3`/v10), restored rows can't say "(confirmed)".
+  Costs ~1 no-pick day/month. **Two-service deploy**, NO cohort reset, **engine-only** (the
+  new skip reason reaches the trader's ledger row and MCP as data; no web surface renders
+  it — memory `skip-reason-flows-to-mcp-not-a-web-surface`).
+  `docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md` + the `-trader-handoff-response.md`.
 - 🔴 **Rotate `POLYGON_API_KEY`** (leaked 07-06, echoed 08-05 in an error body, contained,
   endpoint hotfixed `00015-t78`). Regenerate → update secret → redeploy all mounting
   services (grep deploy.sh).
@@ -103,6 +105,14 @@ impressions and ~97% of sessions).
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
+- 🔴 **P3 from the trader, unfixed and not fixable in code: nothing measures spread or
+  dollar depth.** OI + print count are proxies for "can a subscriber get out"; MDB passed
+  both at a 44.6% spread. Wanted on the candidate row + card: `spread_pct`,
+  `bid_depth_usd`. Blocked on the Polygon quote entitlement (GAP-001 / RM-001b) — owner $
+  call, do not keep tuning proxies as though that closes it.
+- **FALLBACK picks bypass the liquidity floor entirely** — `_liquidity_refresh_and_rank`
+  runs on STRICT days only; a `POLICY_GATE_FALLBACK` day takes `df.iloc[0]` with no live-OI
+  or print check. Same defect class as the 08-12 regression, deliberately not bundled.
 - ✅ **DONE 08-10 — MCP `view="surface"` fix SHIPPED** (`gammarips-mcp-00043-mgz`,
   MCP commit `1c8d874`; engine half `971521c` → `dbt-runner-00009-lvd`). Row mode was
   silently returning 200 of 791 matched rows and, because the sort is `scan_date DESC,

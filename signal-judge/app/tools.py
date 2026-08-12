@@ -54,6 +54,9 @@ MIN_SCORER_SUCCESS_FRAC = float(os.getenv("MIN_SCORER_SUCCESS_FRAC", "0.5"))
 # in signal_ranker_runs (mode=REQUIRED columns can't be nulled), so the
 # post-collapse cohort is cleanly separable from the v5 two-stage cohort.
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", PICKER_MODEL)
+# version 10 = tournament_v1_3 (2026-08-12 fail-soft restore fix: ONE sentence
+# added to _build_prompt — the liquidity_floor_restored wall — otherwise
+# byte-identical to v1_2);
 # version 9 = tournament_v1_2 (2026-08-07 stale-day-bar fix: two sentences added
 # to _build_prompt — the "early_volume of 0 = untradeable" second wall and the
 # numbers-in-the-why clause — otherwise byte-identical to v1_1);
@@ -67,9 +70,9 @@ JUDGE_MODEL = os.getenv("JUDGE_MODEL", PICKER_MODEL)
 # NOTE: production pins these via deploy.sh --set-env-vars — keep code default,
 # deploy.sh, and this comment in sync. No version-8 rows existed in
 # signal_ranker_runs before 2026-07-28 (verified), so 8 cleanly labels v1_1;
-# version 9 is unused before 2026-08-07 for the same reason.
-JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "9"))
-JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1_2")
+# versions 9 and 10 are unused before 2026-08-07 / 2026-08-12 for the same reason.
+JUDGE_PROMPT_VERSION = int(os.getenv("JUDGE_PROMPT_VERSION", "10"))
+JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1_3")
 # Bounded retry for the single fused call — one malformed structured output no
 # longer forfeits the whole slate (replaces the gather+MIN_SCORER_SUCCESS_FRAC
 # partial-failure tolerance lost in the collapse).

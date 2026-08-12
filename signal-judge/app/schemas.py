@@ -93,6 +93,13 @@ class Candidate(BaseModel):
     early_volume: int | None = None       # contracts traded so far this morning (~09:52 delayed read)
     oi_build: int | None = None           # live_oi minus scan-frozen recommended_oi (overnight OI change)
     expected_liquidity: str | None = None  # scan-time CLEAN/THIN verdict from the enriched row
+    # True = this contract FAILED a liquidity floor and is on the slate only
+    # because the notifier's fail-soft restore put it back (2026-08-12). Under
+    # the notifier default (FAILSOFT_RESTORE_MODE="none") nothing is restored
+    # and this is False on every row; it is the second wall for the rollback
+    # modes. Same pre-entry leakage class as early_volume / live_oi. See
+    # docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
+    liquidity_floor_restored: bool | None = None
 
 
 class LedgerSummary(BaseModel):

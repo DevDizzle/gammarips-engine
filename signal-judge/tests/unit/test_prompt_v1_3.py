@@ -1,12 +1,14 @@
-"""tournament_v1_2 prompt bump tests (2026-08-07).
+"""tournament_v1_3 prompt bump tests (2026-08-12).
 
-Discipline mirrors the v1 -> v1_1 bump: the ONLY permitted change is the two new
-sentences. Everything else must be byte-identical to the stored v1_1 golden
+Discipline mirrors every prior bump (v1 -> v1_1 -> v1_2): the ONLY permitted
+changes are the sanctioned sentences. Strip all three additions and the prompt
+must be byte-identical to the stored v1_1 golden
 (tests/golden/tournament_v1_1_{cull,final}.txt, captured from the pre-edit code).
 
-See docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
+v1_3 adds the liquidity_floor_restored wall. See
+docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
 
-    .venv/bin/python -m pytest signal-judge/tests/unit/test_prompt_v1_2.py -q
+    .venv/bin/python -m pytest signal-judge/tests/unit/test_prompt_v1_3.py -q
 """
 
 from __future__ import annotations
@@ -39,11 +41,10 @@ google.auth.default = lambda *a, **k: (None, "test-project")
 import pytest  # noqa: E402
 
 from app import tools  # noqa: E402
-from app.agent import _build_prompt  # noqa: E402
+from app.agent import STALE_FIELDS_BLOCKLIST, _build_prompt  # noqa: E402
 from app.schemas import Candidate  # noqa: E402
 
-# The two v1_2 additions, verbatim. Removing exactly these from the rendered
-# prompt must reproduce v1_1 byte-for-byte.
+# The v1_2 additions, verbatim.
 ADD_ZERO_VOLUME_WALL = (
     " An early_volume of 0 means the contract had not printed at all as of the "
     "pick-time read; treat it as untradeable unless no candidate shows prints."
@@ -52,10 +53,18 @@ ADD_NUMBERS_IN_WHY = (
     ". If liquidity influenced your ranking, the why must state the "
     "early_volume and oi_build values you relied on."
 )
+# The v1_3 addition, verbatim.
+ADD_RESTORED_WALL = (
+    " A liquidity_floor_restored of true means the contract FAILED a hard "
+    "liquidity floor and is on this slate only so the slate would not be "
+    "empty; never rank one above a candidate whose value is false."
+)
 
 GOLDEN_DIR = os.path.join(_JUDGE_ROOT, "tests", "golden")
 
-# Must match the fixture the golden was generated from.
+# Must match the fixture the golden was generated from, PLUS the new field. A
+# candidate carrying liquidity_floor_restored must not perturb anything else in
+# the rendered prompt beyond its own key in the JSON blob (asserted below).
 CANDIDATES = [
     Candidate(ticker="AAA", direction="BULLISH", overnight_score=7,
               recommended_contract="O:AAA260918C00055000", early_volume=2045,
@@ -68,8 +77,8 @@ REPORT_MD = "## Report\nVIX 14.2\n"
 PRIORS = {"cull": "", "final": "Q1. Prefer liquid contracts."}
 
 
-def _prompt(kind: str) -> str:
-    return _build_prompt(REPORT_MD, CANDIDATES, PRIORS[kind])
+def _prompt(kind: str, candidates: list[Candidate] | None = None) -> str:
+    return _build_prompt(REPORT_MD, candidates or CANDIDATES, PRIORS[kind])
 
 
 def _golden(kind: str) -> str:
@@ -78,21 +87,25 @@ def _golden(kind: str) -> str:
 
 
 @pytest.mark.parametrize("kind", ["cull", "final"])
-def test_only_the_two_sentences_changed(kind):
-    """Byte-diff discipline: strip the two additions -> exactly v1_1."""
-    stripped = _prompt(kind).replace(ADD_ZERO_VOLUME_WALL, "", 1).replace(
-        ADD_NUMBERS_IN_WHY, "", 1
+def test_only_the_sanctioned_sentences_changed(kind):
+    """Byte-diff discipline: strip the three additions -> exactly v1_1."""
+    stripped = (
+        _prompt(kind)
+        .replace(ADD_ZERO_VOLUME_WALL, "", 1)
+        .replace(ADD_RESTORED_WALL, "", 1)
+        .replace(ADD_NUMBERS_IN_WHY, "", 1)
     )
     assert stripped == _golden(kind), (
-        "tournament_v1_2 diverges from tournament_v1_1 beyond the two "
+        "tournament_v1_3 diverges from tournament_v1_1 beyond the three "
         "sanctioned sentences — the bump is no longer surgical."
     )
 
 
 @pytest.mark.parametrize("kind", ["cull", "final"])
-def test_both_additions_present_exactly_once(kind):
+def test_all_additions_present_exactly_once(kind):
     p = _prompt(kind)
     assert p.count(ADD_ZERO_VOLUME_WALL) == 1
+    assert p.count(ADD_RESTORED_WALL) == 1
     assert p.count(ADD_NUMBERS_IN_WHY) == 1
 
 
@@ -104,9 +117,36 @@ def test_zero_wall_follows_the_existing_liquidity_directive():
     assert anchor + ADD_ZERO_VOLUME_WALL in p
 
 
+def test_restored_wall_follows_the_zero_wall():
+    """Both walls guard the same decision; keep them adjacent."""
+    assert ADD_ZERO_VOLUME_WALL + ADD_RESTORED_WALL in _prompt("cull")
+
+
 def test_numbers_in_why_follows_the_json_contract():
     p = _prompt("cull")
     assert '"why":"<one sentence on your #1 pick>"}' + ADD_NUMBERS_IN_WHY in p
+
+
+def test_restored_flag_reaches_the_model():
+    """The whole point of the bump: the flag the notifier computes must survive
+    to the rendered prompt. It was popped at the /rank boundary before 08-12 —
+    computed correctly, then discarded at the one place it changes an outcome."""
+    cands = [
+        Candidate(ticker="AAA", direction="BULLISH", overnight_score=7,
+                  early_volume=102, liquidity_floor_restored=True),
+        Candidate(ticker="BBB", direction="BULLISH", overnight_score=6,
+                  early_volume=4668, liquidity_floor_restored=False),
+    ]
+    p = _prompt("cull", cands)
+    assert '"liquidity_floor_restored": true' in p
+    assert '"liquidity_floor_restored": false' in p
+
+
+def test_internal_restore_columns_stay_blocked():
+    """The sanctioned alias is on the wire; the RAW notifier columns never are."""
+    assert "_print_floor_restored" in STALE_FIELDS_BLOCKLIST
+    assert "_floor_failed" in STALE_FIELDS_BLOCKLIST
+    assert "liquidity_floor_restored" not in STALE_FIELDS_BLOCKLIST
 
 
 def test_provenance_bumped():
@@ -120,8 +160,8 @@ def test_provenance_bumped():
         "the env value, not the code default. Clear it and re-run."
     )
     assert "JUDGE_PROMPT_LABEL" not in os.environ
-    assert tools.JUDGE_PROMPT_VERSION == 9
-    assert tools.JUDGE_PROMPT_LABEL == "tournament_v1_2"
+    assert tools.JUDGE_PROMPT_VERSION == 10
+    assert tools.JUDGE_PROMPT_LABEL == "tournament_v1_3"
 
 
 def test_deploy_sh_pins_match_the_code_defaults():

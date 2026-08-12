@@ -111,6 +111,14 @@ STALE_FIELDS_BLOCKLIST: frozenset[str] = frozenset({
     # blocked so an accidental re-attach never widens the surface.
     "_today_volume",
     "today_volume",
+    # `_print_floor_restored` / `_floor_failed` are the notifier's INTERNAL
+    # fail-soft bookkeeping columns. The raw keys are popped before the payload
+    # (C1) and blocked here too; their SANCTIONED alias
+    # `liquidity_floor_restored` (2026-08-12) IS a permitted judge input — it is
+    # the flag the 08-11/08-12 sub-floor picks were made blind to. See
+    # docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
+    "_print_floor_restored",
+    "_floor_failed",
 })
 
 
@@ -157,6 +165,17 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
     #       operator email as if verified. A why that carries its numbers makes a
     #       bad number visible and auditable downstream.
     # See docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
+    #
+    # tournament_v1_3 (2026-08-12): ONE added sentence, the
+    # liquidity_floor_restored wall. Until now the restore flag was computed
+    # correctly and then POPPED at the /rank boundary — the one place it would
+    # have changed an outcome — so the judge picked sub-floor names (ALC 08-11,
+    # MDB 08-12 at a 44.6% spread) and wrote rationales praising their
+    # liquidity. It was not lying, it was blind. The notifier now excludes
+    # restored rows deterministically (FAILSOFT_RESTORE_MODE="none"), which is
+    # the load-bearing fix; this sentence is the second wall for the rollback
+    # modes where restored rows can still appear.
+    # See docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
     return (
         "Your goal: make money buying a single option and selling it for a profit within 3 trading days.\n"
         "Buying the right stock is not enough — the option must capture the move within 3 days, "
@@ -172,7 +191,10 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
         "A pick that cannot be traded is a loss regardless of thesis: among comparable "
         "setups, prefer the one showing real early trading activity. "
         "An early_volume of 0 means the contract had not printed at all as of the "
-        "pick-time read; treat it as untradeable unless no candidate shows prints.\n\n"
+        "pick-time read; treat it as untradeable unless no candidate shows prints."
+        " A liquidity_floor_restored of true means the contract FAILED a hard "
+        "liquidity floor and is on this slate only so the slate would not be "
+        "empty; never rank one above a candidate whose value is false.\n\n"
         f"{rulebook_directive}"
         'Rank the contracts you would buy, best first. Return ONLY JSON: '
         '{"picks":["<ticker>","<ticker>",...],"why":"<one sentence on your #1 pick>"}'

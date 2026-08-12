@@ -1,0 +1,251 @@
+TRADER HANDOFF -> gammarips-engine
+2026-08-12 (Wed, 10:20 ET)
+From: gammarips-trader (the harness that consumes the pool; user zero of the MCP)
+Severity: P1. The daily pick is currently un-enterable and it is a regression.
+
+====================================================================
+BOTTOM LINE
+====================================================================
+
+The tournament pick has failed the harness's tradeability screen on 4 of the
+last 5 sessions, and the two worst spreads ever measured on a pick are the two
+sessions since 2026-08-11.
+
+We can date the change and we can name the mechanism. It is not the ranker
+getting worse at picking stocks. It is this:
+
+  The 2026-08-07 day-bar date-validation fix WORKED. That is the problem.
+
+  Before it, the early-print floor was a structural no-op -- your own comment
+  in signal-notifier/main.py says it "never dropped a single candidate between
+  its 2026-07-29 go-live and 2026-08-07." After it, the floor fires for real.
+  Far more candidates now get dropped. That trips the FAIL-SOFT FLOOR
+  (TOURNEY_MIN=8), which restores dropped candidates back into the slate so the
+  tournament "never starves to zero."
+
+  So the judge is now routinely choosing from names that FAILED a liquidity
+  floor -- and `_print_floor_restored` is popped before /rank, so the judge
+  cannot see which ones those are. It picks a sub-floor contract and then
+  writes a rationale praising its liquidity.
+
+  You fixed the measurement and the fail-soft turned the fix into a pipe that
+  feeds the failures to the judge.
+
+Three asks, in priority order:
+
+  P1  Pass `_print_floor_restored` THROUGH to /rank and make the judge exclude
+      (or heavily penalize) restored rows. One flag, already computed.
+  P2  Let the tournament return FEWER THAN 8, including ZERO. "Never starves"
+      is the design goal that is producing the damage.
+  P3  Get a quote feed. Spread and dollar depth are not measured anywhere in
+      the pipeline. OI and print count are proxies for the thing that actually
+      decides whether a subscriber can get out, and they are not good enough.
+      This is a data-plan spend decision, not a code change.
+
+====================================================================
+THE RECORD (harness-measured, Robinhood NBBO, ~10:00 ET each session)
+====================================================================
+
+Gate is spread <= 10% of mark (docs/RULES.md; the gate that would have saved
+the most money this month).
+
+  Date   Pick   Spread   OI          Bid depth   Verdict
+  -----  -----  -------  ----------  ----------  --------------------------
+  08-05  CSCO     8.7%   --          28x36 book  PASS spread; deadest tape of
+                                                 7 survivors. Owner entered.
+                                                 Closed -32.8% / -$105.
+  08-06  FIG     13.3%   --          $21 (!)     FAIL. 1-lot bid. Delta 0.11,
+                                                 29% OTM after an -18% day.
+  08-07  GCT     10.7%   --          2.65x56     FAIL. ZERO prints. Card said
+                                                 "2045 prints (confirmed)".
+                                                 -> GAP-018
+  08-10  PLTR     3.2%   7,354       $86,240     PASS. Clean book, 4,668
+                                                 prints. This is what good
+                                                 looks like.
+  08-11  ALC     26.1%   41 scan /   $2,100      FAIL. Scan OI was the LOWEST
+                         244 live                of all 50 pool names; next-
+                                                 thinnest GTLB 498. Owner
+                                                 entered. Closed -$312.
+                                                 -> GAP-021
+  08-12  MDB     44.6%   399         $7,050      FAIL. Worst spread we have
+                                                 ever measured on a pick.
+
+MDB today, in full, because it is the cleanest illustration:
+
+  Contract      O:MDB260821C00470000
+  Book @09:59   bid 4.70 x15  /  ask 7.40 x144      mark 6.05
+  Spread        44.6% of mark
+  Theta         -0.749/day = -12.4% PER DAY at 9 DTE
+  Card says     "Entry ~$6.50 / Limit BUY $6.65 / do not chase > $7.00"
+
+  A subscriber who fills the card's own limit of 6.65 is at -29.3% against the
+  live bid THE INSTANT THEY ARE FILLED. The card's target of 9.10 (+40%) sits
+  against a pool base rate of p(touch +40%) = 35.6% (N=3,058), and the round
+  trip costs 44.6% before the underlying moves at all.
+
+  The rationale, verbatim: "MDB provides the most actionable entry with an
+  early_volume of 102 and an oi_build of 202 to securely execute..."
+
+  "Securely execute" on a 15-lot bid. The judge is not lying, it is blind: it
+  was handed a restored row with the restore flag stripped.
+
+====================================================================
+DATING THE CHANGE
+====================================================================
+
+The string "(restored by fail-soft floor)" appears on the card face starting
+2026-08-11. We pulled the raw emails to confirm:
+
+  08-04 TGT   "Liquidity: 1586 prints by ~09:52 (confirmed)"
+  08-06 FIG   "Liquidity: 825 prints by ~09:52 (confirmed)"
+  08-07 GCT   "Liquidity: 2045 prints by ~09:52 (confirmed)"
+  08-10 PLTR  "Liquidity: 1009 prints by ~09:52 (confirmed)"
+  08-11 ALC   "Liquidity: 12 prints by ~09:52 (confirmed) (restored by fail-soft floor)"
+  08-12 MDB   "Liquidity: 102 prints by ~09:52 (confirmed) (restored by fail-soft floor)"
+
+Two things fall out of that list.
+
+1. The reported early_volume drops one to two orders of magnitude exactly when
+   the fail-soft string appears. Both readings are consistent with your fix
+   working: either the floor is now correctly rejecting the inflated
+   prior-session totals (GCT's "2045" was truly 0), or the restore path is
+   surfacing genuinely thin names. Either way the number on the card got
+   smaller AND more honest, and the pick got worse. Those are the same event.
+
+2. "confirmed" and "restored by fail-soft floor" in one sentence is
+   self-contradictory on its face. GAP-021 already asked for this; repeating it
+   because it is now shipping daily.
+
+MDB is worth a log check on your side. Its live OI at 09:59 was 399, above
+OI_FLOOR=200, and get_liquidity showed day_volume 102 at 09:52 -- both above
+their floors. So the drop was almost certainly the PRINT read, where the
+09:52 cron sees the tape only through ~09:37 on the 15-min delayed feed. If
+that is right, the print floor is now rejecting names that do have tape, just
+not by 09:37. Your two logger.info lines in the two-tier block print exactly
+which set each ticker landed in; that will settle it in one grep.
+
+====================================================================
+P1. THE JUDGE CANNOT SEE THE FLAG IT NEEDS
+====================================================================
+
+signal-notifier/main.py, the two-tier slate floor:
+
+  4. FAIL-SOFT FLOOR: if fewer than TOURNEY_MIN survive BOTH floors, restore
+     dropped candidates ranked by (print count desc NULLS LAST, live_oi desc
+     NULLS LAST) up to TOURNEY_MIN so the tournament never starves to zero.
+     Restored rows are marked `_print_floor_restored=True` (internal; popped
+     before /rank, surfaced only in the operator email).
+
+"Popped before /rank" is the defect in six words. The flag is computed
+correctly, ordered correctly (restores append BELOW survivors), and then
+discarded at the one boundary where it would change an outcome.
+
+signal-judge/app/agent.py:152 acknowledges the intent:
+
+  #  the fail-soft restore path deliberately puts sub-floor names back in
+
+Deliberate is fine. Invisible is not. The judge is being handed contaminated
+input and told nothing, so it optimizes over the whole slate and lands on
+sub-floor names roughly in proportion to how much of the slate they are -- and
+on a day when only 2 of 8 clear, that is most of the slate.
+
+Fix, smallest version: keep `_print_floor_restored` in the /rank payload and
+have the judge treat it as a hard exclusion when at least one genuine survivor
+exists. Restored rows remain available only when NOTHING cleared, and in that
+case the card should say so in those words.
+
+====================================================================
+P2. LET IT RETURN NOTHING
+====================================================================
+
+TOURNEY_MIN=8 is a floor on slate SIZE, and there is no corresponding floor on
+slate QUALITY. When the market only offers 2 tradeable names, the engine
+manufactures 6 more from the reject pile and ranks all 8 as if they were peers.
+
+Our own screen this morning found 3 of 50 pool names clearing both gates, and
+the pool is the same universe the tournament draws from. On a board that thin
+the honest slate is 3 names, and the honest pick may be none.
+
+"The tournament never starves to zero" reads like a reliability property. It is
+actually a correctness bug: it guarantees an output even when the correct
+output is an empty set. A no-pick day is a product feature -- it is the single
+most credible thing a signal service can say -- and right now the engine is
+structurally incapable of saying it.
+
+Suggested shape: keep TOURNEY_MIN as a soft target, add a hard rule that a
+restored row can never become the PICK while any genuine survivor exists, and
+emit "NO PICK TODAY -- N of M candidates cleared the liquidity floors" when
+zero clear. We will score no-pick days in the funnel log the same as any other.
+
+====================================================================
+P3. NOBODY IS MEASURING SPREAD (the actual ask)
+====================================================================
+
+This is the one the owner flagged directly and it is the root cause behind all
+of the above.
+
+The pipeline gates on open interest and print count. Neither is the thing that
+decides whether a subscriber can exit. We have measured the gap repeatedly:
+
+  * 2026-07-31: UNP 08/21 310C carried 2,034 OI and traded ZERO contracts all
+    session. OI is not liquidity.
+  * 2026-08-05: the spread gate dropped 4 of 11 names that had already passed
+    every volume test -- U 24.0%, FIG 24.3%, PATH 15.4%, ANET 12.5%.
+  * 2026-08-05: ZETA showed $19,430 on the bid, HOOD $2,681. Same spread
+    percentage tier, 7x difference in what you can actually get out of.
+  * 2026-08-12 (today): MDB passed OI 399 > OI_FLOOR 200 and still quoted a
+    44.6% spread on a 15-lot bid.
+
+get_liquidity serves no bid/ask on the current Polygon plan (GAP-001,
+documented since July). That is why the engine gates on proxies: the real
+number is not available to it. Every session the harness has to go pull the
+Robinhood book separately to answer the question the engine's own liquidity
+tool is named after.
+
+Concretely, the two numbers we want on the candidate row and on the card face:
+
+  spread_pct   = (ask - bid) / mark
+  bid_depth_usd = bid_size * bid * 100
+
+With those two fields the fail-soft restore becomes safe (restore by real
+fillability instead of by print count), the judge's rationale stops claiming
+"securely execute" on a 15-lot bid, and the card can carry a number a
+subscriber can act on. Without them the engine is guessing, and today it
+guessed 44.6%.
+
+====================================================================
+WHAT THIS HAS COST, SO YOU CAN SIZE THE FIX
+====================================================================
+
+Real money, owner's own account, both entries on tournament picks:
+
+  08-05  CSCO   -$105   (-32.8%)  pick cleared spread but was the deadest
+                                  tape of the session's 7 survivors
+  08-11  ALC    -$312   (-86.7%)  41-OI contract, 26.1% spread, stamped
+                                  "confirmed" on the card
+
+The 08-11 chase above the card's own do-not-chase line is the owner's and is
+logged against him in eval/behavior-ledger.jsonl -- we are not putting that on
+you. What is on you is that the card put a 41-OI contract in front of him with
+a "(confirmed)" liquidity attestation, 11 minutes before the harness screen
+that would have caught it runs.
+
+That is the subscriber failure mode in one sentence, and at a paid tier it is
+the whole product.
+
+====================================================================
+RELATED
+====================================================================
+
+  GAP-001  get_liquidity serves no bid/ask on this data plan (root of P3)
+  GAP-018  card recycles scan-day volume as entry-day prints (GCT 08-07)
+           -> the 08-07 fix for this is what surfaced the present regression
+  GAP-021  fail-soft floor masks the thinnest contract in the pool (ALC 08-11)
+           -> now recurring daily; MDB 08-12 is instance 2
+
+Harness-side evidence: eval/funnel-log.jsonl (461 rows, one per pool name per
+session, including every tournament pick and every screen drop with its
+reason), eval/trades.jsonl (fills), docs/GAP-LOG.md.
+
+Happy to run any measurement you want on the live book. We pull it every
+session anyway.

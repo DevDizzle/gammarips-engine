@@ -27,6 +27,14 @@
 # day-bar date-validation fix: before it, early_volume==0 could not physically
 # occur. Rollback = revert these two env values to 8 / tournament_v1_1.
 # See docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
+# Prompt bumped to tournament_v1_3 / JUDGE_PROMPT_VERSION=10 on 2026-08-12 —
+# ONE added sentence: never rank a contract with liquidity_floor_restored=true
+# above one whose value is false. That field is a NEW permitted candidate input
+# (sanctioned alias of the notifier's internal _print_floor_restored). It is the
+# SECOND wall only: signal-notifier now excludes restored rows deterministically
+# via FAILSOFT_RESTORE_MODE=none, so the field is false on every row under the
+# default config. Rollback = revert these two env values to 9 / tournament_v1_2.
+# See docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
 set -e
 
 # Pre-deploy guard: the picker_v5 case-memory block must actually be present and
@@ -66,7 +74,7 @@ gcloud run deploy signal-judge \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=9,JUDGE_PROMPT_LABEL=tournament_v1_2,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=10,JUDGE_PROMPT_LABEL=tournament_v1_3,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

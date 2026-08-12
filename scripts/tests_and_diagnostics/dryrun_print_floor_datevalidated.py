@@ -116,7 +116,7 @@ def _replay_day(day_df: pd.DataFrame) -> dict:
         slate["_today_volume"] = slate[f"_{tag}_volume"]
         # Stub the network refresh: the replayed columns ARE the refresh result.
         with patch.object(main, "_refresh_live_oi_batch", side_effect=lambda d: d.copy()):
-            survivors = main._liquidity_refresh_and_rank(slate)
+            survivors, _floor_stats = main._liquidity_refresh_and_rank(slate)
         restored_col = survivors.get("_print_floor_restored")
         n_restored = (
             int(pd.Series(restored_col).fillna(False).astype(bool).sum())
@@ -160,9 +160,15 @@ def main_cli() -> None:
     res = pd.DataFrame(rows)
 
     print(f"\nDate-validated print floor — dry run over {len(res)} sessions")
+    # Every knob that changes the result is printed, so a pasted run is
+    # reproducible from its own header. OI_FLOOR and FAILSOFT_RESTORE_MODE are
+    # env-resolved and BOTH differ from the in-code defaults in production
+    # (1000, and the mode is the whole point of the 08-12 comparison) — an
+    # output without them cannot be checked. Quote runs WITH this line.
     print(f"PRINT_FLOOR_MIN={main.PRINT_FLOOR_MIN}  OI_FLOOR={main.OI_FLOOR}  "
           f"TOURNEY_MIN={main.TOURNEY_MIN}  TOURNEY_POOL_CAP={main.TOURNEY_POOL_CAP}  "
-          f"PRINT_VALID_AFTER_ET_MIN={main.PRINT_VALID_AFTER_ET_MIN}\n")
+          f"PRINT_VALID_AFTER_ET_MIN={main.PRINT_VALID_AFTER_ET_MIN}  "
+          f"FAILSOFT_RESTORE_MODE={main.FAILSOFT_RESTORE_MODE}\n")
 
     hdr = (f"{'date':<12}{'read':>6}{'pool0/50':>10}{'cap0/12':>9}"
            f"{'PRE surv':>9}{'PRE rst':>8}{'POST surv':>10}{'POST rst':>9}"
@@ -191,7 +197,12 @@ def main_cli() -> None:
     print(f"  POST-fix genuinely-clearing, mean {res['postfix_genuine'].mean():.1f}"
           f"  (fail-soft restores: {res['postfix_restored'].mean():.1f}/session)")
     starved = int((res["postfix_genuine"] < main.TOURNEY_MIN).sum())
-    print(f"  sessions where fail-soft carries the slate: {starved}/{n}")
+    print(f"  sessions under TOURNEY_MIN on genuine survivors: {starved}/{n}"
+          f"  (= sessions the OLD always-on restore would have padded)")
+    dry = int((res["postfix_survivors"] == 0).sum())
+    print(f"  sessions with ZERO survivors "
+          f"(a no-pick day when mode=none; this run is mode="
+          f"{main.FAILSOFT_RESTORE_MODE}): {dry}/{n}")
     zr = res["postfix_zero_restored"]
     print(f"  ZERO-PRINT names restored to the judge:     {int(zr.sum())} total, "
           f"{int((zr > 0).sum())}/{n} sessions (max {int(zr.max())}/session)")
