@@ -15,6 +15,27 @@ Read any service's `requirements.txt` + `deploy.sh` for the rest.
 - **Data vendors:** Polygon (options/equity), FRED (VIX daily). FMP is legacy — still used by enrichment/win-tracker, **removed from forward-paper-trader**.
 - **Do NOT use:** FMP in forward-paper-trader (retired 2026-04-08), sklearn/XGBoost on N<500 datasets, any new data vendor without user approval
 
+## Writing style — ASD-STE100 (Simplified Technical English)
+
+All prose obeys ASD-STE100 Issue 9: chat replies, docs, PRDs, PR text,
+and emails. The `ste100` skill (user-level, `~/.claude/skills/ste100/`)
+has the full rules, the word lists, and the searchable dictionary. Read
+it before you write a document. These core rules always apply:
+
+- Write short sentences: 20 words maximum in procedures, 25 in
+  descriptions.
+- Use the active voice. Write instructions in the imperative (command)
+  form.
+- Use only the simple tenses. Do not use the "-ing" form of verbs.
+- Write one instruction in each sentence. Keep one topic in each
+  paragraph, with six sentences maximum. Do not use a semicolon.
+- Use approved words: "do" not "perform", "make sure that" not
+  "ensure/verify", "but" not "however", "must" not "shall/should",
+  "for example" not "e.g.".
+- Code, SQL, identifiers, and quoted output are verbatim. STE applies
+  to prose only. Project domain terms are technical nouns and stay as
+  they are.
+
 ## Commands
 Deploying anything: run the `/deploy-service` skill (checklist, review gate, secret-mount
 and route facts live there, not here).
