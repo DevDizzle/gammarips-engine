@@ -45,16 +45,27 @@ property without first stripping brand, `site:`, and bot traffic** (that is 53% 
 impressions and ~97% of sessions).
 
 ## Owner queue
-- 🔴 **DEPLOY DECISION — fail-soft restore fix (trader P1, 08-12).** Code + 48 tests +
-  15-session replay + docs DONE, uncommitted; gated on `gammarips-review` + you. The 08-07
-  print-floor fix worked and the fail-soft restore then fed the rejects to a judge blind to
-  the flag: ALC 08-11 (26.1% spread, **-$312**), MDB 08-12 (44.6%, worst ever). Now
-  `FAILSOFT_RESTORE_MODE=none`, zero clearing = `no_liquid_candidates` no-pick, judge sees
-  `liquidity_floor_restored` (`tournament_v1_3`/v10), restored rows can't say "(confirmed)".
-  Costs ~1 no-pick day/month. **Two-service deploy**, NO cohort reset, **engine-only** (the
-  new skip reason reaches the trader's ledger row and MCP as data; no web surface renders
-  it — memory `skip-reason-flows-to-mcp-not-a-web-surface`).
-  `docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md` + the `-trader-handoff-response.md`.
+- ✅ **SHIPPED 08-12 — fail-soft restore fix.** `signal-judge-00010-xkc` +
+  `signal-notifier-00058-fl2`, commit `1c2c60d`, `gammarips-review` PASS on the second
+  pass (it BLOCKED the first: my `measured` flag proved "no exception fired", not "we
+  measured", so a Polygon outage could have swept the slate on stale frozen OI and
+  published a false stand-down). Live: `FAILSOFT_RESTORE_MODE=none`,
+  `LIVE_FETCH_MIN_OK_FRAC=0.5`, `tournament_v1_3`/v10.
+  **Cohort RESET to `LIVE_COHORT_START_DATE=2026-08-13`** (owner call): 2 of the 08-10
+  cohort's 3 entries were restores the new code cannot select.
+  `docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md`.
+  - 🟡 **WATCH Thu 08-13 09:52 ET, the first pick under it.** Expect a slate thinner
+    than 8 and no `restored` line. New log lines to grep: `Fail-soft restore
+    SUPPRESSED`, `DEGRADED live read`, `EMPTY SLATE`. A `no_liquid_candidates` day is
+    correct behavior, not a break, and it now emails you the counts.
+- 🔴 **DEADLINE Mon 08-17 05:00 ET — cohort mirror drift (from the 08-12 reset).** The
+  constant is mirrored in 4 places; 2 are updated (`signal-notifier/main.py`,
+  `libs/gammarips_content`, pinned by `test_cohort_pin.py`). **Still on 08-10:**
+  `gammarips-mcp/src/utils/data.py` (separate repo, own commit + review gate) and the
+  vendored copies inside x-poster + blog-generator, which need a REDEPLOY to pick the
+  new value up. blog-generator's Mon 05:00 ET cron would otherwise publish a cohort
+  containing ALC, the -$312 restore pick this change repudiates. Also prose in the MCP's
+  `historical.py` and `performance_tracker.py`.
 - 🔴 **Rotate `POLYGON_API_KEY`** (leaked 07-06, echoed 08-05 in an error body, contained,
   endpoint hotfixed `00015-t78`). Regenerate → update secret → redeploy all mounting
   services (grep deploy.sh).
@@ -70,9 +81,6 @@ impressions and ~97% of sessions).
 - **win-tracker NOT deployed** — park watchdog removal is in the working tree alongside
   unrelated uncommitted changes from a prior session; review before shipping. Safe to
   leave: `park_watchdog/gate_30_alerted` is set so it cannot re-fire.
-- **Cohort constant is pinned across repos.** `libs/gammarips_content/cohort.py` +
-  `tests/test_cohort_pin.py`; MCP mirrors it in `src/utils/data.py`. **On the next cohort
-  reset that test fails until you update it AND redeploy both publishers.**
 - **Compliance substring misfires:** `'for you'` matches "for your agent",
   `'guaranteed'` kills negations (`libs/gammarips_content/compliance.py:125`). Killed 2
   posts, will bite MCP-cluster topics. `$19`/`Starter tier` absent from `RETIRED_ALIASES`.
