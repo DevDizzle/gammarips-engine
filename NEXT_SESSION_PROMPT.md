@@ -7,29 +7,31 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## Active workstream — Growth sequence (DECIDED 08-06)
-`docs/DECISIONS/2026-08-06-growth-sequence-video-hn-ads.md` is the plan of record.
-07-07 directory sprint = 30-day null result; passive listings don't move this, don't
-re-propose. Steps, in order:
-1. ✅ **DONE 08-08 — webapp PRs #20-24 merged, deployed, verified in prod.** GA4
-   attribution (fixes checkouts made AFTER deploy only), ticker 308, reports archive
-   (116 reports back to 02-13), head hygiene (og:image 15/15, titles, descriptions
-   129-150 chars), options-flow-API FAQ + report chain + ticker→report links.
-2. **🔴 NEXT: the video. CONCEPT CHANGED BY OWNER 08-08** to a **zero-to-contracts
-   install demo**: empty dir → `git clone` harness → one-line MCP connect → `/trade` →
-   contract candidates. Spec v2 (acts, start-from-nothing rule, beats that must survive
-   the cut) in `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Owner records, edits with
-   **Gemini**. Fresh demo key, revoke after. A "nothing today" outcome SHIPS.
-   Embed: webapp `landing/video-led` (READY, iframe swap, `/ship`).
-3. **Show HN. Fully planned in `docs/GTM-DISTRIBUTION-PLAYBOOK.md`** (title, URL, the
-   verbatim submission text, gates, hard rules, the 3 questions he will be asked).
-   `~/workspace/HN-SUBMISSION.txt` is a copy-paste scratch duplicate. Submit the **repo**,
-   not gammarips.com: same artifact the video demos. README fixed 08-08 (PR #2) so it no
-   longer opens with "Subscribe $39/mo". **The loop CANNOT run anonymously**
-   (`get_liquidity`, `get_signal`, `query_outcomes`, `replay_contract` are pro) — never
-   claim it can. FIRE ONLY AFTER the video AND the GA4 purchase check.
-4. **Ads review ~09-01** on measured CVR from video+HN traffic; $10-20/day on the exact
-   "claude mcp options trading" cluster only if CVR nonzero.
+## Active workstream — Organic growth push (owner 2026-08-13)
+**`docs/GTM-ORGANIC-GROWTH-PLAN.md` is the plan of record** (extends the 08-06
+decision; video/HN gates unchanged). Product statement LOCKED: **MCP + harness =
+agentic trading** — execution-risk data (paid MCP) + free open loop + the user's own
+agent. Audience: agent-harness users who trade options (memory
+`audience-is-claude-code-options-traders`). All new public copy in STE. Order:
+1. **🔴 NEXT: landing rewrite (plan §A) + Grok guide (§B1).** Start with A1:
+   `harness-cta.tsx:21` teaches 4 RETIRED commands; real loop is `/trade` `/review`
+   `/coach`. Then hero equation, per-client connect tabs, section reorder. Branch
+   (main auto-deploys), `gammarips-copywriter`, `/ship` from `~/workspace`.
+2. **The video** (spec v2 unchanged, `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`;
+   owner records, Gemini edit, fresh demo key, "nothing today" SHIPS) → **Show HN**
+   per `docs/GTM-DISTRIBUTION-PLAYBOOK.md`. Gates: video live AND one real
+   GA4-attributed checkout. Loop cannot run anonymously — never claim it can.
+3. **Backlinks weekly (plan §C).** NO directories (07-07 = 30-day null, decided).
+4. **Ads review ~09-01** on measured CVR, only if nonzero.
+Inputs banked 08-13: GSC assistant-name footprint = ZERO (whole cluster 8
+impressions/90d; seed "mcp options order flow server" pos 10); **Robinhood agentic
+MCP is OFFICIAL** (memory `robinhood-agentic-trading-mcp-official`); public Grok
+share demos the free-tier funnel end to end (link in plan §B1).
+Harness repo pending (plan §D2): `AGENTS.md` for Codex, "your fills close the loop"
+README section, hand-sync 4 wiki notes — sync tool `--apply` is UNSAFE (memory
+`trader-harness-sync-apply-unsafe`). Prior-session uncommitted ste100 skill commit
+rides first. **OPEN OWNER CALL: regime-rail public doctrine** — keep fail-closed
+(recommended) vs adopt his private halve-and-continue.
 
 Open verification carried from 07-30: **blog-generator deploy** — confirm revision, then
 dry-run `POST /generate {"slug":"best-mcp-servers-for-trading-and-finance","dry_run":true}`
