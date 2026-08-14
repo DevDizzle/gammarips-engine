@@ -389,6 +389,109 @@ def life_surface_section(client: bigquery.Client) -> dict:
                 "stranded": None, "backlog": None, "notes": []}
 
 
+# ----------------------------------------------------- opportunity surface ---
+
+def opp_surface_section(client: bigquery.Client) -> dict:
+    """Opportunity-surface (3-day MFE/MAE) fill health — the OTHER labeler.
+
+    Why this exists (2026-08-14). The digest watched `life_status` only, so the
+    single "Public life surface [OK]" badge covered one of two independent
+    labelers and a reader took it as "labeling is healthy". The opportunity
+    surface — the one the paid MCP serves as view="surface" — had NO row here at
+    all. Its only alarm was the dbt test `assert_opp_surface_labels_fresh.sql`
+    at a 10-CALENDAR-DAY threshold, so a stopped fill job stayed invisible to
+    the operator for up to ten days. That is the exact surface that silently ran
+    dark 2026-06-26 -> 2026-07-28, 950 rows (FINDINGS_LEDGER 2026-07-28).
+
+    THE ALLOWANCE IS THE WHOLE POINT. `fill-closed-windows` is `30 17 * * 1-5`
+    ET and this digest reads at 07:15 ET, BEFORE that day's run. So a window
+    that closed yesterday has had ZERO fill attempts when this query runs, and
+    calling it overdue is a guaranteed daily false alarm. That is not
+    hypothetical: the MCP's `open_past_due` derives closure with no fill-run
+    allowance and therefore tells a paying subscriber "This looks like a stalled
+    fill job" every weekday from midnight until 17:30 ET (verified live
+    2026-08-14 08:37 ET against scan_date 2026-08-10, whose fill ran on
+    schedule that evening). Do not copy that predicate. Count FILL RUNS.
+
+    Sessions, not calendar days, and the calendar is the table's own DISTINCT
+    entry_day values — same no-new-dependency idiom the MCP uses. A holed or
+    stale calendar undercounts elapsed sessions and would route to the
+    reassuring branch, so an unusable calendar reports UNKNOWN, never OK.
+    """
+    try:
+        sql = f"""
+        WITH sessions AS (
+          SELECT DISTINCT entry_day AS d
+          FROM `{PROJECT_ID}.profit_scout.enriched_option_outcomes`
+          WHERE entry_day IS NOT NULL
+            AND entry_day >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 120 DAY)
+        ), cal AS (
+          SELECT MAX(d) AS max_session, MAX(DATE_DIFF(d, prev_d, DAY)) AS max_gap
+          FROM (SELECT d, LAG(d) OVER (ORDER BY d) AS prev_d FROM sessions)
+        ), scoped AS (
+          SELECT
+            o.scan_date,
+            (o.opp_status IS NULL OR o.opp_status = 'WINDOW_OPEN') AS pending,
+            IFNULL(o.opp_window_days, 3) - 1 AS need,
+            (SELECT COUNT(*) FROM sessions s
+              WHERE s.d > o.entry_day
+                AND s.d < CURRENT_DATE('America/New_York')) AS elapsed
+          FROM `{PROJECT_ID}.profit_scout.enriched_option_outcomes` o
+          WHERE o.entry_day IS NOT NULL
+            AND o.entry_day >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 120 DAY)
+        )
+        SELECT
+          COUNTIF(pending) AS pending_rows,
+          -- window closed, but the fill cron has not had its turn yet: EXPECTED.
+          COUNTIF(pending AND elapsed >= need) AS closed_awaiting_fill,
+          -- two 17:30 ET runs have had a shot and did not fill it: STALLED.
+          COUNTIF(pending AND elapsed >= need + 2) AS overdue_rows,
+          COUNT(DISTINCT IF(pending AND elapsed >= need + 2, scan_date, NULL)) AS overdue_dates,
+          MIN(IF(pending AND elapsed >= need + 2, scan_date, NULL)) AS oldest_overdue,
+          MAX(IF(NOT pending, scan_date, NULL)) AS closed_frontier,
+          (SELECT max_session FROM cal) AS max_session,
+          IFNULL(
+            (SELECT max_session FROM cal)
+              < DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 5 DAY)
+            OR IFNULL((SELECT max_gap FROM cal), 0) > 4,
+            TRUE
+          ) AS calendar_unusable
+        FROM scoped
+        """
+        row = next(iter(client.query(sql).result()), None)
+        if row is None:
+            return {"status": UNKNOWN, "error": "no rows returned", "notes": []}
+
+        if row["calendar_unusable"]:
+            return {
+                "status": UNKNOWN,
+                "error": (f"session calendar unusable (ends {row['max_session']}) — "
+                          "cannot decide whether pending windows are overdue"),
+                "notes": [],
+            }
+
+        overdue = int(row["overdue_rows"] or 0)
+        notes = []
+        if overdue > 0:
+            notes.append(
+                f"{overdue} row(s) across {row['overdue_dates']} scan date(s), oldest "
+                f"{row['oldest_overdue']}, are still unfilled after 2+ fill-closed-windows "
+                "runs — the opportunity-surface fill job has likely stopped. The paid MCP "
+                "serves this surface as view=\"surface\"."
+            )
+        return {
+            "status": ATTENTION if notes else OK,
+            "pending": int(row["pending_rows"] or 0),
+            "awaiting_fill": int(row["closed_awaiting_fill"] or 0),
+            "overdue": overdue,
+            "closed_frontier": str(row["closed_frontier"]) if row["closed_frontier"] else None,
+            "notes": notes,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"digest opp surface section failed: {e}")
+        return {"status": UNKNOWN, "error": str(e)[:400], "notes": []}
+
+
 # ------------------------------------------------------------------- render ---
 
 _CSS = (
@@ -408,7 +511,8 @@ def _badge(status: str) -> str:
             f'border-radius:3px;padding:1px 6px;font-size:11px;font-weight:600">{label}</span>')
 
 
-def render_html(fresh: dict, cov: dict, sched: dict, life: dict, overall: str) -> str:
+def render_html(fresh: dict, cov: dict, sched: dict, life: dict, opp: dict,
+                overall: str) -> str:
     out = [f'<div style="{_CSS}">']
     now = datetime.now(EST).strftime("%A %Y-%m-%d %H:%M ET")
     out.append(f'<h2 style="margin:0 0 2px">Engine health {_badge(overall)}</h2>')
@@ -533,6 +637,23 @@ def render_html(fresh: dict, cov: dict, sched: dict, life: dict, overall: str) -
         for n in life.get("notes", []):
             out.append(f'<div style="color:#b00;font-size:12px">{n}</div>')
 
+    # --- opportunity surface (the OTHER labeler; see opp_surface_section)
+    out.append(f'<h3 style="margin:18px 0 6px">Opportunity surface (3-day MFE/MAE) '
+               f'{_badge(opp["status"])}</h3>')
+    if opp["status"] == UNKNOWN:
+        out.append(f'<div style="color:#a60">Check failed: {opp.get("error","")}</div>')
+    else:
+        out.append(f'<div>closed through <b>{opp.get("closed_frontier")}</b> &middot; '
+                   f'pending <b>{opp.get("pending")}</b> &middot; overdue '
+                   f'<b>{opp.get("overdue")}</b></div>')
+        out.append('<div style="color:#666;font-size:12px">'
+                   f'{opp.get("awaiting_fill")} row(s) have a closed window still '
+                   'awaiting tonight&rsquo;s 17:30 ET fill — that is the design lag, '
+                   'not a stall. Overdue counts only rows that have already missed '
+                   'two fill runs.</div>')
+        for n in opp.get("notes", []):
+            out.append(f'<div style="color:#b00;font-size:12px">{n}</div>')
+
     # The digest cannot report its own non-delivery: if dbt hangs or the service
     # is down, no email exists to carry the bad news, and the only remaining
     # signal is the console-red job this artifact exists to replace. There is no
@@ -606,13 +727,16 @@ def build_and_send(freshness: dict, send: bool = True) -> dict:
         cov = {"status": UNKNOWN, "error": "BigQuery client unavailable",
                "days": [], "grid": [], "gaps": [], "holidays": []}
         life = {"status": UNKNOWN, "error": "BigQuery client unavailable", "counts": {}}
+        opp = {"status": UNKNOWN, "error": "BigQuery client unavailable", "notes": []}
     else:
         cov = coverage_section(client)
         life = life_surface_section(client)
+        opp = opp_surface_section(client)
     sched = scheduler_section()
 
-    overall = _worst(fresh["status"], cov["status"], sched["status"], life["status"])
-    html = render_html(fresh, cov, sched, life, overall)
+    overall = _worst(fresh["status"], cov["status"], sched["status"],
+                     life["status"], opp["status"])
+    html = render_html(fresh, cov, sched, life, opp, overall)
     tag = {OK: "OK", ATTENTION: "ATTENTION", UNKNOWN: "UNKNOWN"}.get(overall, "UNKNOWN")
     date_str = datetime.now(EST).strftime("%a %m-%d")
     subject = f"[GammaRips] Engine health {tag} — {date_str}"
@@ -621,7 +745,8 @@ def build_and_send(freshness: dict, send: bool = True) -> dict:
     return {
         "overall": overall, "subject": subject, "sent": sent,
         "sections": {"freshness": fresh["status"], "coverage": cov["status"],
-                     "scheduler": sched["status"], "life_surface": life["status"]},
+                     "scheduler": sched["status"], "life_surface": life["status"],
+                     "opp_surface": opp["status"]},
         "gaps": cov["gaps"], "failing_jobs": [j["name"] for j in sched["failing"]],
         "not_fresh": fresh.get("not_fresh", {}),
         "html": html,
