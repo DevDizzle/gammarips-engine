@@ -726,7 +726,10 @@ def write_todays_pick_doc(
         entry_disp = {
             "entry_mark": em,                              # fresh entry-day (~09:50 ET) mark
             "entry_mark_asof": mark["asof_iso"],
-            "entry_mark_source": mark["source"],           # last_trade | day_close | unavailable
+            # last_trade | day_close | stale_day_bar | unavailable.
+            # stale_day_bar = a prior-session close was offered and REFUSED
+            # (2026-08-14); price is None so the whole bracket below stays null.
+            "entry_mark_source": mark["source"],
             "entry_mark_stale": mark["stale"],
             "limit_entry_price": _round_tick(em * (1 + ENTRY_LIMIT_BUFFER)) if em else None,
             "do_not_chase_above": _round_tick(em * (1 + ENTRY_CHASE_CAP)) if em else None,
@@ -1075,13 +1078,20 @@ def _entry_display_strings(entry_disp: dict | None) -> dict | None:
         except (TypeError, ValueError):
             return "—"
 
-    asof_label = "9:50 ET"
+    # The label must state WHEN the mark was measured, never a constant. It used
+    # to default to the literal "9:50 ET", and because `last_trade` is unentitled
+    # on this plan (see _fetch_entry_mark) `asof` was None on 32 of 32 picks —
+    # so EVERY card ever sent stamped a hardcoded 9:50 onto a delayed day-bar
+    # close. Measured 2026-08-14 against the engine's own 10:00 ET entry basis
+    # (`opp_entry_price`), that mark misses by a median 16% and a mean 28%, in
+    # both directions, on 27 picks. An unknown time now reads as unknown.
+    asof_label = "time unknown"
     asof = entry_disp.get("entry_mark_asof")
     if asof:
         try:
             asof_label = datetime.fromisoformat(asof).astimezone(est).strftime("%H:%M ET")
         except (ValueError, TypeError):
-            asof_label = "9:50 ET"
+            asof_label = "time unknown"
     return {
         "entry": _d(entry_disp.get("entry_mark")),
         "limit": _d(entry_disp.get("limit_entry_price")),
@@ -1620,15 +1630,24 @@ def _round_tick(price: float, tick: float = 0.05) -> float:
     return max(tick, round(round(price / tick) * tick, 2))
 
 
-def _fetch_entry_mark(underlying: str, contract: str) -> dict:
+def _fetch_entry_mark(
+    underlying: str, contract: str, read_dt_et: datetime | None = None
+) -> dict:
     """Fetch a FRESH entry-day price mark for the CHOSEN contract, post-selection.
 
     Returns ``{"price", "asof_iso", "source", "stale", "status"}`` where:
-      * ``price``    — last printed trade price (float), else day close, else None.
-      * ``asof_iso`` — ISO8601 of the last trade (None if unavailable/day_close).
-      * ``source``   — "last_trade" | "day_close" | "unavailable".
-      * ``stale``    — True if the last trade is older than ENTRY_MARK_STALE_SECS.
+      * ``price``    — last printed trade price (float), else a DATE-VALIDATED
+                       day close, else None.
+      * ``asof_iso`` — ISO8601 of the price's own timestamp (last-trade
+                       ``sip_timestamp`` or the day bar's ``last_updated``).
+                       None only when the feed gave us no usable timestamp.
+      * ``source``   — "last_trade" | "day_close" | "stale_day_bar" | "unavailable".
+      * ``stale``    — True if the mark is older than ENTRY_MARK_STALE_SECS, or
+                       if its age could not be established at all.
       * ``status``   — "ok" | "polygon_empty" | "polygon_error".
+
+    ``read_dt_et`` is injectable for tests (mirrors ``_fetch_live_oi``); it
+    defaults to now in ET and decides what "prior session" means.
 
     POST-SELECTION / DISPLAY ONLY — the mirror image of _fetch_live_oi's C1 wall.
     That function DELIBERATELY DISCARDS last_trade / day OHLC because they are
@@ -1667,14 +1686,21 @@ def _fetch_entry_mark(underlying: str, contract: str) -> dict:
     # Prefer the most recent printed trade; fall back to the day close. (No NBBO
     # on this plan, so there is no real mid — the last trade IS our fair-value
     # proxy, same as enrichment's _best_contract last-trade pricing.)
+    #
+    # MEASURED 2026-08-14: `last_trade` is NOT entitled on this Polygon plan. It
+    # was absent on 32 of 32 picks that ever carried an entry mark, so the branch
+    # below is dead in production and EVERY card has priced off `day.close`. It
+    # is kept because the entitlement is a purchase away, not because it runs.
     lt = res.get("last_trade") if isinstance(res.get("last_trade"), dict) else {}
     price_raw = lt.get("price")
     sip_ns = lt.get("sip_timestamp")  # Polygon sip_timestamp is nanoseconds
     source = "last_trade"
+    day_ns = None
     if price_raw is None:
         day = res.get("day") if isinstance(res.get("day"), dict) else {}
         price_raw = day.get("close")
         sip_ns = None
+        day_ns = day.get("last_updated")
         source = "day_close" if price_raw is not None else "unavailable"
     try:
         price = float(price_raw) if price_raw is not None else None
@@ -1683,15 +1709,60 @@ def _fetch_entry_mark(underlying: str, contract: str) -> dict:
     if price is None or price <= 0:
         return {**fail, "status": "ok"}
 
+    # ONE READ CLOCK for the whole function (2026-08-07 review precedent). Date
+    # validation and staleness must agree, or a replay injecting read_dt_et gets
+    # its dates from the fixture and its ages from wall-clock now.
+    read_dt = read_dt_et if read_dt_et is not None else datetime.now(est)
+
     asof_iso, stale = None, False
     if sip_ns is not None:
         try:
             asof_dt = datetime.fromtimestamp(int(sip_ns) / 1e9, tz=pytz.UTC)
             asof_iso = asof_dt.isoformat()
-            age_s = (datetime.now(pytz.UTC) - asof_dt).total_seconds()
+            age_s = (read_dt - asof_dt).total_seconds()
             stale = age_s > ENTRY_MARK_STALE_SECS
         except (TypeError, ValueError, OSError, OverflowError):
             asof_iso, stale = None, False
+    elif source == "day_close":
+        # DATE-VALIDATE THE DAY BAR (2026-08-14). Same vendor semantics that
+        # produced GAP-018 in `_fetch_live_oi`: Polygon serves the PRIOR
+        # session's `day` bar for a contract that has not printed yet, so a raw
+        # `day.close` read cannot tell "today's 09:37 close" from "yesterday's
+        # settle". The 2026-08-07 follow-on audit scoped to readers of
+        # `day.volume` and therefore never looked at this function.
+        #
+        # Fail direction is deliberate and asymmetric: a WRONG mark is worse
+        # than NO mark, because every downstream number (limit, do-not-chase,
+        # target, stop) is derived from it and the operator places orders
+        # against them. A prior-session close is therefore refused outright.
+        bar_date = _day_bar_et_date(day_ns)
+        if bar_date is None:
+            # UNDATABLE: serve the price (fail-open on the value, same as the
+            # print floor) but never let it claim freshness — stale=True routes
+            # the card to its UNVERIFIED tag instead of a confident timestamp.
+            logger.warning(
+                f"Entry mark {contract}: day bar has no parseable last_updated; "
+                "serving price as UNVERIFIED"
+            )
+            asof_iso, stale = None, True
+        elif bar_date < read_dt.date():
+            # PRIOR-SESSION BAR: refuse. entry_mark=None nulls the whole bracket
+            # rather than publishing a fabricated one.
+            logger.warning(
+                f"Entry mark {contract}: day bar dated {bar_date} < read date "
+                f"{read_dt.date()} — prior-session close REFUSED as an entry mark"
+            )
+            return {**fail, "source": "stale_day_bar", "status": "ok"}
+        else:
+            # Today's bar. Publish its REAL asof so the card stops asserting a
+            # time it never measured, and let the existing staleness threshold
+            # judge the delayed-feed lag.
+            try:
+                asof_dt = datetime.fromtimestamp(int(day_ns) / 1e9, tz=pytz.UTC)
+                asof_iso = asof_dt.isoformat()
+                stale = (read_dt - asof_dt).total_seconds() > ENTRY_MARK_STALE_SECS
+            except (TypeError, ValueError, OSError, OverflowError):
+                asof_iso, stale = None, True
 
     return {"price": price, "asof_iso": asof_iso, "source": source, "stale": stale, "status": "ok"}
 
