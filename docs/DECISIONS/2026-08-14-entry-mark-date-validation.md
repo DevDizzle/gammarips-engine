@@ -144,6 +144,28 @@ same shape (`trade.get("price") or day.get("close")`, no date validation). It
 feeds `recommended_mid_price`, which is the number the refusal branch falls back
 to. Still open. Do not close that item with this change.
 
+## Known residual, accepted (`gammarips-review` second pass, finding 4)
+
+The UNDATABLE branch merges two populations, and they are not equally innocent:
+
+- `last_updated` **absent** — incidental, never seen in 49,285 real reads.
+- `last_updated` **present but out of range** — positive evidence of a vendor
+  semantics change.
+
+Both serve the price. So under a real ns-to-ms change every card would serve an
+unvalidated `day.close` with a `(stale)` tag **and a full bracket derived from
+it**, which inverts this function's own rule that a wrong mark is worse than no
+mark.
+
+Accepted for now, for three reasons. The B1 caveat makes the alternative
+(universal refusal) honest rather than silent. The six-week status quo was
+strictly worse than either option. The trigger is low-probability.
+
+**The cheap improvement, if it ever fires:** split the two cases and refuse only
+the out-of-range one. Watch for the WARNING `outside [10d, 0d] of read`. If it
+fires broadly, treat it as a Polygon timestamp-unit change and read this section
+before touching anything.
+
 ## Definition of Done
 
 Not an execution-policy change. `docs/TRADING-STRATEGY.md` has no entry-mark

@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 import pytz
 
@@ -230,6 +231,55 @@ def test_yesterdays_bar_is_still_refused_inside_the_age_window():
 
 
 # ------------------------------------------- last_trade parity (non-blocking 3) ---
+
+# ------------------------------------------------- WIRING regression (B1) ---
+# gammarips-review, second pass, follow-up 1. The tests above exercise
+# `_entry_mark_refusal_note` in isolation, so deleting its CALL SITE leaves them
+# all green. B1 was a WIRING defect: the helper existed nowhere near the place
+# the wrong conclusion is drawn. These two tests fail if the wiring is removed.
+
+def _row() -> pd.Series:
+    return pd.Series({
+        "ticker": "HPE", "direction": "BULLISH",
+        "recommended_contract": "O:HPE260821C00060000",
+        "recommended_strike": 60.0, "recommended_dte": 8,
+        "recommended_mid_price": 2.09, "vol_oi_ratio": 0.3823,
+        "moneyness_pct": 0.0206, "overnight_score": 7,
+    })
+
+
+REFUSED = {"entry_mark": None, "entry_mark_source": "stale_day_bar",
+           "entry_mark_stale": True, "limit_entry_price": None,
+           "do_not_chase_above": None, "display_target_price": None,
+           "display_stop_price": None}
+
+
+def test_email_card_declares_a_refused_mark_next_to_the_overnight_number():
+    html = main.format_email_html(_row(), date(2026, 8, 12), date(2026, 8, 13),
+                                  entry_disp=REFUSED)
+    assert "REFUSED" in html, "the card must not present the overnight mid silently"
+    assert "OVERNIGHT scan mark" in html
+    # The stale number it fell back to is still on the card, which is exactly
+    # why the caveat has to sit beside it.
+    assert "2.09" in html
+
+
+def test_plaintext_card_declares_a_refused_mark_too():
+    msg = main.format_whatsapp_message(_row(), date(2026, 8, 12), date(2026, 8, 13),
+                                       has_pick=True, entry_disp=REFUSED)
+    assert "REFUSED" in msg
+
+
+def test_a_good_mark_prints_no_refusal_note_anywhere():
+    good = {"entry_mark": 4.00, "entry_mark_asof": None,
+            "entry_mark_source": "day_close", "entry_mark_stale": False,
+            "limit_entry_price": 4.10, "do_not_chase_above": 4.30,
+            "display_target_price": 5.60, "display_stop_price": 2.80}
+    html = main.format_email_html(_row(), date(2026, 8, 12), date(2026, 8, 13),
+                                  entry_disp=good)
+    assert "REFUSED" not in html
+    assert "Limit BUY" in html
+
 
 def test_prior_session_last_trade_is_refused_too():
     """Otherwise the entitlement landing re-opens the hole we just closed."""

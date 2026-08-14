@@ -726,9 +726,10 @@ def write_todays_pick_doc(
         entry_disp = {
             "entry_mark": em,                              # fresh entry-day (~09:50 ET) mark
             "entry_mark_asof": mark["asof_iso"],
-            # last_trade | day_close | stale_day_bar | unavailable.
-            # stale_day_bar = a prior-session close was offered and REFUSED
-            # (2026-08-14); price is None so the whole bracket below stays null.
+            # last_trade | day_close | stale_day_bar | stale_last_trade | unavailable.
+            # The two stale_* values mean a prior-session price was offered and
+            # REFUSED (2026-08-14). Price is None, so the whole bracket below
+            # stays null and the card renders _entry_mark_refusal_note().
             "entry_mark_source": mark["source"],
             "entry_mark_stale": mark["stale"],
             "limit_entry_price": _round_tick(em * (1 + ENTRY_LIMIT_BUFFER)) if em else None,
@@ -1681,7 +1682,8 @@ def _fetch_entry_mark(
       * ``asof_iso`` — ISO8601 of the price's own timestamp (last-trade
                        ``sip_timestamp`` or the day bar's ``last_updated``).
                        None only when the feed gave us no usable timestamp.
-      * ``source``   — "last_trade" | "day_close" | "stale_day_bar" | "unavailable".
+      * ``source``   — "last_trade" | "day_close" | "stale_day_bar" |
+                       "stale_last_trade" | "unavailable".
       * ``stale``    — True if the mark is older than ENTRY_MARK_STALE_SECS, or
                        if its age could not be established at all.
       * ``status``   — "ok" | "polygon_empty" | "polygon_error".

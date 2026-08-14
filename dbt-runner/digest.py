@@ -680,8 +680,9 @@ def render_html(fresh: dict, cov: dict, sched: dict, life: dict, opp: dict,
         # filled, and the filler will not revisit them.
         out.append('<div style="color:#888;font-size:11px">'
                    f'{opp.get("terminal_unusable")} row(s) resolved to a terminal '
-                   'non-OK status (NO_BARS / ERROR). They are counted as closed, '
-                   'never as overdue, and the fill job will not retry them.</div>')
+                   'non-OK status (NO_BARS / NO_POST_ENTRY_BARS / ERROR). They '
+                   'are counted as closed, never as overdue, and the fill job '
+                   'will not retry them.</div>')
         for n in opp.get("notes", []):
             out.append(f'<div style="color:#b00;font-size:12px">{n}</div>')
 

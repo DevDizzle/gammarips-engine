@@ -18,7 +18,7 @@ delayed `day.close` and "~09:50 ET" was a hardcoded label on 32 of 32 picks (med
 off the true 10:00 anchor). `entry_mark_source` is now
 `last_trade|day_close|stale_day_bar|stale_last_trade|unavailable`. A prior-session price is
 REFUSED: the bracket goes null and the card must print the refusal reason next to the
-overnight mid it falls back to. See [[entry-mark-date-validation]] and
+overnight mid it falls back to. See
 `docs/DECISIONS/2026-08-14-entry-mark-date-validation.md`.
 
 Trigger: the webapp/email had published `recommended_mid_price` (the overnight scan-time
