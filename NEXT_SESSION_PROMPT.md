@@ -115,6 +115,27 @@ impressions and ~97% of sessions).
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
+- 🔴 **UNDEPLOYED, ready: the card's entry mark (trader 08-13 P3).** `_fetch_entry_mark`
+  fell through to `day.close` on **32 of 32** picks (`last_trade` is unentitled), so
+  "@9:50 ET" was a hardcoded string, `entry_mark_stale` was structurally unreachable, and
+  a prior-session close could become an entry mark. Measured vs the engine's own 10:00
+  basis: **median 16.2% / mean 28.4% error over 27 picks**; the -30% stop lands at -11%,
+  touched **50%** same-day vs 19% intended. Fixed + 10 tests (101 pass), display-path only.
+  Needs `gammarips-review` + owner. Memory `entry-mark-is-a-delayed-day-close`.
+- 🟡 **UNDEPLOYED: digest opportunity-surface section** (`dbt-runner/digest.py`). The
+  digest watched `life_status` only, so half of labeling was never checked and the dbt
+  test's 10-day threshold was the sole alarm. New section counts FILL RUNS, not calendar
+  days. Verified live. Ships with the above or on its own.
+- 🔴 **MCP `open_past_due` emits a false stall verdict daily** (separate repo, own gate).
+  No fill-cron allowance, so from midnight to 17:30 ET every weekday it tells paying
+  subscribers "this looks like a stalled fill job". Copy `opp_surface_section`'s predicate.
+  Memory `mcp-open-past-due-daily-false-stall`.
+- **P1 live 10:00 ET anchor pass — ACCEPTED, not built.** The engine already computes it
+  T+1 (`opp_entry_price` / `opp_entry_timestamp` / `opp_status`); P1 = run that collector
+  live at 10:00 and serve 3 cols on MCP `get_pool`/`get_liquidity`. Serve the RAW bar close
+  (ours carries 2% slippage). Blocked on owner call: Polygon cost, ~50 contracts/morning.
+- **Audit remaining readers of snapshot `day.*`** — the 08-07 audit scoped to `day.volume`;
+  `day.close` was a second one, live 6 weeks. Assume a third until checked.
 - 🔴 **P3 from the trader, unfixed and not fixable in code: nothing measures spread or
   dollar depth.** OI + print count are proxies for "can a subscriber get out"; MDB passed
   both at a 44.6% spread. Wanted on the candidate row + card: `spread_pct`,
