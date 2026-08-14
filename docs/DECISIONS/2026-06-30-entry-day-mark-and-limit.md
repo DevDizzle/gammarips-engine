@@ -25,6 +25,12 @@ brackets; the live trader is V7.1 GIGO at **−30%/+40%** (`STOP_PCT=0.30` /
 After the tournament has **already picked**, fetch a **fresh entry-day (~09:50 ET)
 price** for the CHOSEN contract only and publish, on the `todays_pick` doc:
 - `entry_mark`, `entry_mark_asof`, `entry_mark_source` (`last_trade|day_close|unavailable`), `entry_mark_stale`
+  - **SUPERSEDED 2026-08-14.** The enum gained `stale_day_bar` and
+    `stale_last_trade`, and a prior-session price is now REFUSED rather than
+    served. `last_trade` turned out to be unentitled on this Polygon plan, so
+    this path was `day_close` on 32 of 32 picks, `entry_mark_asof` was always
+    None, and the "~09:50 ET" label below was a hardcoded string. See
+    `docs/DECISIONS/2026-08-14-entry-mark-date-validation.md`.
 - `limit_entry_price` = mark × (1 + `ENTRY_LIMIT_BUFFER`, def 2%), tick-rounded — a marketable fair-value BUY limit
 - `do_not_chase_above` = mark × (1 + `ENTRY_CHASE_CAP`, def 8%), tick-rounded — hard "skip if it ran past this"
 - `limit_good_til` = "10:15 ET"

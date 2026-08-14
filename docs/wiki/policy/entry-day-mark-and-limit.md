@@ -13,6 +13,14 @@ After the tournament has ALREADY picked, `signal-notifier` fetches a fresh entry
 def 2%), `do_not_chase_above` = mark × (1 + `ENTRY_CHASE_CAP`, def 8%), `limit_good_til`
 "10:15 ET". This is DISPLAY only — it does not change selection or the trader.
 
+**AMENDED 2026-08-14.** `last_trade` is unentitled on this Polygon plan, so the mark is a
+delayed `day.close` and "~09:50 ET" was a hardcoded label on 32 of 32 picks (median 16.2%
+off the true 10:00 anchor). `entry_mark_source` is now
+`last_trade|day_close|stale_day_bar|stale_last_trade|unavailable`. A prior-session price is
+REFUSED: the bracket goes null and the card must print the refusal reason next to the
+overnight mid it falls back to. See [[entry-mark-date-validation]] and
+`docs/DECISIONS/2026-08-14-entry-mark-date-validation.md`.
+
 Trigger: the webapp/email had published `recommended_mid_price` (the overnight scan-time
 mark); on 2026-06-29 FCEL $27C showed $2.40 while the real entry-day price was $5.10 (weekend
 reprice) — an actively misleading entry basis. The operator-display brackets

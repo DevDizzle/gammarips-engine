@@ -733,10 +733,14 @@ def write_todays_pick_doc(
             "entry_mark_stale": mark["stale"],
             "limit_entry_price": _round_tick(em * (1 + ENTRY_LIMIT_BUFFER)) if em else None,
             "do_not_chase_above": _round_tick(em * (1 + ENTRY_CHASE_CAP)) if em else None,
-            "limit_good_til": "10:15 ET",
+            # Both of these ASSERT a live basis. With no mark there is no
+            # bracket and no limit window, so they must not keep asserting one
+            # over a row of nulls (gammarips-review 2026-08-14, non-blocking 2).
+            "limit_good_til": "10:15 ET" if em else None,
             "display_target_price": round(em * (1 + TARGET_PCT_DISPLAY), 2) if em else None,
             "display_stop_price": round(em * (1 - STOP_PCT_DISPLAY), 2) if em else None,
-            "entry_bracket_basis": "live_entry_day_mark",  # vs overnight recommended_mid_price
+            # live_entry_day_mark vs overnight recommended_mid_price.
+            "entry_bracket_basis": "live_entry_day_mark" if em else "none_refused",
         }
         doc_data.update(entry_disp)
 
@@ -1092,6 +1096,7 @@ def _entry_display_strings(entry_disp: dict | None) -> dict | None:
             asof_label = datetime.fromisoformat(asof).astimezone(est).strftime("%H:%M ET")
         except (ValueError, TypeError):
             asof_label = "time unknown"
+
     return {
         "entry": _d(entry_disp.get("entry_mark")),
         "limit": _d(entry_disp.get("limit_entry_price")),
@@ -1101,6 +1106,38 @@ def _entry_display_strings(entry_disp: dict | None) -> dict | None:
         "asof_label": asof_label,
         "stale": bool(entry_disp.get("entry_mark_stale")),
     }
+
+
+# Why a refused live mark MUST say so on the card (gammarips-review, 2026-08-14,
+# BLOCKING B1). When there is no usable entry mark the card falls back to
+# `recommended_mid_price`, the OVERNIGHT scan-time mark. That is the exact
+# number the entry-mark feature was built to escape — the FCEL 2026-06-29 card
+# showed $2.40 against a real $5.10. A silent fallback renders a normal-looking
+# pre-2026-06-30 card, so the operator cannot tell a fresh mark from a
+# 16-hour-old one, and the refusal we added to protect them becomes invisible.
+# The caveat belongs here, next to the number a wrong conclusion is drawn from.
+_MARK_REFUSAL_NOTES = {
+    "stale_day_bar": "Polygon served a PRIOR-SESSION day bar",
+    "stale_last_trade": "the only trade on the tape is from a PRIOR SESSION",
+    "unavailable": "no live price came back",
+}
+
+
+def _entry_mark_refusal_note(entry_disp: dict | None) -> str:
+    """Plain-text reason the card is showing the overnight mark, or ''.
+
+    Returned for BOTH render paths so the email and the plain-text message
+    cannot drift apart on the one line that says the number is old.
+    """
+    if not entry_disp or entry_disp.get("entry_mark") is not None:
+        return ""
+    reason = _MARK_REFUSAL_NOTES.get(
+        entry_disp.get("entry_mark_source"), "the live mark was not usable"
+    )
+    return (
+        f"OVERNIGHT scan mark — live entry mark REFUSED ({reason}). "
+        "No limit, target or stop is published. Set your own from the live book."
+    )
 
 
 def format_whatsapp_message(
@@ -1183,8 +1220,11 @@ def format_whatsapp_message(
             f"V/OI {vol_oi_str} · {money_str}\n\n"
         )
     else:
+        refusal = _entry_mark_refusal_note(entry_disp)
         contract_lines = (
-            f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}\n\n"
+            f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}\n"
+            + (f"{refusal}\n" if refusal else "")
+            + "\n"
         )
     return (
         f"*GammaRips — {entry_day.isoformat()}*\n"
@@ -1718,11 +1758,26 @@ def _fetch_entry_mark(
     if sip_ns is not None:
         try:
             asof_dt = datetime.fromtimestamp(int(sip_ns) / 1e9, tz=pytz.UTC)
+            # SAME RULE AS THE DAY BAR. A last trade from a PRIOR SESSION is a
+            # prior-session price whatever field carries it, so it is refused
+            # too. Without this the branch re-opens the hole the day the
+            # entitlement lands: an old trade would be SERVED, and the full
+            # bracket derived from it, under a merely-cosmetic (stale) tag.
+            if asof_dt.astimezone(est).date() < read_dt.date():
+                logger.warning(
+                    f"Entry mark {contract}: last trade dated "
+                    f"{asof_dt.astimezone(est).date()} < read date "
+                    f"{read_dt.date()} — prior-session trade REFUSED"
+                )
+                return {**fail, "source": "stale_last_trade", "stale": True,
+                        "status": "ok"}
             asof_iso = asof_dt.isoformat()
             age_s = (read_dt - asof_dt).total_seconds()
             stale = age_s > ENTRY_MARK_STALE_SECS
         except (TypeError, ValueError, OSError, OverflowError):
-            asof_iso, stale = None, False
+            # No usable timestamp on a real trade price: serve it, but never
+            # let it claim freshness (matches the undatable day-bar branch).
+            asof_iso, stale = None, True
     elif source == "day_close":
         # DATE-VALIDATE THE DAY BAR (2026-08-14). Same vendor semantics that
         # produced GAP-018 in `_fetch_live_oi`: Polygon serves the PRIOR
@@ -1736,23 +1791,45 @@ def _fetch_entry_mark(
         # target, stop) is derived from it and the operator places orders
         # against them. A prior-session close is therefore refused outright.
         bar_date = _day_bar_et_date(day_ns)
+
+        # SANITY BOUND, mirroring `_validate_day_bar_volume`'s use of
+        # PRINT_BAR_MAX_AGE_DAYS. Without it a vendor units change (ns -> ms is
+        # the obvious one) parses EVERY bar to 1970, every date compares older
+        # than the read date, and this function refuses 100% of marks silently
+        # and forever. A refusal is not a safe default when it is universal:
+        # the card then falls back to the overnight mark on every send. So an
+        # out-of-range date is UNDATABLE (serve + flag), never "prior session".
+        if bar_date is not None and not (
+            read_dt.date() - timedelta(days=PRINT_BAR_MAX_AGE_DAYS)
+            <= bar_date
+            <= read_dt.date()
+        ):
+            logger.warning(
+                f"Entry mark {contract}: day bar date {bar_date} outside "
+                f"[{PRINT_BAR_MAX_AGE_DAYS}d, 0d] of read {read_dt.date()} — "
+                "treating as UNDATABLE, not as a prior session"
+            )
+            bar_date = None
+
         if bar_date is None:
             # UNDATABLE: serve the price (fail-open on the value, same as the
             # print floor) but never let it claim freshness — stale=True routes
             # the card to its UNVERIFIED tag instead of a confident timestamp.
             logger.warning(
-                f"Entry mark {contract}: day bar has no parseable last_updated; "
+                f"Entry mark {contract}: day bar has no usable last_updated; "
                 "serving price as UNVERIFIED"
             )
             asof_iso, stale = None, True
         elif bar_date < read_dt.date():
             # PRIOR-SESSION BAR: refuse. entry_mark=None nulls the whole bracket
-            # rather than publishing a fabricated one.
+            # rather than publishing a fabricated one. stale=True so a consumer
+            # keying on the boolean cannot read the stalest possible result as
+            # fresh.
             logger.warning(
                 f"Entry mark {contract}: day bar dated {bar_date} < read date "
                 f"{read_dt.date()} — prior-session close REFUSED as an entry mark"
             )
-            return {**fail, "source": "stale_day_bar", "status": "ok"}
+            return {**fail, "source": "stale_day_bar", "stale": True, "status": "ok"}
         else:
             # Today's bar. Publish its REAL asof so the card stops asserting a
             # time it never measured, and let the existing staleness threshold
@@ -2422,8 +2499,13 @@ def format_email_html(
             f'<br>V/OI {vol_oi_str} · {money_str}'
         )
     else:
+        refusal = _entry_mark_refusal_note(entry_disp)
+        refusal_html = (
+            f'<br><span style="color:#c62828;">{refusal}</span>' if refusal else ""
+        )
         contract_detail_html = (
             f"Strike {strike} · DTE {dte} · Mid {mid_str} · V/OI {vol_oi_str} · {money_str}"
+            f"{refusal_html}"
             f"{liq_html}"
         )
 

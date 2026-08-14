@@ -170,6 +170,77 @@ def test_refused_mark_yields_no_bracket_at_all():
     }) is None
 
 
+# ------------------------------------------------- refusal must be VISIBLE ---
+# gammarips-review 2026-08-14, BLOCKING B1. With no usable mark the card falls
+# back to `recommended_mid_price`, the OVERNIGHT scan mark — the exact number
+# this feature exists to escape. A silent fallback renders a normal-looking
+# card, so the refusal that protects the operator becomes invisible.
+
+@pytest.mark.parametrize("source,fragment", [
+    ("stale_day_bar", "PRIOR-SESSION day bar"),
+    ("stale_last_trade", "PRIOR SESSION"),
+    ("unavailable", "no live price came back"),
+])
+def test_refusal_note_names_the_reason(source, fragment):
+    note = main._entry_mark_refusal_note({"entry_mark": None, "entry_mark_source": source})
+    assert "OVERNIGHT scan mark" in note
+    assert fragment in note
+    assert "REFUSED" in note
+
+
+def test_refusal_note_is_empty_when_a_mark_exists():
+    assert main._entry_mark_refusal_note({"entry_mark": 4.00,
+                                          "entry_mark_source": "day_close"}) == ""
+    assert main._entry_mark_refusal_note(None) == ""
+
+
+def test_unknown_source_still_produces_a_caveat():
+    """A future enum value must never render as a silent clean fallback."""
+    note = main._entry_mark_refusal_note({"entry_mark": None,
+                                          "entry_mark_source": "something_new"})
+    assert "OVERNIGHT scan mark" in note
+
+
+# ------------------------------------------------------- max-age bound (B2) ---
+
+def test_undatable_unit_change_does_not_refuse_everything():
+    """A ns->ms vendor change parses every bar to 1970.
+
+    Refusing on that would silently drop EVERY card to the overnight mark, so
+    an out-of-range date must be UNDATABLE (serve + flag), not "prior session".
+    """
+    out = _fetch(_snapshot({"close": 4.00, "last_updated": 1}))  # epoch ~1970
+    assert out["price"] == 4.00, "a unit change must not refuse 100% of marks"
+    assert out["source"] == "day_close"
+    assert out["stale"] is True
+
+
+def test_bar_dated_in_the_future_is_undatable_not_trusted():
+    future = _ns(_et(2026, 9, 30, 10, 0))
+    out = _fetch(_snapshot({"close": 4.00, "last_updated": future}))
+    assert out["price"] == 4.00
+    assert out["stale"] is True
+
+
+def test_yesterdays_bar_is_still_refused_inside_the_age_window():
+    """The bound must not weaken the refusal it guards."""
+    out = _fetch(_snapshot({"close": 2.09, "last_updated": PRIOR_BAR_NS}))
+    assert out["source"] == "stale_day_bar"
+    assert out["stale"] is True, "the stalest possible read must never read fresh"
+
+
+# ------------------------------------------- last_trade parity (non-blocking 3) ---
+
+def test_prior_session_last_trade_is_refused_too():
+    """Otherwise the entitlement landing re-opens the hole we just closed."""
+    old_ns = _ns(_et(2026, 8, 12, 15, 59))
+    out = _fetch(_snapshot({"close": 4.00, "last_updated": TODAY_BAR_NS},
+                           last_trade={"price": 2.11, "sip_timestamp": old_ns}))
+    assert out["price"] is None
+    assert out["source"] == "stale_last_trade"
+    assert out["stale"] is True
+
+
 # ------------------------------------------------------------ fail-soft ----
 
 @pytest.mark.parametrize("body", [{}, {"results": {}}, {"results": None}])

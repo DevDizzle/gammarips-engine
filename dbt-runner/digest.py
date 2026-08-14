@@ -431,6 +431,7 @@ def opp_surface_section(client: bigquery.Client) -> dict:
         ), scoped AS (
           SELECT
             o.scan_date,
+            o.opp_status,
             (o.opp_status IS NULL OR o.opp_status = 'WINDOW_OPEN') AS pending,
             IFNULL(o.opp_window_days, 3) - 1 AS need,
             (SELECT COUNT(*) FROM sessions s
@@ -439,6 +440,13 @@ def opp_surface_section(client: bigquery.Client) -> dict:
           FROM `{PROJECT_ID}.profit_scout.enriched_option_outcomes` o
           WHERE o.entry_day IS NOT NULL
             AND o.entry_day >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 120 DAY)
+            -- MIRROR the filler's queue exactly (_rows_needing_window_fill).
+            -- A row it can never pick up would otherwise read as overdue
+            -- forever, which is the phantom-backlog failure the life section
+            -- documents at length. Same reason, same fix.
+            AND o.recommended_strike IS NOT NULL
+            AND o.recommended_expiration IS NOT NULL
+            AND o.recommended_contract IS NOT NULL
         )
         SELECT
           COUNTIF(pending) AS pending_rows,
@@ -449,6 +457,12 @@ def opp_surface_section(client: bigquery.Client) -> dict:
           COUNT(DISTINCT IF(pending AND elapsed >= need + 2, scan_date, NULL)) AS overdue_dates,
           MIN(IF(pending AND elapsed >= need + 2, scan_date, NULL)) AS oldest_overdue,
           MAX(IF(NOT pending, scan_date, NULL)) AS closed_frontier,
+          -- Resolved-as-unusable, NOT filled. These rows are non-pending
+          -- forever: the MERGE guard lets a terminal status overwrite a
+          -- WINDOW_OPEN target and the filler never re-selects them. They are
+          -- invisible to `overdue` by construction, so COUNT them rather than
+          -- let the section read a clean OK over a growing dark set.
+          COUNTIF(NOT pending AND opp_status != 'OK') AS terminal_unusable,
           (SELECT max_session FROM cal) AS max_session,
           IFNULL(
             (SELECT max_session FROM cal)
@@ -479,11 +493,21 @@ def opp_surface_section(client: bigquery.Client) -> dict:
                 "runs — the opportunity-surface fill job has likely stopped. The paid MCP "
                 "serves this surface as view=\"surface\"."
             )
+            # The cron only scans scan_date BETWEEN today-10d AND today, so a row
+            # that goes overdue by more than that is permanently out of its reach.
+            # Without this line the note keeps saying "the job has likely stopped"
+            # after the job recovers, and the reader retries the wrong fix.
+            notes.append(
+                "Rows older than the cron's 10-day scan_date lookback will NOT "
+                "self-heal once it recovers — they need a manual backfill "
+                "(scripts/ledger_and_tracking/backfill_opportunity_surface.py)."
+            )
         return {
             "status": ATTENTION if notes else OK,
             "pending": int(row["pending_rows"] or 0),
             "awaiting_fill": int(row["closed_awaiting_fill"] or 0),
             "overdue": overdue,
+            "terminal_unusable": int(row["terminal_unusable"] or 0),
             "closed_frontier": str(row["closed_frontier"]) if row["closed_frontier"] else None,
             "notes": notes,
         }
@@ -651,6 +675,13 @@ def render_html(fresh: dict, cov: dict, sched: dict, life: dict, opp: dict,
                    'awaiting tonight&rsquo;s 17:30 ET fill — that is the design lag, '
                    'not a stall. Overdue counts only rows that have already missed '
                    'two fill runs.</div>')
+        # Disclose the set this check is structurally blind to, rather than let
+        # an OK badge cover it. These rows are resolved-as-unusable, never
+        # filled, and the filler will not revisit them.
+        out.append('<div style="color:#888;font-size:11px">'
+                   f'{opp.get("terminal_unusable")} row(s) resolved to a terminal '
+                   'non-OK status (NO_BARS / ERROR). They are counted as closed, '
+                   'never as overdue, and the fill job will not retry them.</div>')
         for n in opp.get("notes", []):
             out.append(f'<div style="color:#b00;font-size:12px">{n}</div>')
 
