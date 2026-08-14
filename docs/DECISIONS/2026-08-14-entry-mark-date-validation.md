@@ -1,8 +1,22 @@
 # 2026-08-14 — The entry mark was a delayed day close under a hardcoded "9:50 ET" label
 
-**Status: FIXED in code, `gammarips-review` FAIL then re-review, NOT YET DEPLOYED.**
-Display path only. No selection input changes. Supersedes the `entry_mark_source`
-enum pinned in `docs/DECISIONS/2026-06-30-entry-day-mark-and-limit.md`.
+**Status: DEPLOYED 2026-08-14, `signal-notifier-00059-ssz`.** `gammarips-review`
+FAILED the first pass (see B1 below) and PASSED the second. Display path only.
+No selection input changes. Supersedes the `entry_mark_source` enum pinned in
+`docs/DECISIONS/2026-06-30-entry-day-mark-and-limit.md`.
+
+Deployed AFTER the 09:52 ET pick on 2026-08-14 (PATH), so the change sits idle
+over the weekend and **first runs Monday 2026-08-17 09:52 ET**. Live env
+verified: `PRINT_BAR_MAX_AGE_DAYS=10` (the new age bound depends on it),
+`PRINT_VALID_AFTER_ET_MIN=590`, `OI_FLOOR=1000`, `FAILSOFT_RESTORE_MODE=none`,
+all 5 secret mounts intact.
+
+**The first real proof is Monday's card, not this deploy.** The new path only
+fires on a pick day. A card that shows the refusal note and no bracket is the
+fix working, not a regression. Three WARNING strings tell the cases apart:
+`prior-session close REFUSED`, `prior-session trade REFUSED`, and
+`outside [10d, 0d] of read`. If the third fires broadly, treat it as a Polygon
+timestamp-unit change and read "Known residual" below before touching anything.
 
 ## Problem
 

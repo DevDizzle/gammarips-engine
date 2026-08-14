@@ -115,17 +115,20 @@ impressions and ~97% of sessions).
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
-- 🔴 **UNDEPLOYED, ready: the card's entry mark (trader 08-13 P3).** `_fetch_entry_mark`
-  fell through to `day.close` on **32 of 32** picks (`last_trade` is unentitled), so
-  "@9:50 ET" was a hardcoded string, `entry_mark_stale` was structurally unreachable, and
-  a prior-session close could become an entry mark. Measured vs the engine's own 10:00
-  basis: **median 16.2% / mean 28.4% error over 27 picks**; the -30% stop lands at -11%,
-  touched **50%** same-day vs 19% intended. Fixed + 10 tests (101 pass), display-path only.
-  Needs `gammarips-review` + owner. Memory `entry-mark-is-a-delayed-day-close`.
-- 🟡 **UNDEPLOYED: digest opportunity-surface section** (`dbt-runner/digest.py`). The
-  digest watched `life_status` only, so half of labeling was never checked and the dbt
-  test's 10-day threshold was the sole alarm. New section counts FILL RUNS, not calendar
-  days. Verified live. Ships with the above or on its own.
+- 🟡 **WATCH Mon 08-17 09:52 ET — first card under the entry-mark fix.** ✅ SHIPPED 08-14
+  (`signal-notifier-00059-ssz`, `dbt-runner-00010-h26`, commits `f68af73`/`05fcc1a`/
+  `3d2b265`, `gammarips-review` PASS on the 2nd pass). `_fetch_entry_mark` fell through to
+  `day.close` on **32 of 32** picks (`last_trade` is unentitled), so "@9:50 ET" was a
+  hardcoded string, `entry_mark_stale` was unreachable, and a prior-session close could
+  become an entry mark. Measured vs the engine's own 10:00 basis: **median 16.2% / mean
+  28.4% over 27 picks**; the -30% stop lands at -11%, touched **50%** same-day vs 19%
+  intended. A card showing the refusal note and NO bracket is the fix working. Grep
+  `prior-session close REFUSED` / `prior-session trade REFUSED` / `outside [10d, 0d] of
+  read` — if the THIRD fires broadly it is a Polygon ns→ms unit change, read the
+  "Known residual" section of `docs/DECISIONS/2026-08-14-entry-mark-date-validation.md`
+  BEFORE touching anything. Memory `entry-mark-is-a-delayed-day-close`.
+  - Review's top open follow-up: the UNDATABLE branch merges "timestamp absent" with
+    "timestamp out of range"; splitting them is the cheap fix if that WARNING ever fires.
 - 🔴 **MCP `open_past_due` emits a false stall verdict daily** (separate repo, own gate).
   No fill-cron allowance, so from midnight to 17:30 ET every weekday it tells paying
   subscribers "this looks like a stalled fill job". Copy `opp_surface_section`'s predicate.
