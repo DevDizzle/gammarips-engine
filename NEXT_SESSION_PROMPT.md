@@ -7,7 +7,28 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## Active workstream — Organic growth push (owner 2026-08-13)
+## Active workstream — GTM organic push, refocused 2026-08-15
+Owner (08-15, later in the day): "let gammarips-trader do its work"; this session
+focuses on the ORGANIC GROWTH push. Plan of record stays
+`docs/GTM-ORGANIC-GROWTH-PLAN.md`, now with the verified client matrix
+(`docs/GTM-CLIENT-CONNECT-MATRIX.md`, 08-15), the reordered guide list B1-B9, the video
+series (`docs/GTM-VIDEO-SERIES.md`, E1-E6), and D4 (OAuth 2.1 on the MCP, DECIDED 08-15:
+build in anticipation, sequenced after landing + YouTube and before the live-money
+agent debut; memory `oauth-d4-decided-build-now`). State 08-15 EOD:
+webapp PR-1 (`landing/a1-harness-commands`, `2b041fca`) and PR-3
+(`landing/a2-a4-hero-connect-reorder`, rebased on PR-1: hero equation, connect tabs for
+7 clients, reorder, FAQ + /developers sync) are COMMITTED LOCALLY, not pushed; ship both
+with `/ship` from `~/workspace` (PR-3 contains PR-1). E1 full script + description +
+pinned comment are in `GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Next: guides B1 Grok + B2
+Claude Code drafts + the Firestore publish script (B9), then E2 script after the owner's
+Grok UI test. Owner: Grok UI test (header field?), record E1, YouTube channel.
+**Live-money agent lane** (real $1,000 RH agentic account, traces to BQ, `/agent` page,
+delegated): `docs/EXEC-PLANS/2026-08-15-live-agent-trace-surface-plan.md`. Lane A is the
+trader session's; lanes B/C `/agent` are queued behind the GTM push. Direct
+SendMessage to the trader session was blocked by the classifier; the owner pastes the
+one-line pointer himself.
+
+## Prior workstream — Organic growth push (owner 2026-08-13), detail still current
 **`docs/GTM-ORGANIC-GROWTH-PLAN.md` is the plan of record** (extends the 08-06
 decision; video/HN gates unchanged). Product statement LOCKED: **MCP + harness =
 agentic trading** — execution-risk data (paid MCP) + free open loop + the user's own
