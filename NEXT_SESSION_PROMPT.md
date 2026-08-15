@@ -15,10 +15,16 @@ focuses on the ORGANIC GROWTH push. Plan of record stays
 series (`docs/GTM-VIDEO-SERIES.md`, E1-E6), and D4 (OAuth 2.1 on the MCP, DECIDED 08-15:
 build in anticipation, sequenced after landing + YouTube and before the live-money
 agent debut; memory `oauth-d4-decided-build-now`). State 08-15 EOD:
-webapp PR-1 (`landing/a1-harness-commands`, `2b041fca`) and PR-3
-(`landing/a2-a4-hero-connect-reorder`, rebased on PR-1: hero equation, connect tabs for
-7 clients, reorder, FAQ + /developers sync) are COMMITTED LOCALLY, not pushed; ship both
-with `/ship` from `~/workspace` (PR-3 contains PR-1). E1 full script + description +
+webapp landing rewrite is **PR #25** (`landing/a2-a4-hero-connect-reorder`, contains
+A1; hero equation, 7-client connect tabs, reorder, facts sweep: "about 3,500 optionable
+US stocks", no ChatGPT-paid claims, title separator, em dashes). `/ship` gate run by
+the book from the engine session (content-reviewer x3, claim-skeptic x2, all findings
+fixed, build passes). **Merge was blocked by the classifier; the owner merges #25**
+(main auto-deploys). Verify: gammarips.com H1 reads "MCP + harness". Reviewer
+follow-ups queued: pre-existing em dashes on /methodology, /reports/[date] Dataset name,
+signals:60 done; `subscription-dialog.tsx` retired-copy component still imported by
+auth-modal-provider; harness README line 57 lockstep ("or any MCP client that reads
+.mcp.json"); a `< 3500` WARNING in `universe_refresh.py`. E1 full script + description +
 pinned comment are in `GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Next: guides B1 Grok + B2
 Claude Code drafts + the Firestore publish script (B9), then E2 script after the owner's
 Grok UI test. Owner: Grok UI test (header field?), record E1, YouTube channel.
