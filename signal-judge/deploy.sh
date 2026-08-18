@@ -54,7 +54,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENDOR_DIR="${SCRIPT_DIR}/_gammarips_content_vendor"
 rm -rf "${VENDOR_DIR}"
 cp -r "${SCRIPT_DIR}/../libs/gammarips_content/." "${VENDOR_DIR}"
-trap 'rm -rf "${VENDOR_DIR}"' EXIT
+
+# Stage shared trace_logger lib (mirrors enrichment-trigger). Added 2026-08-17:
+# the tournament was the last uninstrumented LLM caller, so its cost had to be
+# rebuilt from Cloud Monitoring token counts instead of read from BigQuery.
+TRACE_VENDOR_DIR="${SCRIPT_DIR}/_trace_logger_vendor"
+rm -rf "${TRACE_VENDOR_DIR}"
+cp -r "${SCRIPT_DIR}/../libs/trace_logger/." "${TRACE_VENDOR_DIR}"
+
+trap 'rm -rf "${VENDOR_DIR}" "${TRACE_VENDOR_DIR}"' EXIT
 
 # IAM-invoker only (no --allow-unauthenticated). signal-notifier and the
 # operator (smoke-test scripts) authenticate via service-account ID tokens.
@@ -74,7 +82,7 @@ gcloud run deploy signal-judge \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=10,JUDGE_PROMPT_LABEL=tournament_v1_3,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,DRY_RUN=false"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=10,JUDGE_PROMPT_LABEL=tournament_v1_3,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,TRACE_LOGGING_ENABLED=true,DRY_RUN=false"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

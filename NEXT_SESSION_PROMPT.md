@@ -142,6 +142,18 @@ impressions and ~97% of sessions).
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
+- 🟡 **LLM cost accounting fixed 08-17, DEPLOY PENDING (review gate).**
+  `libs/trace_logger/pricing.py` was stale by ~26x on `gemini-3.5-flash` and
+  `signal-judge` wrote no traces at all, so "what does the pick cost" was
+  unanswerable from BigQuery. Rates now come from the Cloud Billing Catalog, and
+  the tournament logs one row per LLM attempt with thinking folded into
+  `output_tokens`. Measured: **~$0.25/run-day** (3 calls, ~44k in / ~11k out),
+  ~24% of all Vertex spend. Three services need a redeploy for it to take effect:
+  `signal-judge` (new instrumentation + `TRACE_LOGGING_ENABLED=true`),
+  `enrichment-trigger`, `overnight-report-generator` (vendored lib only).
+  Historical `cost_usd` is NOT rewritten (owner call). See
+  `docs/DECISIONS/2026-08-17-llm-cost-accounting-fix.md`, memory
+  `vertex-cost-measurement-method`.
 - 🟡 **WATCH Mon 08-17 09:52 ET — first card under the entry-mark fix.** ✅ SHIPPED 08-14
   (`signal-notifier-00059-ssz`, `dbt-runner-00010-h26`, commits `f68af73`/`05fcc1a`/
   `3d2b265`, `gammarips-review` PASS on the 2nd pass). `_fetch_entry_mark` fell through to

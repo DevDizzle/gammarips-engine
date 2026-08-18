@@ -19,6 +19,11 @@ RUN uv sync
 COPY ./_gammarips_content_vendor/ /opt/gammarips_content/
 RUN uv pip install --no-deps /opt/gammarips_content
 
+# GammaRips shared LLM trace logger — also staged by deploy.sh. --no-deps is
+# safe: its only dependency (google-cloud-bigquery) is already in pyproject.
+COPY ./_trace_logger_vendor/ /opt/trace_logger/
+RUN uv pip install --no-deps /opt/trace_logger
+
 ARG COMMIT_SHA=""
 ENV COMMIT_SHA=${COMMIT_SHA}
 

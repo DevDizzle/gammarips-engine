@@ -34,6 +34,7 @@ import os
 import random
 import time
 from collections import Counter
+from dataclasses import dataclass
 
 import google.auth
 from google import genai
@@ -45,6 +46,19 @@ from app import tools
 from app.schemas import Candidate, RankRequest, RankResponse
 
 logger = logging.getLogger(__name__)
+
+# Shared LLM cost/usage logger -> profit_scout.llm_traces_v1. deploy.sh vendors
+# the lib into the image; it is absent in local/test runs, so the import is
+# guarded and every call site fails open. A pick must never fail because cost
+# accounting failed. Honors TRACE_LOGGING_ENABLED (default false).
+try:
+    from trace_logger import TraceLogger, TraceRecord
+
+    _trace_logger = TraceLogger()
+except Exception as _e:  # noqa: BLE001 — lib absent or BQ client unavailable
+    logger.info(f"trace logging disabled: {_e!r}")
+    _trace_logger = None
+    TraceRecord = None  # type: ignore[assignment]
 
 _, _project_id = google.auth.default()
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", _project_id or "profitscout-fida8")
@@ -203,29 +217,124 @@ def _build_prompt(report_md: str, batch: list[Candidate], quant_priors: str = ""
     )
 
 
+@dataclass(frozen=True)
+class _TraceCtx:
+    """Identity of ONE bracket call, carried only so the trace row can name it."""
+
+    run_id: str
+    scan_date: str
+    seed: int
+    rnd: int
+
+
+def _log_trace(
+    ctx: _TraceCtx | None,
+    *,
+    attempt: int,
+    batch: list[Candidate],
+    prompt: str,
+    response: object | None,
+    response_text: str | None,
+    parsed: dict | None,
+    status: str,
+    latency_ms: int,
+    error: str | None = None,
+) -> None:
+    """Write one llm_traces_v1 row for a bracket call. NEVER raises.
+
+    The tournament was the last uninstrumented LLM caller in the pipeline, so
+    its cost was invisible in BigQuery and had to be rebuilt from Cloud
+    Monitoring token counts (2026-08-17). Every ATTEMPT gets a row, retries
+    included, because a retry bills like any other call.
+
+    Runs in a worker thread (the BQ insert is synchronous), so the bracket does
+    not block on it.
+    """
+    if _trace_logger is None or TraceRecord is None or ctx is None:
+        return
+    try:
+        um = getattr(response, "usage_metadata", None)
+        in_tok = getattr(um, "prompt_token_count", None) if um else None
+        # Thinking tokens BILL as output and they dominate this call (~11k/day
+        # of thinking against ~90 tokens of JSON answer). Fold them in or the
+        # row understates the bill by an order of magnitude — the same trap
+        # enrichment hit on 2026-06-12.
+        out_c = getattr(um, "candidates_token_count", None) if um else None
+        thoughts = getattr(um, "thoughts_token_count", None) if um else None
+        out_tok = None
+        if out_c is not None or thoughts is not None:
+            out_tok = (out_c or 0) + (thoughts or 0)
+        _trace_logger.log(
+            TraceRecord(
+                service="signal_judge",
+                call_site="tournament_batch",
+                run_id=ctx.run_id,
+                scan_date=ctx.scan_date,
+                model_provider="vertex_gemini",
+                model_id=JUDGE_MODEL,
+                prompt=prompt,
+                response_text=response_text,
+                response_parsed=parsed,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                latency_ms=latency_ms,
+                status=status,
+                error=error,
+                inputs_raw=(
+                    f"prompt_version={tools.JUDGE_PROMPT_VERSION}|seed={ctx.seed}"
+                    f"|round={ctx.rnd}|attempt={attempt}|n={len(batch)}"
+                    f"|{','.join(sorted(c.ticker for c in batch))}"
+                ),
+            )
+        )
+    except Exception as e:  # noqa: BLE001 — cost accounting never breaks a pick
+        logger.warning(f"trace log skipped: {e!r}")
+
+
 async def _judge_batch(
-    client: genai.Client, report_md: str, batch: list[Candidate], quant_priors: str = ""
+    client: genai.Client,
+    report_md: str,
+    batch: list[Candidate],
+    quant_priors: str = "",
+    ctx: _TraceCtx | None = None,
 ) -> dict:
     """One bracket call over <=10 candidates -> ranked picks. Bounded retry.
-    `quant_priors` is non-empty only on the final round (see _run_bracket)."""
+    `quant_priors` is non-empty only on the final round (see _run_bracket).
+    `ctx` names the call in the cost trace — None disables the row, never the call."""
     cfg = genai_types.GenerateContentConfig(response_mime_type="application/json")
     prompt = _build_prompt(report_md, batch, quant_priors)
     valid = {c.ticker for c in batch}
     for attempt in range(1, tools.JUDGE_MAX_ATTEMPTS + 1):
+        t0 = time.monotonic()
+        r = None
+        raw = None
         try:
             r = await client.aio.models.generate_content(
                 model=JUDGE_MODEL, contents=prompt, config=cfg
             )
-            d = json.loads(r.text)
+            raw = r.text
+            d = json.loads(raw)
             if isinstance(d, list):
                 d = d[0] if d and isinstance(d[0], dict) else {}
             picks = d.get("picks") or ([d["pick"]] if d.get("pick") else [])
             picks = [p for p in picks if isinstance(p, str) and p in valid]
             if picks:
-                return {"picks": picks, "why": str(d.get("why", ""))}
+                out = {"picks": picks, "why": str(d.get("why", ""))}
+                await asyncio.to_thread(
+                    _log_trace, ctx, attempt=attempt, batch=batch, prompt=prompt,
+                    response=r, response_text=raw, parsed=out, status="ok",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                )
+                return out
             raise ValueError("no in-batch picks")
         except Exception as e:  # parse / transport / empty
             logger.warning(f"judge_batch attempt {attempt}: {e!r}")
+            await asyncio.to_thread(
+                _log_trace, ctx, attempt=attempt, batch=batch, prompt=prompt,
+                response=r, response_text=raw, parsed=None,
+                status="parse_error" if isinstance(e, ValueError) else "api_error",
+                latency_ms=int((time.monotonic() - t0) * 1000), error=repr(e)[:1000],
+            )
             if attempt == tools.JUDGE_MAX_ATTEMPTS:
                 return {"picks": [], "why": ""}
             await asyncio.sleep(1.0 * attempt)
@@ -238,10 +347,13 @@ async def _run_bracket(
     report_md: str,
     seed: int,
     quant_priors: str = "",
+    run_id: str | None = None,
+    scan_date: str | None = None,
 ) -> tuple[Candidate | None, dict[str, str], dict[str, int]]:
     """One full bracket: <=10/call, top-2 advance until 1 remains.
     Returns (winner, why_by_ticker, max_round_reached_by_ticker).
-    `quant_priors` (quant.md) is injected ONLY on the final round (k==1)."""
+    `quant_priors` (quant.md) is injected ONLY on the final round (k==1).
+    `run_id`/`scan_date` are trace identity only — absent, the calls still run."""
     rng = random.Random(seed)
     pool = list(candidates)
     reached: dict[str, int] = {c.ticker: 0 for c in candidates}
@@ -254,8 +366,13 @@ async def _run_bracket(
         k = 2 if len(pool) > BATCH else 1  # advance top-2 until the single final batch
         # Final round = the single championship batch (k==1): hand it the rulebook.
         final_priors = quant_priors if k == 1 else ""
+        ctx = (
+            _TraceCtx(run_id=run_id, scan_date=scan_date, seed=seed, rnd=rnd)
+            if run_id and scan_date
+            else None
+        )
         results = await asyncio.gather(
-            *[_judge_batch(client, report_md, b, final_priors) for b in batches]
+            *[_judge_batch(client, report_md, b, final_priors, ctx) for b in batches]
         )
         # Bug #11: a batch whose LLM call totally fails returns no picks. Don't
         # silently eliminate its members — re-queue them into the next round so a
@@ -297,9 +414,12 @@ async def _run_bracket(
     return (pool[0] if pool else None), why_by, reached
 
 
-async def run_tournament(req: RankRequest) -> tuple[Candidate | None, str, str, dict[str, int]]:
+async def run_tournament(
+    req: RankRequest, run_id: str | None = None
+) -> tuple[Candidate | None, str, str, dict[str, int]]:
     """3 independent brackets -> consensus winner.
-    Returns (winner, why, confidence, advancement_by_ticker)."""
+    Returns (winner, why, confidence, advancement_by_ticker).
+    `run_id` is carried for the cost trace only; it changes no selection logic."""
     by_ticker = {c.ticker: c for c in req.candidates}
     # single-candidate fast path (nothing to bracket)
     if len(req.candidates) == 1:
@@ -309,7 +429,13 @@ async def run_tournament(req: RankRequest) -> tuple[Candidate | None, str, str, 
     client = genai.Client(vertexai=True, location="global")
     quant_priors = tools.load_quant_md()  # injected at each bracket's final round only
     brackets = await asyncio.gather(
-        *[_run_bracket(client, req.candidates, by_ticker, req.report_md, s, quant_priors) for s in SEEDS]
+        *[
+            _run_bracket(
+                client, req.candidates, by_ticker, req.report_md, s, quant_priors,
+                run_id=run_id, scan_date=req.scan_date,
+            )
+            for s in SEEDS
+        ]
     )
     winners = [(w.ticker, why_by.get(w.ticker, "")) for w, why_by, _ in brackets if w]
     if not winners:
@@ -353,7 +479,7 @@ async def run_pipeline(req: RankRequest) -> RankResponse:
         tools.assert_no_leakage(req.scan_date, c)
 
     started = time.monotonic()
-    winner, why, confidence, advancement = await run_tournament(req)
+    winner, why, confidence, advancement = await run_tournament(req, run_id=run_id)
     latency_ms = int((time.monotonic() - started) * 1000)
 
     if winner is None:
