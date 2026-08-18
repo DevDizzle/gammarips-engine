@@ -142,17 +142,33 @@ impressions and ~97% of sessions).
 - Mid-Aug: post-06-12-era ITM check (needs ≥200 expired era rows).
 
 ## Open engineering
-- 🟡 **LLM cost accounting fixed 08-17, DEPLOY PENDING (review gate).**
-  `libs/trace_logger/pricing.py` was stale by ~26x on `gemini-3.5-flash` and
-  `signal-judge` wrote no traces at all, so "what does the pick cost" was
-  unanswerable from BigQuery. Rates now come from the Cloud Billing Catalog, and
-  the tournament logs one row per LLM attempt with thinking folded into
-  `output_tokens`. Measured: **~$0.25/run-day** (3 calls, ~44k in / ~11k out),
-  ~24% of all Vertex spend. Three services need a redeploy for it to take effect:
-  `signal-judge` (new instrumentation + `TRACE_LOGGING_ENABLED=true`),
-  `enrichment-trigger`, `overnight-report-generator` (vendored lib only).
-  Historical `cost_usd` is NOT rewritten (owner call). See
-  `docs/DECISIONS/2026-08-17-llm-cost-accounting-fix.md`, memory
+- 🔴 **NEXT: deploy the LLM cost-accounting fix. Code is committed (`a2fb621`,
+  master, NOT pushed), 58 tests pass, nothing is live yet.** Owner said 08-17
+  "we'll deploy tomorrow", so this is the first engine task of the 08-18 session.
+  Run `/deploy-service` for each (it carries the `gammarips-review` gate), in
+  this order:
+  1. `signal-judge` — the real change. New `trace_logger` wiring +
+     `TRACE_LOGGING_ENABLED=true` in `deploy.sh`, vendored lib COPY in the
+     Dockerfile. Selection logic and the prompt are UNTOUCHED
+     (`tournament_v1_3`/v10), so a diff that shows prompt movement is a mistake.
+  2. `enrichment-trigger` — no code change, redeploy only to pick up the
+     corrected vendored price table.
+  3. `overnight-report-generator` — same, no code change.
+  **Verify after the next 09:52 ET run:** `SELECT service, status, input_tokens,
+  output_tokens, cost_usd FROM profit_scout.llm_traces_v1 WHERE
+  service='signal_judge' ORDER BY created_at DESC LIMIT 10` — expect ~3 rows/day
+  (one per bracket seed), `cost_usd` NON-NULL, and the day summing to ~$0.25.
+  Zero rows means the vendored lib did not ship; NULL cost means the model id
+  missed the price table.
+  **Why:** `pricing.py` was stale ~26x on `gemini-3.5-flash` and `signal-judge`
+  wrote no traces at all, so "what does the pick cost" was unanswerable from
+  BigQuery and had to be rebuilt from Cloud Monitoring token counts. Measured:
+  **~$0.25/run-day** (3 calls, ~44k in / ~11k out, thinking is ~60% of the bill),
+  ~24% of all Vertex spend (~$21.60/30d).
+  **Owner call still open:** historical `cost_usd` is NOT rewritten. 5,305 Flash
+  rows log $1.54 against ~$40 real. The token columns were always correct, so a
+  one-shot recompute is possible if he wants the history clean.
+  Detail: `docs/DECISIONS/2026-08-17-llm-cost-accounting-fix.md`, memory
   `vertex-cost-measurement-method`.
 - 🟡 **WATCH Mon 08-17 09:52 ET — first card under the entry-mark fix.** ✅ SHIPPED 08-14
   (`signal-notifier-00059-ssz`, `dbt-runner-00010-h26`, commits `f68af73`/`05fcc1a`/
