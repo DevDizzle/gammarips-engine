@@ -7,63 +7,65 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## Active workstream — GTM organic push, refocused 2026-08-15
-Owner (08-15, later in the day): "let gammarips-trader do its work"; this session
-focuses on the ORGANIC GROWTH push. Plan of record stays
-`docs/GTM-ORGANIC-GROWTH-PLAN.md`, now with the verified client matrix
-(`docs/GTM-CLIENT-CONNECT-MATRIX.md`, 08-15), the reordered guide list B1-B9, the video
-series (`docs/GTM-VIDEO-SERIES.md`, E1-E6), and D4 (OAuth 2.1 on the MCP, DECIDED 08-15:
-build in anticipation, sequenced after landing + YouTube and before the live-money
-agent debut; memory `oauth-d4-decided-build-now`). State 08-15 EOD:
-webapp landing rewrite is **PR #25** (`landing/a2-a4-hero-connect-reorder`, contains
-A1; hero equation, 7-client connect tabs, reorder, facts sweep: "about 3,500 optionable
-US stocks", no ChatGPT-paid claims, title separator, em dashes). `/ship` gate run by
-the book from the engine session (content-reviewer x3, claim-skeptic x2, all findings
-fixed, build passes). **Merge was blocked by the classifier; the owner merges #25**
-(main auto-deploys). Verify: gammarips.com H1 reads "MCP + harness". Reviewer
-follow-ups queued: pre-existing em dashes on /methodology, /reports/[date] Dataset name,
-signals:60 done; `subscription-dialog.tsx` retired-copy component still imported by
-auth-modal-provider; harness README line 57 lockstep ("or any MCP client that reads
-.mcp.json"); a `< 3500` WARNING in `universe_refresh.py`. E1 full script + description +
-pinned comment are in `GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Next: guides B1 Grok + B2
-Claude Code drafts + the Firestore publish script (B9), then E2 script after the owner's
-Grok UI test. Owner: Grok UI test (header field?), record E1, YouTube channel.
-**Live-money agent lane** (real $1,000 RH agentic account, traces to BQ, `/agent` page,
-delegated): `docs/EXEC-PLANS/2026-08-15-live-agent-trace-surface-plan.md`. Lane A is the
-trader session's; lanes B/C `/agent` are queued behind the GTM push. Direct
-SendMessage to the trader session was blocked by the classifier; the owner pastes the
-one-line pointer himself.
+## Active workstream — OAuth 2.1 for the MCP, BUILT 2026-08-19, not live
+Owner (08-19): "We need OAuth for the gammarips-mcp server so we can run an agent
+headless in a VM." D4 pulled forward and built in one session. Memory
+`oauth-as-built-2026-08-19`; decision note (MCP repo)
+`docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`; GTM plan D4 line updated.
+- **Webapp** branch `oauth/authorization-server` (PR open, see below): gammarips.com is
+  the issuer (`/.well-known/oauth-authorization-server`, `/oauth/{authorize,consent,
+  token,register,revoke,jwks}`; CIMD + DCR, PKCE S256, RS256 1h tokens with a `tier`
+  claim from `isUserMcpEntitledAdmin`, rotating 30d refresh, `client_credentials`
+  **machine clients** on `/account` = the headless-VM path). Unit 9/9, build passes.
+- **MCP** commits `b13ba5a` (OAuth) + `1f27ed3` (cohort mirror 08-10 -> 08-13, the
+  overdue 08-17 deadline item) are **merged to `main` and pushed, NOT deployed** (the
+  classifier blocked `scripts/deploy.sh` from this session). `src/utils/oauth.py` (JWKS
+  verify, `/pro` gateway, discovery docs), `auth.py` JWT branch + `client_class` meter,
+  `SERVER_VERSION` 4.2.0. Offline tests 3/3, cohort tests 9/9. `/mcp` + keys unchanged.
+  `gammarips-review`: BLOCK on 2 webapp items (open `?redirect=`, frameable consent),
+  both fixed, PASS on the second pass.
+- **e2e with the REAL MCP SDK client** (`webapp scripts/oauth/e2e.ts`, local AS + local
+  MCP): DCR flow, Claude Code CIMD flow, machine client, free-tier user, deny, bad
+  redirect, discovery: **24/24**.
+- Infra done: Secret Manager `OAUTH_SIGNING_KEY` v1 (kid `2026-08-19`); Firestore TTL
+  on `expires_at` for the 4 `oauth_*` collections.
+- **Rollout, in order (owner clicks):** (1) `firebase login --reauth && firebase
+  apphosting:secrets:grantaccess OAUTH_SIGNING_KEY --backend=gammarips-webapp`
+  (classifier blocked the gcloud IAM binding); (2) `/ship` from `~/workspace` on webapp
+  **PR #26**, merge (main auto-deploys), verify `curl https://gammarips.com/.well-known/
+  oauth-authorization-server` and `/oauth/jwks`; (3) MCP: `cd ../gammarips-mcp && bash
+  scripts/deploy.sh` from `main` (`OAUTH_ENABLED=true` is in the script), verify
+  `curl -i https://mcp.gammarips.com/pro` = 401 + `WWW-Authenticate`, and
+  `query_outcomes(view="positions")` now reports `cohort_start` 2026-08-13; (4) add
+  `https://mcp.gammarips.com/pro` in Claude Code, `/mcp` Authenticate, call a pro tool.
+  Order (2) before (3) matters only for UX: the MCP code is safe to deploy first.
+- Until (3) is live: no guide, video, or copy may claim OAuth. Then: webapp copy PR
+  (`/developers`, `public/mcp.json`, `llms.txt`, connect tabs) via copywriter + `/ship`;
+  guides B4/B5, videos E4/E5 unblock. The VM agent's `agent-day.sh` mints a token per
+  run (`client_credentials`, recipe in the MCP README) or keeps `GAMMARIPS_MCP_KEY`.
+- Local dev gotchas graduated to memory `webapp-local-dev-adc-quota-project`.
 
-## Prior workstream — Organic growth push (owner 2026-08-13), detail still current
-**`docs/GTM-ORGANIC-GROWTH-PLAN.md` is the plan of record** (extends the 08-06
-decision; video/HN gates unchanged). Product statement LOCKED: **MCP + harness =
-agentic trading** — execution-risk data (paid MCP) + free open loop + the user's own
-agent. Audience: agent-harness users who trade options (memory
-`audience-is-claude-code-options-traders`). All new public copy in STE. Order:
-1. **🔴 NEXT: landing rewrite (plan §A) + Grok guide (§B1).** Start with A1:
-   `harness-cta.tsx:21` teaches 4 RETIRED commands; real loop is `/trade` `/review`
-   `/coach`. Then hero equation, per-client connect tabs, section reorder. Branch
-   (main auto-deploys), `gammarips-copywriter`, `/ship` from `~/workspace`.
-2. **The video** (spec v2 unchanged, `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`;
-   owner records, Gemini edit, fresh demo key, "nothing today" SHIPS) → **Show HN**
-   per `docs/GTM-DISTRIBUTION-PLAYBOOK.md`. Gates: video live AND one real
-   GA4-attributed checkout. Loop cannot run anonymously — never claim it can.
-3. **Backlinks weekly (plan §C).** NO directories (07-07 = 30-day null, decided).
-4. **Ads review ~09-01** on measured CVR, only if nonzero.
-Inputs banked 08-13: GSC assistant-name footprint = ZERO (whole cluster 8
-impressions/90d; seed "mcp options order flow server" pos 10); **Robinhood agentic
-MCP is OFFICIAL** (memory `robinhood-agentic-trading-mcp-official`); public Grok
-share demos the free-tier funnel end to end (link in plan §B1).
-Harness repo pending (plan §D2): `AGENTS.md` for Codex, "your fills close the loop"
-README section, hand-sync 4 wiki notes — sync tool `--apply` is UNSAFE (memory
-`trader-harness-sync-apply-unsafe`). Prior-session uncommitted ste100 skill commit
-rides first. **OPEN OWNER CALL: regime-rail public doctrine** — keep fail-closed
-(recommended) vs adopt his private halve-and-continue.
-
-Open verification carried from 07-30: **blog-generator deploy** — confirm revision, then
-dry-run `POST /generate {"slug":"best-mcp-servers-for-trading-and-finance","dry_run":true}`
-(now needs `-H "Authorization: Bearer $(gcloud auth print-identity-token)"`); check
-whether the 08-03 Mon cron fired or 500'd (wk15 slug).
+## GTM organic push (refocused 2026-08-15), still current
+Plan of record `docs/GTM-ORGANIC-GROWTH-PLAN.md` + `docs/GTM-CLIENT-CONNECT-MATRIX.md`
+(OAuth status note added 08-19) + `docs/GTM-VIDEO-SERIES.md`. Landing rewrite **PR #25
+MERGED 08-15**. Verify: gammarips.com H1 reads "MCP + harness". Reviewer follow-ups
+queued: pre-existing em dashes on /methodology, /reports/[date] Dataset name;
+`subscription-dialog.tsx` retired-copy component still imported by auth-modal-provider;
+harness README line 57 lockstep; a `< 3500` WARNING in `universe_refresh.py`. E1 script
+in `GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`. Next: guides B1 Grok + B2 Claude Code drafts +
+the Firestore publish script (B9), E2 script after the owner's Grok UI test. Owner: Grok
+UI test, record E1, YouTube channel. Gates unchanged: video live AND one real
+GA4-attributed checkout before Show HN; NO directories; ads review ~09-01 only if CVR
+is nonzero. Harness repo pending (plan §D2): `AGENTS.md` for Codex, "your fills close
+the loop" README section, hand-sync 4 wiki notes (sync tool `--apply` is UNSAFE, memory
+`trader-harness-sync-apply-unsafe`). **OPEN OWNER CALL: regime-rail public doctrine**
+(keep fail-closed, recommended, vs his private halve-and-continue). Open verification
+from 07-30: blog-generator deploy revision + dry-run `POST /generate` with an ID token;
+did the 08-03 Mon cron fire.
+**Live-money agent lane** (real $1,000 RH agentic account, traces to BQ, `/agent` page):
+`docs/EXEC-PLANS/2026-08-15-live-agent-trace-surface-plan.md`. Lane A = trader session;
+lanes B/C queued behind the GTM push. OAuth (above) was sequenced before this agent's
+public debut and is now built.
 
 ## SEO posture (measured 08-08)
 GRADUATED to memory `reports-are-the-seo-asset-not-ticker-pages` +
@@ -89,12 +91,12 @@ impressions and ~97% of sessions).
     correct behavior, not a break, and it now emails you the counts.
 - 🔴 **DEADLINE Mon 08-17 05:00 ET — cohort mirror drift (from the 08-12 reset).** The
   constant is mirrored in 4 places; 2 are updated (`signal-notifier/main.py`,
-  `libs/gammarips_content`, pinned by `test_cohort_pin.py`). **Still on 08-10:**
-  `gammarips-mcp/src/utils/data.py` (separate repo, own commit + review gate) and the
+  `libs/gammarips_content`, pinned by `test_cohort_pin.py`). **MCP `data.py` + prose
+  in `historical.py` / `performance_tracker.py` FIXED 08-19** (MCP main `1f27ed3`), NOT
+  deployed: rides the OAuth deploy (Active workstream step 3). **Still on 08-10:** the
   vendored copies inside x-poster + blog-generator, which need a REDEPLOY to pick the
   new value up. blog-generator's Mon 05:00 ET cron would otherwise publish a cohort
-  containing ALC, the -$312 restore pick this change repudiates. Also prose in the MCP's
-  `historical.py` and `performance_tracker.py`.
+  containing ALC, the -$312 restore pick this change repudiates.
 - 🔴 **Rotate `POLYGON_API_KEY`** (leaked 07-06, echoed 08-05 in an error body, contained,
   endpoint hotfixed `00015-t78`). Regenerate → update secret → redeploy all mounting
   services (grep deploy.sh).

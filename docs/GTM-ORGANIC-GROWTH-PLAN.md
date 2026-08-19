@@ -201,6 +201,16 @@ result and the decision is recorded. Active placements only.
   `docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`. Also add a client
   class to the `MCP_TOOL_CALL` meter so the weekly denial-by-client
   read is one query.
+  **BUILT 2026-08-19** (owner pulled it forward: "we need OAuth so we
+  can run an agent headless in a VM"). Webapp branch
+  `oauth/authorization-server` (AS: `/.well-known/oauth-authorization-server`,
+  `/oauth/{authorize,consent,token,register,revoke,jwks}`, CIMD + DCR,
+  PKCE, RS256 tokens with `tier`, rotating refresh, `client_credentials`
+  machine clients on `/account`). MCP branch `oauth/pro-endpoint`
+  (`/pro`, JWT verification, discovery docs, meter `client_class`).
+  e2e with the real MCP SDK client: 24/24. Pending: webapp `/ship` +
+  merge (owner), signing key secret, MCP deploy, then guides B4/B5 and
+  videos E4/E5 can show a person paying inside the chat client.
 - D5. Connect tabs (A3) ship the four full-paid CLI clients as
   copy-paste steps and give the chat clients a free-tier step plus
   the honest pro line from the matrix. Never invent a step.
