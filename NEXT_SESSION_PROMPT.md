@@ -7,43 +7,36 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## Active workstream — OAuth 2.1 for the MCP, BUILT 2026-08-19, not live
+## Active workstream — OAuth 2.1 for the MCP: LIVE 2026-08-19 (one rollout pending)
 Owner (08-19): "We need OAuth for the gammarips-mcp server so we can run an agent
-headless in a VM." D4 pulled forward and built in one session. Memory
+headless in a VM." D4 pulled forward, built, reviewed, shipped the same day. Memory
 `oauth-as-built-2026-08-19`; decision note (MCP repo)
-`docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`; GTM plan D4 line updated.
-- **Webapp** branch `oauth/authorization-server` (PR open, see below): gammarips.com is
-  the issuer (`/.well-known/oauth-authorization-server`, `/oauth/{authorize,consent,
-  token,register,revoke,jwks}`; CIMD + DCR, PKCE S256, RS256 1h tokens with a `tier`
-  claim from `isUserMcpEntitledAdmin`, rotating 30d refresh, `client_credentials`
-  **machine clients** on `/account` = the headless-VM path). Unit 9/9, build passes.
-- **MCP** commits `b13ba5a` (OAuth) + `1f27ed3` (cohort mirror 08-10 -> 08-13, the
-  overdue 08-17 deadline item) are **merged to `main` and pushed, NOT deployed** (the
-  classifier blocked `scripts/deploy.sh` from this session). `src/utils/oauth.py` (JWKS
-  verify, `/pro` gateway, discovery docs), `auth.py` JWT branch + `client_class` meter,
-  `SERVER_VERSION` 4.2.0. Offline tests 3/3, cohort tests 9/9. `/mcp` + keys unchanged.
-  `gammarips-review`: BLOCK on 2 webapp items (open `?redirect=`, frameable consent),
-  both fixed, PASS on the second pass.
-- **e2e with the REAL MCP SDK client** (`webapp scripts/oauth/e2e.ts`, local AS + local
-  MCP): DCR flow, Claude Code CIMD flow, machine client, free-tier user, deny, bad
-  redirect, discovery: **24/24**.
-- Infra done: Secret Manager `OAUTH_SIGNING_KEY` v1 (kid `2026-08-19`); Firestore TTL
-  on `expires_at` for the 4 `oauth_*` collections.
-- **Rollout, in order (owner clicks):** (1) `firebase login --reauth && firebase
-  apphosting:secrets:grantaccess OAUTH_SIGNING_KEY --backend=gammarips-webapp`
-  (classifier blocked the gcloud IAM binding); (2) `/ship` from `~/workspace` on webapp
-  **PR #26**, merge (main auto-deploys), verify `curl https://gammarips.com/.well-known/
-  oauth-authorization-server` and `/oauth/jwks`; (3) MCP: `cd ../gammarips-mcp && bash
-  scripts/deploy.sh` from `main` (`OAUTH_ENABLED=true` is in the script), verify
-  `curl -i https://mcp.gammarips.com/pro` = 401 + `WWW-Authenticate`, and
-  `query_outcomes(view="positions")` now reports `cohort_start` 2026-08-13; (4) add
-  `https://mcp.gammarips.com/pro` in Claude Code, `/mcp` Authenticate, call a pro tool.
-  Order (2) before (3) matters only for UX: the MCP code is safe to deploy first.
-- Until (3) is live: no guide, video, or copy may claim OAuth. Then: webapp copy PR
-  (`/developers`, `public/mcp.json`, `llms.txt`, connect tabs) via copywriter + `/ship`;
-  guides B4/B5, videos E4/E5 unblock. The VM agent's `agent-day.sh` mints a token per
-  run (`client_credentials`, recipe in the MCP README) or keeps `GAMMARIPS_MCP_KEY`.
-- Local dev gotchas graduated to memory `webapp-local-dev-adc-quota-project`.
+`docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`; owner file `~/workspace/OAUTH-ROLLOUT.txt`.
+- **Live and verified:** webapp PR #26 merged (`da272d3f`), AS metadata serves at
+  `gammarips.com/.well-known/oauth-authorization-server`. MCP `gammarips-mcp-00044-2fq`
+  (4.2.0, `OAUTH_ENABLED=true`): `/pro` 401 + `WWW-Authenticate`, PRM served, and the
+  cohort mirror fix is live (`query_outcomes view=positions` -> `cohort_start`
+  2026-08-13, 4 rows, ALC/MDB gone).
+- **Pending at handoff:** `/oauth/jwks` was 503 (key not wired: apphosting.yaml's
+  `secretEnv:` is NOT schema, see memory `apphosting-secretenv-is-dead-console-values-are-live`).
+  Fix `912d3def` on webapp main (key in `env:` + `secret:`) auto-rolling. **First check
+  next session:** `curl -s https://gammarips.com/oauth/jwks` shows `"kid":"2026-08-19"`;
+  then add `https://mcp.gammarips.com/pro` in Claude Code, `/mcp` Authenticate, call a
+  pro tool. Until jwks serves, the OAuth sign-in fails at the token step (no key).
+- Shape (do not re-derive): gammarips.com issuer, CIMD + DCR, PKCE S256, RS256 1h tokens
+  with `tier` from `isUserMcpEntitledAdmin`, rotating refresh, machine clients
+  (`client_credentials`) on `/account` = the headless-VM path; `/mcp` + API keys unchanged.
+  `gammarips-review`: BLOCK x2 (open `?redirect=`, frameable consent), fixed, PASS.
+- 🔴 **OWNER CALL (flagged once, in the txt):** the webapp's real secrets are plain
+  Firebase-Console env values and the App Hosting build log prints them (Stripe live
+  key, webhook secret, Mailgun, GA, cron, vendor keys). Move to Secret Manager refs,
+  rotate Stripe + webhook after, delete the dead `secretEnv:` block.
+- Next on this lane: webapp copy PR (`/developers`, `public/mcp.json`, `llms.txt`,
+  connect tabs) via copywriter + `/ship`; then guides B4/B5, videos E4/E5. Trader
+  session briefed (machine-client recipe in the MCP README; `agent-day.sh` can mint per
+  run or keep the key). Mark GitGuardian incident 36370105 false positive (temp-user
+  password in `scripts/oauth/e2e.ts`).
+- Local dev gotchas: memory `webapp-local-dev-adc-quota-project`.
 
 ## GTM organic push (refocused 2026-08-15), still current
 Plan of record `docs/GTM-ORGANIC-GROWTH-PLAN.md` + `docs/GTM-CLIENT-CONNECT-MATRIX.md`

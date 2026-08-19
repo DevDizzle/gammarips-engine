@@ -5,14 +5,13 @@ each guide and each video. Target server: `https://mcp.gammarips.com/mcp`,
 Streamable HTTP. Anonymous tier needs no auth. Pro tier needs
 `Authorization: Bearer gr_live_<32 hex>`.
 
-**OAuth status (2026-08-19): BUILT, NOT LIVE.** D4 is code-complete in both
-repos (webapp branch `oauth/authorization-server`, MCP branch
-`oauth/pro-endpoint`, e2e 24/24 with the real MCP SDK client). When it
-ships, the "OAuth" column becomes the paid path for every chat client:
-add `https://mcp.gammarips.com/pro`, sign in, done. Until the webapp PR
-is merged and the MCP is deployed, every line below stays true and the
-copy rules below still bind. Re-verify each client against the live
-`/pro` endpoint before any guide or video claims it.
+**OAuth status (2026-08-19 EOD): SHIPPED.** gammarips.com is the
+authorization server, the MCP serves `https://mcp.gammarips.com/pro`
+(auth required, OAuth 2.1 + PKCE, CIMD and DCR). The "OAuth" column is
+now the paid path for every chat client: add `/pro`, sign in, done. The
+lines below were verified BEFORE that; re-verify each client against the
+live `/pro` endpoint (one real sign-in per client) before any guide or
+video claims it, and rewrite the copy rules below once that is done.
 
 ## Matrix
 

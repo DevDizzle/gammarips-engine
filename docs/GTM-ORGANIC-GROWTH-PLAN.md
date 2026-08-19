@@ -208,9 +208,11 @@ result and the decision is recorded. Active placements only.
   PKCE, RS256 tokens with `tier`, rotating refresh, `client_credentials`
   machine clients on `/account`). MCP branch `oauth/pro-endpoint`
   (`/pro`, JWT verification, discovery docs, meter `client_class`).
-  e2e with the real MCP SDK client: 24/24. Pending: webapp `/ship` +
-  merge (owner), signing key secret, MCP deploy, then guides B4/B5 and
-  videos E4/E5 can show a person paying inside the chat client.
+  e2e with the real MCP SDK client: 24/24. **SHIPPED the same day:** PR #26
+  merged, MCP `gammarips-mcp-00044-2fq`; the JWKS key wiring (`912d3def`)
+  was the last rollout. Next: the webapp copy PR (`/developers`, discovery
+  files, connect tabs), then guides B4/B5 and videos E4/E5 can show a
+  person paying inside the chat client.
 - D5. Connect tabs (A3) ship the four full-paid CLI clients as
   copy-paste steps and give the chat clients a free-tier step plus
   the honest pro line from the matrix. Never invent a step.
