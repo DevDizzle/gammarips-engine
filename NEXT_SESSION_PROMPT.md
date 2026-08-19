@@ -17,12 +17,13 @@ headless in a VM." D4 pulled forward, built, reviewed, shipped the same day. Mem
   (4.2.0, `OAUTH_ENABLED=true`): `/pro` 401 + `WWW-Authenticate`, PRM served, and the
   cohort mirror fix is live (`query_outcomes view=positions` -> `cohort_start`
   2026-08-13, 4 rows, ALC/MDB gone).
-- **Pending at handoff:** `/oauth/jwks` was 503 (key not wired: apphosting.yaml's
-  `secretEnv:` is NOT schema, see memory `apphosting-secretenv-is-dead-console-values-are-live`).
-  Fix `912d3def` on webapp main (key in `env:` + `secret:`) auto-rolling. **First check
-  next session:** `curl -s https://gammarips.com/oauth/jwks` shows `"kid":"2026-08-19"`;
-  then add `https://mcp.gammarips.com/pro` in Claude Code, `/mcp` Authenticate, call a
-  pro tool. Until jwks serves, the OAuth sign-in fails at the token step (no key).
+- **LIVE and verified end to end on prod** (`scripts/oauth/e2e.ts`, AS + MCP = the real
+  hosts, real MCP SDK client): DCR, Claude Code CIMD, machine client, free-tier bounce,
+  deny, discovery = 24/24. `/oauth/jwks` serves `kid=2026-08-19`. The 503 during rollout
+  was the `secretEnv:` schema bug (memory `apphosting-secretenv-is-dead-console-values-are-live`),
+  fixed `912d3def`. **Residual (low):** the App Hosting edge mangles a literal `127.0.0.1`
+  in a query param, so a 127.0.0.1 redirect_uri 400s on prod (localhost/https fine); the
+  decision note has it, native clients should use localhost.
 - Shape (do not re-derive): gammarips.com issuer, CIMD + DCR, PKCE S256, RS256 1h tokens
   with `tier` from `isUserMcpEntitledAdmin`, rotating refresh, machine clients
   (`client_credentials`) on `/account` = the headless-VM path; `/mcp` + API keys unchanged.
