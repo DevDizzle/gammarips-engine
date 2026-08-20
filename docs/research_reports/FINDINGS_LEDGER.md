@@ -5,9 +5,45 @@
 > Start there for the current state of a lever; this file stays the **canonical evidence
 > base with the full tables and N** that each note cites — it is provenance, not the index.
 >
-> Durable evidence base. Every numeric claim in `INTELLIGENCE_BRIEF.md` and `STRATEGY_PLAYBOOK.md` should be traceable to a row in this file. Originals preserved in `_archive/research_reports_2026-04/`.
+> Durable evidence base. Every numeric claim in `INTELLIGENCE_BRIEF.md` should be traceable to a row in this file. Originals preserved in `_archive/research_reports_2026-04/`. (`STRATEGY_PLAYBOOK.md` is archived at `../archive/research_reports/`.)
+
+## Index (added 2026-08-20)
+
+Read this file by section, never whole. Status legend: **LIVE-DOCTRINE** (claim still governs), **CLOSED-NULL** (tested, dead, do not re-propose), **HISTORICAL** (V3-V5-era evidence, cited by wiki notes, not current doctrine).
+
+| Section | One-line claim | Status | Wiki note |
+|---|---|---|---|
+| §Cohort definitions | `signals_labeled_v1`: N=1,563 executed, Feb-Apr 2026, frozen V3 mechanics | HISTORICAL | — |
+| §Bracket Sweeps | 0/840 bracket variants profitable on the whole-pool cohort | LIVE-DOCTRINE | [[bracket-optimization-dead]] |
+| §Premium-Score Validation | premium_score is anti-predictive; the production filter made it worse | CLOSED-NULL | [[premium-score-anti-predictive]] |
+| §Filter Discovery | ~800 univariate filters and top pair combos; none survive bootstrap | CLOSED-NULL | — |
+| §Dead-ends — option-PnL gate discovery | five 2026-06-05 gate candidates dead; direction was the only robust lever | CLOSED-NULL | [[bullish-direction-asymmetry]] |
+| §Momentum lever + exploit falsification + pool-cap (2026-06-19) | mom_60 tilt shipped; ride-recent-winners falsified; cap-25 coverage | HISTORICAL (tilt graded retire-worthy OOS 07-28; owner kept it) | [[momentum-60d-enrichment-tilt]], [[ride-winners-mean-reverts]], [[pool-cap-coverage]] |
+| §Bootstrap Validation — `filt_rrr` autopsy | the canonical multiple-comparison failure; regime artifact, not edge | LIVE-DOCTRINE (method rule) | — |
+| §Univariate Feature Quintiles | per-feature quintile tables; `recommended_oi` is the monotonic loser | HISTORICAL | [[oi-not-quality-signal]] |
+| §Tree-Based Feature Importance | GBM and tree importance on N=1,563 is noise | HISTORICAL | — |
+| §Liquidity Findings | liquidity gating lifts the cohort to breakeven, not profit | HISTORICAL | — |
+| §Execution Mechanics | pre-Iran intraday sweep and Monte Carlo parameters | HISTORICAL | — |
+| §Scoring v2 spec | V3-era regime-aware execution spec; template only | HISTORICAL | — |
+| §Regime Context | the Feb-Apr 2026 cohort is regime-confounded (Iran shock) | LIVE-DOCTRINE (caveat) | — |
+| §Reading list / §Source mapping | literature anchors; originals-to-sections map | reference | — |
+| §2026-06-22 — Entry-timing | earlier-than-10:00 entries are a thin-tape mirage; keep 10:00 | LIVE-DOCTRINE (amended by §2026-08-19 entry hour) | [[entry-1000-et]] |
+| §2026-07-06 — ITM vs delta | the pool is delta-calibrated; zero directional edge at expiration | LIVE-DOCTRINE | [[pool-delta-calibrated]] |
+| §2026-07-06 — excursion vs IV null | path-calibrated too; the giveback is the durable finding | LIVE-DOCTRINE | [[path-calibrated-giveback]] |
+| §2026-07-06 — harvest curve | pops are late (day 2-3); every fixed-target rule is negative | LIVE-DOCTRINE | [[three-day-harvest-curve]] |
+| §2026-07-28 — pool-of-50 composition | mom_60 retire-grade OOS; delta ceiling validated; zero underlying alpha | LIVE-DOCTRINE | [[momentum-60d-enrichment-tilt]] |
+| §2026-07-28 (evening) — tradeability | ghost-pool mechanism quantified; name-level liquidity predictors unused | LIVE-DOCTRINE | [[live-oi-floor]] |
+| §2026-08-05 — trader-handoff adjudication | catalyst/ATR "inversions" refuted at scale (between-day artifact) | CLOSED-NULL | [[catalyst-atr-inversion-refuted]] |
+| §2026-08-19 — PM entry / overnight | no morning pop on tradeable contracts; the overnight hold deletes the stop | CLOSED-NULL | [[overnight-hold-breaks-the-stop]] |
+| §2026-08-19 (execution) | execution risk is exit certainty, not spread; stop fills slip one-sided | LIVE-DOCTRINE | [[execution-risk-is-exit-certainty]] |
+| §2026-08-19 (tradeable subset) | ghosts flattered the pool (-4.67% vs -9.59%); contract_score re-test FAILS | LIVE-DOCTRINE | [[ghost-rows-flatter-pool-composites]], [[contract-score-lead-dead]] |
+| §2026-08-19 (bracket sweep, tradeable) | 0/432 on the honest substrate; the ghost objection is closed | LIVE-DOCTRINE | [[bracket-optimization-dead]] |
+| §2026-08-19 (pool construction) | ghost-free pool of 50 impossible; outcome: PRINT_FLOOR_MIN=25 adopted, not yet deployed | LIVE-DOCTRINE | [[live-oi-floor]] |
+| §2026-08-19 (entry hour) | 10:00-11:00 carries the whole day's bleed; later entry is an open owner call | LIVE-DOCTRINE (owner call open) | [[first-hour-bleed]] |
 
 ---
+
+> **Era banner.** Sections from here through §Source mapping are the Feb-Apr 2026 (V3-V5, `signals_labeled_v1`) era: historical evidence that wiki notes cite, not current doctrine. The dated entries from §2026-06-22 onward are the live-ledger era.
 
 ## Cohort definitions
 
@@ -547,7 +583,7 @@ Forward paper ledger must include `is_skipped`, `skip_reason`, `VIX_at_entry`, `
 - Frozen policy during validation window
 - No loosening of filters or bracket tweaking
 
-**Status as written:** Live capital NO. Production NO. Forward paper YES. The spec was the basis for the V3 forward paper trader currently running. The Iran-window data has invalidated the EV numbers used to justify it; the architectural framework (eligibility / skip / execution / logging separation) remains useful as a template for any regime-aware v2.
+**Status as written:** Live capital NO. Production NO. Forward paper YES. The spec was the basis for the V3 forward paper trader (V3 retired 2026-04-16). The Iran-window data has invalidated the EV numbers used to justify it; the architectural framework (eligibility / skip / execution / logging separation) remains useful as a template for any regime-aware v2.
 
 Source: `_archive/research_reports_2026-04/SPEC-SCORING-V2.md`.
 
@@ -765,3 +801,575 @@ Trader-window replications confirm their measurements were accurate; the window 
 **Universe refresh EXECUTED same day (owner go):** `overnight-universe.txt` regenerated to **3,547 point-verified active optionable US common stocks** (SPCX in; CS-only criterion preserved — no ETFs/ADRs, confirmed the old list's design). All 1,780 removals point-verified legitimate: ~1,700 old names had NO listed options (never could signal — the effective universe was always ~3,450), the rest delisted/acquired (BLD, NUVL, SCVL, LC, IAC, SATS confirmed dead tickers). Old file backed up (`universe-backups/overnight-universe-2026-02-13.txt`); tool `scripts/universe/refresh_universe.py`; recurring job queued (runtime ~9 min > scanner 540s). **Vendor discovery en route: Polygon `next_url` cursor pagination silently and deterministically SKIPS rows** (RDDT dropped from the /v3/reference/tickers bulk walk while point lookups return it; /v3/reference/options/contracts bulk walk lost it too, and unfiltered limit=1000 pages of that endpoint time out server-side). Derivation therefore uses explicit keyset paging + per-name probes, removals point-verified, probe errors fail open. Production `next_url` trust (`polygon_client.py:215` Pass 2 chains, `benchmark_context.py`) flagged for completeness audit — memory `polygon-next-url-cursor-skips-rows`.
 
 Scripts (throwaway, read-only BQ): session scratchpad `opp_study.csv`, `analyze.py`, `decompose.py`, `followup.py`.
+
+---
+
+## 2026-08-19 — PM entry / "catch the morning pop": REFUTED. The morning pop does not exist on tradeable contracts, and the overnight hold breaks the stop
+
+Owner question: is it better to enter in the afternoon and catch the next morning pop, than
+to enter in the morning? Tested the live V7.1 GIGO bracket (+40% TP / -30% stop, 2%
+slippage each way, TIMEOUT > STOP > TARGET) under three entry/exit rules on the option
+premium path.
+
+- **Substrate:** `profit_scout.option_minute_paths` (the enriched-pool minute tape, day_index
+  1/2/3, regular session only). 337,264 bars, 4,292 (scan_date, contract) legs, 87 scan
+  dates, 2026-04-10 → 2026-08-17. Script:
+  `backtesting_and_research/2026-08-19_pm_entry_overnight_study.py` (read-only).
+- **Arms.** A = LIVE, enter 10:00 ET day-1, flat 15:45 ET day-1. B = PM, enter 15:45 ET
+  day-1, hold overnight, exit day-2 at 09:35 / 10:00 / 10:30 / 11:00 / 12:00 / 15:45.
+  C = CONTROL, enter 10:00 ET day-1 but hold to day-2 10:00. C separates "PM entry" from
+  "overnight hold". Cadence is one trade per day in every arm, so capital velocity is
+  approximately equal and the V7 velocity lever does not decide this comparison.
+- **Gap handling.** Options do not trade overnight, so the stop cannot execute in the gap.
+  On the first bar of a new session the stop fills at the open when the open is already
+  through it. The target stays capped at the limit price. A symmetric variant is reported
+  alongside.
+
+### Method defect caught and fixed mid-study (record it, it recurs)
+
+Version 1 of the walk carried the last seen close forward when the timeout day had no print
+near the exit time. That invented a near-flat exit (slippage only) for every illiquid leg
+and flattered whichever arm held the thinner tape. It read as PM +1.55%. The fix requires a
+real print within 15 minutes at BOTH ends of every arm. A leg with no print near its exit
+time is UNFILLABLE, not flat. Tape quality that forced this: median 11 traded minutes per
+day-2 leg out of 390, 71% of legs under 30 bars, **73% of all bars single-print
+(o==h==l==c)**, and the first day-2 print lands after 10:15 on 25% of legs.
+
+### Fill availability (15-minute tolerance, symmetric)
+
+| anchor | legs with a real print | % |
+|---|---|---|
+| within 15m of 10:00 ET day-1 | 2,017 | 47.0% |
+| within 15m of 15:45 ET day-1 | 1,793 | 41.8% |
+| **intersection (both arms fillable)** | **1,074 (64 days)** | 25.0% |
+
+Zero legs expire on day-1, so expiry does not block the overnight hold.
+
+### The premise fails on its own terms: there is no morning pop where you can trade
+
+Raw price legs, no bracket, no slippage. LIQUID = day-1 and day-2 both >= 120 traded
+minutes and premium >= $1.00 (N=103).
+
+| leg | n | mean | trim99 | median | LIQUID mean | LIQUID median |
+|---|---|---|---|---|---|---|
+| day-1 10:00 -> 15:45 (AM session) | 1,317 | -4.56% | -4.84% | -7.69% | -2.58% | -4.65% |
+| day-1 15:45 -> day-2 09:30 (GAP) | 1,411 | -0.73% | -1.02% | -0.40% | -4.43% | -5.59% |
+| day-2 09:30 -> 10:00 (MORNING POP) | 1,150 | +8.19% | +5.08% | **+0.00%** | **-3.60%** | -2.94% |
+| day-1 15:45 -> day-2 10:00 (PM total) | 1,271 | +3.48% | +2.70% | -1.44% | **-7.72%** | -12.04% |
+
+The whole-set +8.19% morning mean is two penny options: MBLY 260807C8.5 at +2,100% and CHWY
+260618C21 at +1,400%, both under $0.60. The median morning move is exactly 0.00%. By premium
+bucket the mean falls monotonically: +22.9% under $0.25, +2.8% at $2-5, +2.9% above $5. On
+liquid contracts both the overnight gap AND the first 30 minutes are NEGATIVE.
+
+### Bracketed head-to-head, paired difference vs the live arm (day-clustered bootstrap, 90% CI)
+
+| tier | n legs / days | PM -> d2 10:00 | PM -> d2 15:45 | C (AM entry, held overnight) |
+|---|---|---|---|---|
+| ALL fillable | 1,074 / 64 | +2.03% [-2.1, +6.0] | +0.93% [-3.2, +4.9] | -0.98% [-2.4, +0.3] |
+| LIQUID >=60 min/day, prem >=$0.50 | 361 / 49 | +0.61% [-5.0, +6.2] | -1.34% [-7.0, +4.0] | -1.93% [-4.3, +0.3] |
+| DEEP >=120 min/day, prem >=$1.00 | 103 / 40 | -6.45% [-17.6, +4.4] | -8.96% [-19.6, +1.1] | **-5.55% [-10.1, -1.6]** |
+| **ENTRY-KNOWABLE** day-1 >=120 min, prem >=$1.00 | 168 / 45 | -5.44% [-15.0, +4.2] | **-8.25% [-17.0, -0.2]** | **-4.87% [-8.7, -1.4]** |
+
+The sign flips with liquidity. The apparent PM gain lives only in the tier that includes
+contracts nobody can trade, which is the same thin-tape mirage the 2026-06-22 entry-timing
+study found. LIQUID and DEEP screen partly on day-2 bar count, which is not knowable at
+entry. ENTRY-KNOWABLE screens on day-1 liquidity only, so it is the tier that describes a
+rule the trader could actually run. Every PM variant is negative in it.
+
+### The decisive result is the tail, not the mean
+
+| tier | arm | mean | win% | p05 | share worse than -30% |
+|---|---|---|---|---|---|
+| ENTRY-KNOWABLE | A. LIVE 10:00 -> 15:45 d1 | -4.42% | 39.3% | **-31.4%** | 29.2% |
+| ENTRY-KNOWABLE | B. PM 15:45 -> d2 10:00 | -9.86% | 35.7% | **-53.0%** | 38.7% |
+| ENTRY-KNOWABLE | B. PM 15:45 -> d2 15:45 | -13.33% | 30.7% | -53.8% | 56.4% |
+| ENTRY-KNOWABLE | C. AM entry held to d2 10:00 | -9.29% | 36.3% | -51.3% | 52.4% |
+
+The live arm's p05 is -31.4% because the -30% stop IS the floor. Every overnight arm prints
+p05 near -53%. The stop cannot execute in the gap, so the protection the live policy pays for
+stops existing. The tail deepens by about 22 percentage points.
+
+Exit mix shifts as expected: A = TIMEOUT 55% / STOP 32% / TARGET 13%. PM -> d2 10:00 =
+TIMEOUT 48% / STOP 32% / TARGET 20%. The extra target hits are the cheap-contract pops.
+
+### Control arm C is the cleanest signal in the study
+
+C keeps the 10:00 entry and changes ONLY the hold. It is significantly worse in both liquid
+tiers (-5.55% [-10.1, -1.6] and -4.87% [-8.7, -1.4], both CIs exclude zero). **The damage is
+the overnight hold, not the entry time.** This independently re-confirms the same-day exit
+lever ([[v7-gigo-same-day-exit]]) on a substrate and a question that study never touched.
+
+### Robustness and stability
+
+Symmetric gap fills (target also fills at a gapped open, favourable to the challenger) move
+the ALL-tier paired difference to +3.45% [-0.4, +7.4], still no signal. Month means on the
+intersection set: Apr +1.08, May +3.85, Jun +4.71, Jul -0.84, Aug +1.44 (Apr/May n=5/11, do
+not read them). Tournament picks only, both arms fillable, N=14: A mean -12.69% / median
+-12.29% / win 21%; PM -> 10:00 mean -7.95% but median -16.97% and win 43%, so the mean is one
+winner; PM -> d2 15:45 mean -15.48% / median -31.40%. N=14 decides nothing.
+
+### Verdict and caveats
+
+**Do NOT move the entry to the afternoon. Do NOT hold overnight.** The premise fails twice
+over: on tradeable contracts the overnight gap is negative (-4.4%) and the morning half-hour
+is also negative (-3.6%), and the overnight hold removes the stop that caps the live policy's
+tail. Keep V7.1 as it is.
+
+Caveats. Single regime (Apr-Aug 2026, 64-45 usable days). Liquid N is small (103-168) so
+"PM is worse" carries a wide CI, but the burden of proof was on the challenger and every
+liquid-tier variant is negative on both mean and tail. No NBBO on this Polygon plan, so no
+spread model exists and no arm pays a spread, the same limit the 2026-06-22 study hit. The
+result is an entry/exit-timing finding only. It does not bear on selection.
+
+---
+
+## 2026-08-19 (execution) — Execution-risk calibration: the stop is the failure point, not the spread
+
+Owner question: what guidelines minimise EXECUTION risk for the autonomous traders? Built
+the measured mapping from the fields an agent can see at decision time to the execution
+risk they imply. Guidelines document: `docs/EXECUTION-RISK-GUIDELINES.md`. Script:
+`backtesting_and_research/2026-08-19_execution_risk_calibration.py` (read-only).
+
+**Hard constraint confirmed first: we have NO spread.** `bid`, `ask`, `mid`, `spread_pct`
+and `last_trade_price` are NULL in **all 64,550 `pool_liquidity_snapshot` reads**
+([[spread-gate-retired]]). True crossing cost is unmeasurable. Every number below is a
+print-based proxy.
+
+### Print density (day-1 tape, 4,292 legs)
+
+Median leg trades **9 minutes out of 390**. 51.7% under 10 traded minutes, 73.0% under 30,
+86.1% under 60, 94.9% under 120. Session coverage by 30-min block (share of legs printing):
+09:30-10:00 63.0% / 10:30-11:30 66.0% / 11:30-13:00 66.9% / 14:30-15:30 57.1% /
+**15:30-16:00 51.6% (thinnest block of the day)**. The live 15:45 flat exit is planned into
+the worst liquidity of the session.
+
+### Inter-print price uncertainty (the spread substitute, 114,267 steps)
+
+By gap between consecutive prints, median |move|: 1 min **1.6%**, 5-14 min 3.0%,
+15-29 min 4.2%, 30-59 min 5.6%, 60+ min **8.2%** (p90 26.7%, p99 62.7%). By the leg's
+all-day print count, median |move| between its own prints: <10 prints **6.2%** (p90 19.7%,
+median gap 40 min) falling monotonically to 200+ prints **1.5%** (p90 2.6%, gap 1 min).
+Context: median same-day peak under V7.1 is +3.8%. **On the thin half of the pool the
+uncertainty between two consecutive prints exceeds the median same-day opportunity.**
+
+### Stop reliability — the sharpest asymmetry (N=547 breach events)
+
+For every leg entered 10:00 ET whose -30% stop level breached, the realised fill against
+the intended stop:
+
+| traded minutes | legs | median | p10 | p01 | median gap before the breach |
+|---|---|---|---|---|---|
+| <10 | 48 | **-10.3%** | -24.1% | -38.5% | 89 min |
+| 10-29 | 125 | -5.1% | -23.7% | -35.1% | 18 min |
+| 30-59 | 159 | -3.0% | -11.5% | -27.7% | 10 min |
+| 60-119 | 131 | -2.5% | -8.0% | -13.0% | 4 min |
+| 120-199 | 61 | -1.7% | -6.6% | -11.2% | 2 min |
+| 200+ | 23 | -1.8% | -6.6% | -9.3% | 1 min |
+
+All legs: median **-3.1%**, p10 **-14.5%**, p01 **-30.4%**, worst **-44.0%**. **33.6% of
+stops fill more than 5% past the level, 10.1% more than 15% past.** A -30% stop on a
+sub-10-print contract is a -40% stop at median-to-p10 and a -54% stop in the tail. The
+slippage is one-sided, so it deepens the tail without touching the mean opportunity.
+
+### Prints by 10:00 ET is near-deterministic (the dominant observable)
+
+| prints by 10:00 | share of pool | P(60+ prints left) | median prints left |
+|---|---|---|---|
+| 0 | 36.6% | **0.0%** | 2 |
+| 1-2 | 26.1% | 0.5% | 5 |
+| 3-5 | 13.2% | 2.6% | 17 |
+| 6-10 | 10.2% | 13.5% | 32 |
+| 11-20 | 9.3% | 50.6% | 60 |
+| 21+ | 4.7% | **93.0%** | 138 |
+
+Roughly **14% of the pool is comfortably manageable; about 63% is effectively untradeable
+by 10:00**. Independently corroborates the 2026-07-28 ghost study (early >=5 prints ->
+96.3% finish >=50 contracts; early >=20 -> 100%) on a different label and a longer window.
+
+### Anti-heuristic: premium does NOT predict liquidity
+
+Median traded minutes by premium: <$0.50 = 12, $0.50-1 = 11, $1-2 = 13, $2-5 = 10,
+**>$5 = 6**. P(60+ minutes all day) is flat at 12-17% across every premium bucket.
+Expensive contracts print LESS. Do not use premium or name recognition as a liquidity
+proxy.
+
+### NULL RESULT — the round trip is second-order
+
+Replayed the identical V7.1 bracket on identical legs (N=1,317) under three fill
+conventions: PAPER (flat 2% each way), ADVERSE (buy entry-bar high, sell exit-bar low),
+UNCERT (pay half the leg's own median inter-print move each way). Tier drag is about 2 to 4
+points with **no clean liquidity gradient**, because a percentage bracket is
+scale-invariant: a higher entry scales the stop and the target with it. ADVERSE reads
+*better* than PAPER on thin tiers (-0.3% vs -3.4% at <10 prints) purely because
+single-print bars have h==l==c, which is the proxy going blind exactly where risk is
+highest. **Conclusion: the execution problem is not "you pay a wide spread twice", it is
+"you cannot transact when you need to."** Do not spend effort modelling round-trip spread
+cost. Caveat: this replay needs a real print at both 10:00 and 15:45, so it selects the
+most liquid members of every thin tier (the <10 cell is 70 legs).
+
+### Caveats
+
+Single regime (Apr-Aug 2026). Stop-slippage N is 547 events and only 23 in the deepest
+tier, so the tier ORDER is safe (monotonic, large) but the precise levels are not. **No
+number here is validated against a real fill** — everything comes from the trade tape, not
+from our own executions. The live Robinhood lane is the first source of real fill data; the
+first job once it accrues is to compare realised fills against these priors and re-fit.
+
+---
+
+## 2026-08-19 (tradeable subset) — The ghosts were FLATTERING the pool, not hiding it. Pool composite goes -4.67% -> -9.59% when you keep only tradeable rows. Pre-committed contract_score re-test FAILS
+
+Owner call after the execution-risk calibration: if ~63% of the pool is untradeable by
+10:00, re-score selection on the tradeable subset only. Script:
+`backtesting_and_research/2026-08-19_selection_on_tradeable_subset.py` (read-only).
+
+- **Universe:** `enriched_features_v1` (leakage-safe view) joined to `enriched_option_outcomes`
+  and to the day-1 minute tape. N=3,776 closed V7.1 same-day labels, 87 scan dates,
+  2026-04-10 to 2026-08-17, 58 tournament picks with both a label and a tape.
+- **Tradeability label is ENTRY-KNOWABLE:** count of date-validated prints by 10:00 ET.
+  TRADEABLE = 11 or more (the tier where P(60+ prints left) first exceeds 50%).
+
+### A. The result inverts the hypothesis, and the mechanism is measurement
+
+| prints by 10:00 | n | mean | 90% CI | median | win% |
+|---|---|---|---|---|---|
+| 0 | 1,158 | -2.23% | [-3.4, -1.1] | -1.96% | 27.7% |
+| 1-2 | 1,020 | -3.51% | [-5.0, -1.9] | -1.96% | 32.9% |
+| 3-5 | 564 | -5.46% | [-7.5, -3.2] | -5.60% | 39.0% |
+| 6-10 | 436 | -6.13% | [-9.3, -3.0] | -7.82% | 41.1% |
+| 11-20 | 398 | -9.81% | [-13.5, -6.3] | -14.75% | 30.2% |
+| 21+ | 200 | -9.17% | [-14.0, -3.8] | -14.62% | 33.0% |
+| **ALL** | **3,776** | **-4.67%** | [-6.4, -3.0] | -1.96% | 32.9% |
+| **TRADEABLE 11+** | **598** | **-9.59%** | [-13.4, -5.7] | -14.75% | 31.1% |
+
+Monotonic and the opposite of the prior. **The ghost rows are fabricated near-flat and drag
+the whole-pool composite toward zero.** Verified signature: **33.7% of 0-print rows carry
+the EXACT no-move return of -1.9608%** (= 1/1.02 - 1, the exit filling at the entry bar's
+own close because nothing printed in between), 20.7% of the 1-2 tier likewise, 16.8% of the
+whole pool. 0-print rows are 70.6% `illiquid_exit` and 86.0% TIMEOUT. The gradient SURVIVES
+deleting every `illiquid_exit` row (0-print -3.44% -> 21+ -9.17%), because production's own
+flag catches only 37% of ghosts (2026-07-28 rule).
+
+**Consequence: every whole-pool performance number this program has published is optimistic
+by construction.** The honest harvestable composite under V7.1 is about **-9.6%**, not -4.7%.
+
+### The ghost tier looks better only through NON-PARTICIPATION
+
+| tier | n | STOP | TARGET | TIMEOUT | mean |
+|---|---|---|---|---|---|
+| GHOST 0-2 | 2,178 | 8.8% (-39.2%) | 5.2% (+37.2%) | 86.0% (**-1.54%**) | -2.83% |
+| mid 3-10 | 1,000 | 23.8% (-36.3%) | 10.6% (+37.2%) | 65.6% (-1.60%) | -5.75% |
+| TRADEABLE 11+ | 598 | 35.8% (-34.3%) | 12.2% (+37.2%) | 52.0% (-3.56%) | -9.59% |
+
+On a ghost the bracket essentially never fires and the position exits at a stale mark worth
+-1.5%. That is not performance, it is the absence of a trade.
+
+### B. Selection ranking power on the tradeable subset: NO EVIDENCE
+
+Pooled and day-demeaned AUC vs a positive same-day return, day-clustered 90% CI, 14
+leakage-safe features x 2 methods x 2 subsets = **56 looks**. Only 3 CIs excluded 0.50
+(TRADEABLE demeaned: `overnight_score` 0.537 [0.505, 0.573], `recommended_oi` 0.545
+[0.505, 0.581], `recommended_volume` 0.542 [0.502, 0.584]). **At a 90% CI, 56 looks produce
+about 5.6 spurious exclusions by chance. Three hits is BELOW chance.** Nothing here is
+evidence of ranking power. Stripping ghosts did NOT reveal a hidden selection edge.
+
+### C. The tournament pick DOES tilt toward tradeable, and may add value
+
+Picks land on TRADEABLE (11+) **32.8%** of the time against a pool base of **15.8%** — a
+2.1x lift, which is the live OI + print floors working ([[live-oi-floor]]). But **48.2% of
+picks still land on 0-2-print contracts**, so the floors are not close to sufficient.
+
+Return, matched on the same days: pick -5.43% [-9.6, -1.2] vs pool -6.27%, **diff +0.84pp**
+(n=58). Tradeable only: pick -5.90% [-15.1, +3.4] vs pool -10.31%, **diff +4.41pp** (n=19).
+The tradeable-subset lift is the larger number but n=19 and the CI crosses zero.
+**Directional only, not a result.**
+
+### D. PRE-COMMITTED RE-TEST FAILED — contract_score era-B lead is dead
+
+The 2026-08-05 adjudication flagged one lead: cap-50-era `contract_score` AUC 0.552
+[0.515, 0.588] pooled / 0.564 day-demeaned, to be re-tested on >=15 FRESH closed-label days
+after 07-27. **The 15 days now exist (N=737) and the lead does not survive:**
+
+| feature | pooled | demeaned |
+|---|---|---|
+| `contract_score` | **0.481** [0.457, 0.505] | **0.484** [0.459, 0.510] |
+| `overnight_score` | 0.522 [0.484, 0.563] | 0.517 [0.479, 0.557] |
+| `contract_score`, TRADEABLE only (n=183) | — | 0.463 [0.389, 0.545] |
+
+Clean out-of-sample rejection of a pre-registered hypothesis. **Close it. Do not re-slice
+the cap-50 era looking for it again.**
+
+### The one constructive finding: the surface is real, the fixed bracket destroys it
+
+SAME-DAY excursion (10:00 entry incl. 2% slip -> 15:45), the correct window for V7.1. The
+3-day `opp_*` surface INVERTS this comparison, exactly as memory
+`same-day-vs-3day-window-mismatch` warns (3-day says tradeable has MORE upside, +29.5% vs
++18.3% median peak; same-day says upside is EQUAL and downside is much worse):
+
+| tier | n | median MFE | median MAE | P(MFE>=+40%) | P(MAE<=-30%) | stop:target |
+|---|---|---|---|---|---|---|
+| GHOST 0-2 | 221 | +11.3% | -14.2% | 14.9% | 20.8% | 1.39 |
+| mid 3-10 | 545 | +10.1% | -19.3% | 12.5% | 28.6% | 2.29 |
+| **TRADEABLE 11+** | 551 | **+10.6%** | **-23.2%** | **12.7%** | **37.6%** | **2.96** |
+
+A tradeable contract's median same-day best moment is **+10.6%** against a **+40%** target it
+reaches 12.7% of the time, while it visits -30% **37.6%** of the time. Unconditional
+same-day touch rates on the tradeable tier: +20% is touched **32%**, +30% 19%, +40% 13%;
+-20% 57%, -30% 38%, -40% 25%, -50% 13%.
+
+**Read this as a SHAPE, not as EV.** Touch rates ignore path order, and
+[[bracket-optimization-dead]] is settled doctrine (0/840 variants profitable in-sample AND
+out-of-sample). What is genuinely new is that the 840-variant sweep ran on
+`signals_labeled_v1`, a whole-pool cohort that this entry now shows is ~58% fabricated-flat
+rows, and no bracket work has ever been run on a tradeability-labelled subset. **That is an
+owner call, flagged once here, not a recommendation to re-run brute force.**
+
+### Caveats
+
+Single regime (Apr-Aug 2026). TRADEABLE n=598 over 51 days; the 21+ tier is 200 rows. The
+tradeability label needs a day-1 minute tape, so legs with no tape at all are absent
+entirely (they are, if anything, worse than the 0-print tier). Section C's tradeable pick
+comparison is n=19. Nothing here is validated against a real fill.
+
+---
+
+## 2026-08-19 (bracket sweep, tradeable) — 0/432 profitable. The 840-sweep verdict REPLICATES on the honest substrate. Bracket optimization is dead here too
+
+Owner call: re-run the bracket sweep on the tradeable subset, because
+[[bracket-optimization-dead]] (0/840) was measured on `signals_labeled_v1`, a whole-pool
+cohort now shown to be ~58% ghost-contaminated, where the bracket mostly never fires
+(STOP fires on 8.8% of 0-2-print rows against 35.8% on tradeable). The concern was
+legitimate. **The answer did not change.** Script:
+`backtesting_and_research/2026-08-19_bracket_sweep_tradeable.py` (read-only).
+
+- **Grid:** target x stop x same-day exit time = 9 x 8 x 6 = **432 variants**
+  (`None` disables a leg, so no-target and no-stop are both in the grid).
+- **Conventions:** production 2% slippage each way, TIMEOUT > STOP > TARGET, and a REAL
+  print required within 15 min at BOTH the entry and the exit anchor (the stale-exit rule).
+- **Protocol:** chronological 60/40 holdout, matched to the original sweep so the verdicts
+  are comparable.
+
+### Result
+
+| tier | legs | days | variants | positive full-period | positive in-sample | positive OOS | **profitable in BOTH halves** |
+|---|---|---|---|---|---|---|---|
+| TRADEABLE (11+ prints) | 591 | 50 | 432 | **0** | **0** | **0** | **0 of 432** |
+| SEMI (6+ prints) | 985 | 56 | 432 | **0** | **0** | **0** | **0 of 432** |
+
+Best in-sample config carried out-of-sample: TRADEABLE `+20% / -15% / 12:00` reads
+**-6.02%** in-sample and **-6.14%** [-8.5, -3.7] out-of-sample. SEMI `+25% / -15% / 13:00`
+reads -6.23% in-sample and -4.95% [-7.3, -2.6] out-of-sample. Stable and negative.
+
+**The grid is not noise, which makes the verdict stronger.** Rank correlation of variant
+means across the two halves is **0.575 (TRADEABLE) / 0.581 (SEMI)**. Variants order
+consistently across time. There is simply no configuration above zero to find. Contrast
+with a noise grid, where the correlation would sit near 0 and the "best" would be random.
+
+### Secondary finding: the LIVE bracket is not the argmax even inside the losing set
+
+On TRADEABLE, live V7.1 (`+40 / -30 / 15:45`) reads **-9.76%** [-13.3, -6.2]. The best
+variants read about **-6.0%**, a spread of roughly **3.7pp per trade**. Every one of the
+top 12 variants shares **stop = -15%** (the TIGHTEST stop in the grid) with a midday exit,
+and every one shows p05 = **-16.7%**, which is exactly the -15% stop plus round-trip
+slippage. Target choice barely moves the result (+20% through +50% cluster inside 0.2pp),
+which independently reproduces the earlier "no target between +30% and +60% is
+distinguishable" finding on a different substrate.
+
+**Read the boundary honestly.** The optimum sits ON the tightest-stop edge of the grid,
+which is the classic signature of an optimum that lies outside it: the extrapolation of
+"cut faster and smaller" is "do not hold the position at all." This is a
+lose-less result, not an edge, and it is the same velocity + tail-reduction lever V7
+already banked ([[exit-velocity-same-day-lever]]). **Do not read it as a proposal to
+re-cut the live bracket to -15%.**
+
+One reason not to, quantified: tightening the stop raises the stop-hit FREQUENCY, and the
+2026-08-19 execution calibration measured stop slippage at the -30% level (median -1.7% to
+-2.5% on tradeable tiers), not at -15%. A -15% stop fires far more often, so it pays that
+slippage far more often. The sweep does not model that, so its -6% is optimistic relative
+to a real -15% implementation.
+
+### What this closes and what it leaves open
+
+**CLOSED:** the ghost-contamination objection to [[bracket-optimization-dead]]. The
+doctrine now holds on both the whole-pool cohort (0/840) and the tradeability-labelled
+subset (0/432, two tiers, in-sample and out-of-sample). It is not a bracket-tuning problem
+on any substrate we have measured. Do not re-open it again without new data, not merely a
+new slice.
+
+**STILL OPEN, and it is the question that actually decides "are the picks good":** the pool
+has never been compared to a BENCHMARK. Every AUC test to date asks "can we rank WITHIN the
+50?" (answer: no). None asks "is the 50 better than 50 random optionable contracts on the
+same day?" We hold no option minute tape for non-pool contracts, so this needs a fresh
+Polygon pull (order of 20 control contracts x 87 days). Until it is run, selection quality
+versus an alternative is **unknown**, not refuted. Note the pending
+`POLYGON_API_KEY` rotation in the owner queue before any new pull.
+
+### Caveats
+
+Single regime (Apr-Aug 2026). TRADEABLE is 591 legs over 50 days, and the out-of-sample
+half is 233. The grid is same-day only, which is correct for V7.1 and is also supported by
+the 2026-08-19 overnight result. Nothing here is validated against a real fill.
+
+---
+
+## 2026-08-19 (pool construction) — The owner is right: ghosts are removable with fields we ALREADY collect. But 50 slots and a ghost-free pool cannot both hold
+
+Owner challenge: no contract in the pool of 50 should ever be a ghost, there is plenty of
+liquid supply, and the selection logic filters the good ones out. **The first two claims
+are correct in direction. The third is half right, and the supply has a hard ceiling.**
+
+### The scan-time fields that predict tradeability are ALREADY in the scanner output
+
+`overnight_signals` (204,991 rows, 89 days) carries `day_volume` (underlying share volume)
+and `call_active_strikes`. Those are the exact two NAME-level predictors the 2026-07-28
+study ranked strongest (rho +0.585 and +0.554) and called "completely unused by the
+pipeline". They are still unused for ranking. No new vendor and no new field are needed.
+
+### Validation on our own labeled pool (N=4,292 contracts, 87 days)
+
+Ghost = 2 or fewer prints by 10:00 ET. Tradeable = 11 or more.
+
+| filter | n | % GHOST | % TRADEABLE |
+|---|---|---|---|
+| **no filter (what we ship today)** | 4,292 | **62.7%** | 14.0% |
+| `und_vol>=2.5M` | 3,131 | 53.5% | 18.6% |
+| `call_active_strikes>=15` | 1,455 | 42.5% | 29.8% |
+| `recommended_oi>=1000` | 1,548 | 34.0% | 29.5% |
+| `und_vol>=2.5M AND strikes>=15` | 1,399 | 41.7% | 30.8% |
+| **`und_vol>=2.5M AND strikes>=15 AND oi>=1000`** | 593 | **11.5%** | 55.1% |
+| **`und_vol>=5M AND strikes>=25 AND oi>=2000`** | 224 | **4.0%** | 75.9% |
+| *for contrast:* `overnight_score>=7` | 1,780 | 51.6% | 19.0% |
+| *for contrast:* `contract_score>=9` | 2,291 | 59.7% | 16.5% |
+
+**The two scores we actually rank on are near-useless for tradeability** (51.6% and 59.7%
+ghost against a 62.7% base). Three fields we already collect take it to 4.0%. The owner's
+"archaic business logic" read is fair: `contract_score` picks the CONTRACT within a ticker
+and was correctly recalibrated 2026-07-28 (log-OI ramp saturating ~3000), but **nothing in
+the pipeline ranks the TICKER on liquidity**, and the ticker is where the ghost risk lives.
+
+### The ceiling: supply per day (BULLISH candidates, 88 days)
+
+| liquidity bar | median/day | p10 | min | days able to fill 50 | days able to fill 25 | ghost% |
+|---|---|---|---|---|---|---|
+| UOA>$500K only (today) | 318 | 221 | 178 | **100%** | 100% | 62.7% |
+| + `und_vol>=2.5M` + `strikes>=15` | 62 | 29 | 21 | 65% | 95% | 41.7% |
+| + `oi>=1000` | **22** | 10 | 5 | **9%** | 45% | **11.5%** |
+| `und_vol>=5M`+`strikes>=25`+`oi>=2000` | 8 | 3 | 0 | 1% | 6% | 4.0% |
+
+**A pool of 50 with no ghosts does not exist in this market on most days.** At the bar that
+gets ghosts to 11.5% the median supply is 22 names. The UOA gate is NOT the binding
+constraint at the tighter bars (identical counts with and without it) — liquidity is.
+
+### Why shrinking the pool costs nothing measurable
+
+The same session established that within-pool ranking has **no demonstrated edge**
+(14 leakage-safe features x pooled and day-demeaned AUC x 2 subsets = 56 looks, 3 CIs
+excluding 0.50 against ~5.6 expected by chance), and that the pre-registered
+`contract_score` lead **failed** its out-of-sample re-test (0.552 -> 0.481). If we cannot
+rank inside the pool, a pool of 50 that is 63% untradeable is strictly worse than a pool of
+22 that is 89% tradeable. **We give up nothing we can measure and we delete most of the
+ghost problem.**
+
+Tournament feasibility: `TOURNEY_MIN` is 8. At the `oi>=1000` bar the median day supplies
+22 and p10 supplies 10, so the tournament still runs on most days.
+[[no-liquid-candidates-no-pick]] already covers the thin-day path.
+
+### Recommended shape (owner call, NOT deployed)
+
+Rank the pool on liquidity FIRST, then apply the flow signal inside the liquid set, and let
+the pool size float instead of forcing 50. Suggested bar:
+`und_vol>=2.5M AND call_active_strikes>=15 AND recommended_oi>=1000` — 22 names/day median,
+11.5% ghost, 55.1% tradeable, a **5.5x** reduction in ghost rate against today.
+
+This is a selection-policy change. Thresholds above are fitted on 87 days in one regime
+and must be re-fit rolling.
+
+### OUTCOME (recorded 2026-08-20)
+
+The recommended admission-floor design was built the same day and lost review. The review
+found a `next_url`-lossy enumeration leg and an unreachable fail-open guard. The design was
+reverted and is NOT ADOPTED (`docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md`).
+In its place the owner adopted `PRINT_FLOOR_MIN` 1 to 25 on `signal-notifier` (2026-08-19).
+That raise is adopted but NOT YET DEPLOYED: the live Cloud Run env still reads 1 as of
+2026-08-20, and `deploy.sh` still pins 1. The evidence tables above stand unchanged.
+
+### Caveats
+
+The ghost label needs a day-1 minute tape, which exists for pool contracts only. So the
+filter is validated on contracts we DID select, not on the ones we passed over. The supply
+counts come from scanner rows and assume the passed-over names behave like the selected
+ones at the same liquidity level. That assumption is untested and is the main risk in the
+supply table.
+
+---
+
+## 2026-08-19 (entry hour) — We enter at 10:00, which is the single worst hour of the day. Every other hour is roughly flat
+
+Owner question: should we stop looking overnight and enter in the afternoon instead? The
+intraday-signal half is not answerable (we have never collected intraday flow). The
+entry-hour half is, on the day-1 tape. TRADEABLE subset only (11+ prints by 10:00, N=599),
+raw prices, no bracket, no slippage.
+
+### Where the money goes, hour by hour
+
+| window | n | mean | median | win% |
+|---|---|---|---|---|
+| **10:00 -> 11:00** | 548 | **-5.32%** | **-6.89%** | 37.2% |
+| 11:00 -> 12:00 | 511 | -0.89% | -0.86% | 45.4% |
+| 12:00 -> 13:00 | 468 | -1.32% | -1.80% | 40.4% |
+| 13:00 -> 14:00 | 439 | +0.81% | -0.34% | 44.9% |
+| 14:00 -> 14:30 | 432 | +0.07% | -0.06% | 43.3% |
+| 14:30 -> 15:00 | 433 | -0.32% | -0.68% | 43.2% |
+| 15:00 -> 15:45 | 487 | -0.80% | -1.33% | 41.1% |
+
+**The entire day's bleed is the first hour.** The other six windows sum to about -2.5%
+against the first hour's -5.32% alone. This corroborates the 2026-06-22 entry-timing study
+("at 10:00 you buy after the AM pop") on the tradeable subset it lacked power for (that
+study's liquid cell was N=55, this is N=548).
+
+### Enter at T, exit 15:45
+
+| entry | n | mean | median | win% | median MFE | median MAE | MFE:MAE |
+|---|---|---|---|---|---|---|---|
+| 10:00 | 551 | -8.66% | -10.71% | 32.5% | +12.8% | -21.6% | 0.59 |
+| 12:00 | 508 | -2.05% | -4.25% | 39.8% | +8.8% | -13.8% | 0.64 |
+| 14:00 | 472 | -1.34% | -1.91% | 41.7% | +5.8% | -8.3% | 0.70 |
+| 14:30 | 464 | -1.26% | -2.22% | 37.5% | +4.7% | -6.9% | 0.68 |
+| 15:00 | 487 | -0.80% | -1.33% | 41.1% | +3.8% | -5.4% | 0.70 |
+
+**A later entry loses less AND gains less.** The MFE:MAE ratio improves from 0.59 to 0.70,
+which is a genuine improvement in shape. But the absolute opportunity collapses with the
+window: a 15:00 entry offers a median best-moment of +3.8%, which is below the round-trip
+cost on most of this pool. **Entering later removes a self-inflicted loss. It does not
+create an edge.**
+
+### Reading
+
+Two separable claims, and only the first is actionable today:
+
+1. **The 10:00 entry is a defect worth fixing.** It is not a strategy question. We buy the
+   worst hour on the clock every day, and the 2026-06-22 study reached the same conclusion
+   from the other direction before fill realism killed its proposed fix. A midday entry
+   keeps most of the opportunity (12:00 median MFE +8.8%) and skips the -5.32% hour.
+2. **A short afternoon hold is not a strategy.** The ratio gets better and the size gets
+   too small to clear costs.
+
+Everything measured today stays consistent with one explanation:
+**a long OTM option held for a fixed window bleeds to theta and spread regardless of
+selection or bracket** ([[option-pnl-not-underlying]], [[volatility-idiosyncratic-trap]],
+[[bracket-optimization-dead]]). This is the fourth independent route to that same wall.
+
+### NOT answered
+
+Whether an INTRADAY signal (flow detected during the session, entered minutes later)
+behaves differently. We have never collected intraday flow, so there is no substrate. It
+needs a new Polygon feed tier. **Cheaper and more decisive first: the pool-versus-benchmark
+test, which is still the only experiment that would tell us whether selection carries any
+value at all.**
+
+### Caveats
+
+Single regime. Raw prices, no bracket and no slippage, so every number here is optimistic
+against a real implementation. Tradeable subset only, which is the honest one but also the
+smallest (N=599).
