@@ -40,6 +40,7 @@ Read this file by section, never whole. Status legend: **LIVE-DOCTRINE** (claim 
 | §2026-08-19 (bracket sweep, tradeable) | 0/432 on the honest substrate; the ghost objection is closed | LIVE-DOCTRINE | [[bracket-optimization-dead]] |
 | §2026-08-19 (pool construction) | ghost-free pool of 50 impossible; outcome: PRINT_FLOOR_MIN=25 deployed 2026-08-20 | LIVE-DOCTRINE | [[live-oi-floor]] |
 | §2026-08-19 (entry hour) | 10:00-11:00 carries the whole day's bleed; later entry is an open owner call | LIVE-DOCTRINE (owner call open) | [[first-hour-bleed]] |
+| §2026-08-20 (liquid-universe Phase 0) | Phase 0 audit: as-of universe exact, Arm A 58/60 days + tape 94.3%, Study 2 matching bar not reconstructible (owner amendment call) | reference (studies pending) | — |
 
 ---
 
@@ -1375,3 +1376,103 @@ value at all.**
 Single regime. Raw prices, no bracket and no slippage, so every number here is optimistic
 against a real implementation. Tradeable subset only, which is the honest one but also the
 smallest (N=599).
+
+---
+
+## 2026-08-20 (liquid-universe Phase 0) — Data audit complete. Arm A has 58 pool days of 60, tape on 94.3% of legs, the as-of universe is exact, and Study 2's matching bar is not reconstructible
+
+Owner directive: run the two pre-registered studies (`NEXT_SESSION_PROMPT.md` active
+workstream). Script: `backtesting_and_research/2026-08-20_liquid_universe_phase0_audit.py`
+(read-only). This run was the FIRST data pull for the 2026-08-20 liquid-universe spec,
+which is now frozen (errata block added to the spec, no design change). Three independent
+verifier agents re-derived every number below (spec fidelity, safety, numbers — all
+figures reproduced to the digit). The audit read no outcome column
+(`realized_return_pct` NULLness only) and made no Polygon call (key rotation pending).
+
+### A. Window and universe as-of (Study 1)
+
+- Entry days: the 60 trading days 2026-05-20..2026-08-14. Scan dates:
+  2026-05-19..2026-08-13. In-window holidays: 05-25, 06-19, 07-03.
+- The universe as-of mapping is EXACT for all 60 scan dates, not approximated:
+
+| scan-date range | n | file | names |
+|---|---|---|---|
+| 2026-05-19..2026-08-04 | 53 | `universe-backups/overnight-universe-2026-02-13.txt` | 5,230 |
+| 2026-08-05..2026-08-07 | 3 | `universe-backups/overnight-universe-2026-08-05.txt` | 3,547 |
+| 2026-08-10..2026-08-13 | 4 | `universe-backups/overnight-universe-2026-08-09.txt` | 3,546 |
+
+- Backup semantics (`src/enrichment/core/pipelines/universe_refresh.py:214`): the filename
+  date is the date the content went live. The live blob got zero writes between 2026-02-13
+  and 2026-08-05 19:46Z (generation-pinned copy proves it), so the 02-13 file is the exact
+  universe the scanner saw on all 53 early dates. Edge case: the 2026-08-05 swap happened
+  15:46 ET, before the evening scan, so scan_date=2026-08-05 correctly maps to the new file.
+
+### B. Arm A composition and tape (Study 1 window)
+
+- Pool days: 58 of 60. Missing: 2026-05-19 (full scanner outage, zero `overnight_signals`
+  rows) and 2026-06-04 (the known pipeline-bug day). Legs: 3,382. Non-BULLISH: 0. NULL
+  contracts: 0.
+- 11 days exceed 50 legs (2026-05-20..2026-06-10, max 175). The `ENRICH_TOP_N=50` cap only
+  exists from 2026-06-12. The spec's "uneven early daily counts" caveat covers these dates.
+- Minute-tape coverage: 3,190 of 3,382 legs (94.32%). 192 no-tape legs are counted, per the
+  spec, never dropped.
+- Six composition changes sit inside the window: 06-04 V6 gate teardown, 06-05 spread-gate
+  retirement, 06-12 top-50 cap creation, 06-19/22 mom_60 tilt (scan_date 2026-06-18 is
+  era-ambiguous), 07-28 LIQ_DEMOTION + contract_score recalibration, 08-05 universe era
+  boundary. Arm A is a declared mixture, per the spec.
+
+### C. VIX rail and baseline source (Study 1 window)
+
+- Rail-skip days (vix_at_scan > vix3m_at_enrich): 2026-06-05, 2026-06-10, 2026-07-29.
+  Zero NULL days. Pool rows EXIST on skip days (the rail stands down the pick, not
+  enrichment), so Arms B and C must drop these days explicitly.
+- `overnight_signals` retention: 59 dates, 1,898 / 2,310 / 2,737 names per day
+  (min/median/max), min |price_change_pct| = 1.00. This corrects the spec's "~100-300/day"
+  bullet (erratum recorded in the spec). The conclusion stands: the series is conditioned
+  on a >= 1% move, so the trailing-UOA baseline must come from Polygon.
+
+### D. H-LU1 Arm A tradeability recompute (11+ real prints by 10:00 ET)
+
+| construction | study window | 87 days 04-10..08-17 |
+|---|---|---|
+| in-study (all tape-joined legs) | 572/3,190 = 17.9% | 599/4,293 = 14.0% |
+| 08-19 parity (closed-label filter) | 571/2,978 = 19.2% | 598/3,776 = 15.8% |
+
+The parity 87-day cell reproduces the §2026-08-19 (tradeable subset) reference exactly,
+which validates the recompute. The 15.8% reference is therefore a closed-label
+construction. The study's Arm A instrument is the in-study row. The 62.6% number is a
+`PRINT_FLOOR_MIN=25` replay projection on the snapshot instrument, and that floor never
+ran live inside either study window (deployed 2026-08-20, first cohort entry 2026-08-21).
+
+### E. Study 2 feasibility finding — pre-data amendment necessary (owner call)
+
+The pool-benchmark spec (2026-08-19) requires, for control names on historical dates:
+the `oi >= 1200` bar, the delta band, and `_best_contract` reuse. Those inputs do not
+exist historically. Evidence: `pool_liquidity_snapshot` starts 2026-07-06 and holds pool
+contracts only (33 days, 1,195 contracts). Polygon OI is a current-state snapshot, and
+the 2026-08-20 sibling spec already bans snapshot proxies as lookahead. Amendment
+sequencing is clean: Phase 0 pulled counts and NULL rates only, no outcome and no
+matching result, so the amendment is not result-informed.
+
+Pre-data amendment options (the decision is the owner's):
+
+1. Reduced volume-based rule for Arms B and C only (max session-T contract volume in the
+   production DTE/OTM bands, contract volume >= 500 floor, as in the sibling spec). Arm A
+   keeps delivered contracts. This declares a contract-selection confound.
+2. The reduced rule for ALL arms, with Arm A contracts re-derived the same way. Contract
+   selection stays identical across arms, which is the spec's stated intent. Arm A is then
+   reconstructed, not as-delivered.
+3. Option 2 as primary, plus a labeled secondary read on delivered Arm A contracts.
+   RECOMMENDED.
+
+Implementation traps recorded for whoever builds the sampler: `overnight_scanner.py:407`
+computes DTE against `date.today()` — patch it per scan date. The production-effective DTE
+window is 7..45 (`fetch_options_chain` uses `max_days=45`), not the 7..90 in
+`_best_contract`. Sector is NULL on 1,178 of 4,744 pool rows (24.8%), so sector matching
+degrades. Control-name day volume needs the Polygon grouped-daily pull (shared with Study
+1) because `overnight_signals` holds >= 1% movers only.
+
+### Caveats
+
+Audit facts only — no hypothesis was tested and no outcome was measured. All Polygon
+phases of the two studies stay blocked on the `POLYGON_API_KEY` rotation (owner queue).

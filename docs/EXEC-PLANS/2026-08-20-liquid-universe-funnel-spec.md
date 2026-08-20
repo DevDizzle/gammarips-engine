@@ -8,6 +8,27 @@ is pulled, each with a dated note (same rule as
 `2026-08-19-pool-benchmark-test-spec.md`, the sibling study). After the first
 data pull, everything below is frozen.
 
+## Phase 0 errata and freeze stamp (2026-08-20, first data pull)
+
+Phase 0 ran on 2026-08-20:
+`backtesting_and_research/2026-08-20_liquid_universe_phase0_audit.py`
+(read-only, verified by three independent re-derivations, evidence in
+`docs/research_reports/FINDINGS_LEDGER.md` §2026-08-20). That run was the
+first data pull. **The spec is now FROZEN.** Phase 0 read no outcome column
+(`realized_return_pct` NULLness only) and made no Polygon call. Two factual
+corrections follow. Neither changes the design.
+
+1. **`overnight_signals` retains ~2,000-2,500 names/day, not ~100-300.**
+   The >= 1%-move conditioning is real (each populated window day has
+   min |price_change_pct| >= 1.00, and the minimum across all days is 1.00). The design conclusion stands: the series is
+   activity-conditioned, and the baseline comes from Polygon.
+2. **The 15.8% H-LU1 reference line is a closed-label construction.** The
+   2026-08-19 base also filtered to `realized_return_pct IS NOT NULL`. The
+   study's own Arm A instrument (all tape-joined legs, no label filter)
+   gives 14.0% on the same 87 days and 17.9% in this study's window. The
+   parity construction gives 19.2% in-window. Report the two constructions
+   with labels. Arm B's 80% pass mark stays Arm B's own bar.
+
 ## Question
 
 Does a liquidity-first funnel (universe → top-N liquid names → UOA measured

@@ -8,20 +8,18 @@
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
 ## Active workstream — run the two pre-registered studies
-All 08-19/08-20 work is COMMITTED AND PUSHED (research, scaffold cleanup,
-print-floor-25 deploy + cohort 2026-08-21, score floor accepted at 1:
-`docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`).
-1. **Liquid-universe funnel study** per the pre-registered
-   `docs/EXEC-PLANS/2026-08-20-liquid-universe-funnel-spec.md` (owner-directed
-   08-20). Start with Phase 0 (BigQuery-only data audit, runnable now). The
-   B-vs-C control arm answers "does relative-UOA carry signal"; executability
-   alone is NOT the profit claim. Frozen once data is pulled.
-2. **Pool-vs-benchmark test** per `docs/EXEC-PLANS/2026-08-19-pool-benchmark-test-spec.md`
-   (amended pre-data 08-20; do NOT modify after data). Share pulls + window
-   with study 1 where possible.
-Both Polygon-dependent phases wait for the POLYGON_API_KEY rotation (owner
-queue). Open owner call from the 08-19 research (flagged once, do not
-re-raise): later same-day entry ([[first-hour-bleed]]).
+1. **Liquid-universe funnel**: Phase 0 DONE 08-20, verified 3-way. Evidence:
+   `FINDINGS_LEDGER.md` §2026-08-20 + the dated audit script. Spec FROZEN
+   (errata block, no design change). Universe as-of exact for all 60 scan
+   dates, Arm A 58/60 pool days, tape 94.3%, 3 VIX-rail skip days. All
+   remaining phases are Polygon pulls, blocked on the key rotation.
+2. **Pool-vs-benchmark** (spec 2026-08-19): BLOCKED on the key rotation AND a
+   pre-data amendment owner call — `oi >= 1200`, delta matching, and
+   `_best_contract` inputs do not exist historically (options + rec in the
+   same ledger §E). No outcome data pulled, so the amendment window is still
+   clean. Share pulls + window with study 1 where possible.
+Open owner call from the 08-19 research (flagged once, do not re-raise):
+later same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM (compressed; shipped state in memory `oauth-as-built-2026-08-19`)
 - OAuth AS + `/pro` LIVE since 08-19 (e2e 24/24 on prod). Secrets owner call is
@@ -42,7 +40,10 @@ re-raise): later same-day entry ([[first-hour-bleed]]).
 
 ## Owner queue
 - 🔴 Rotate `POLYGON_API_KEY` (leaked 07-06, echoed 08-05, contained). Regenerate →
-  update secret → redeploy every mounting service (grep deploy.sh).
+  update secret → redeploy every mounting service (grep deploy.sh). Also gates
+  every remaining phase of the two studies.
+- Study 2 pre-data amendment call: ledger §2026-08-20 E, options 1-3, rec = 3.
+  One answer unblocks the control-sampler build.
 - Revoke + regenerate the 08-06 test MCP key (pasted in chat).
 - Restate the public life-surface headline before the next Fri 12:00 ET
   `x-poster-life-stats` post — 08-07 freshness-canary decision note §Consequences.
@@ -51,10 +52,6 @@ re-raise): later same-day entry ([[first-hour-bleed]]).
 - win-tracker redeploy (committed + pushed `d44a272`); verify x-poster +
   blog-generator redeployed so the vendored cohort pin carries 2026-08-21 (redeploy
   needed; blog-generator's Mon 05:00 cron exposure unchanged).
-- ✅ DONE 08-20: MCP deployed (`gammarips-mcp-00045-l7f`, auth posture verified,
-  live tool call green) and webapp PR #27 merged (`9f746f94`, owner-ordered
-  ship; rollout VERIFIED live 18:42 UTC — the FAQ no longer claims a score
-  floor of 4). The score>=4 claim is now scrubbed from every serving surface.
 - Compliance substring misfires (`'for you'`, `'guaranteed'` negations,
   `libs/gammarips_content/compliance.py:125`); `$19`/`Starter tier` not in aliases.
 - Organic Social halved (67→35 sessions/28d) — x-poster lane needs its own look.
