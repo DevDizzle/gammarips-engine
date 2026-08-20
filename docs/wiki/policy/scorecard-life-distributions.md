@@ -18,5 +18,4 @@ pool under one arbitrary exit contradicts the product's core claim ([[fixed-exit
 The honest, differentiated story is the two-sided distribution — the CEILING (peak premium
 before expiration, strongly right-skewed) and the FLOOR (hold-to-settlement, mostly ruinous
 with a fat right tail); the thesis lives in the gap. The NEGATIVE blind-buy baseline SURVIVES
-as prose — it stays load-bearing for the data-not-advice posture. Any public data-exposure
-change requires `gammarips-review` first.
+as prose — it stays load-bearing for the data-not-advice posture.

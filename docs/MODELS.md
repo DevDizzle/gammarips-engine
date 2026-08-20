@@ -1,8 +1,9 @@
 # MODELS.md — Model → Function Registry
 
-> **Last updated:** 2026-06-04 (tournament). V6 "Tournament" launched — the ranker
-> is now a randomized bracket **tournament** (`tournament_v1`, version 7) at the
-> `signal-judge` service; V5.4 retired, ledger truncated. No Scorer/Picker stages,
+> **Last updated:** 2026-08-20 (spread-field caveat, prompt-version currency). V6 "Tournament"
+> launched 2026-06-04 — the ranker is a randomized bracket **tournament** (`tournament_v1`
+> lineage, currently `tournament_v1_3` / `JUDGE_PROMPT_VERSION=10` — see `signal-judge/deploy.sh`)
+> at the `signal-judge` service; V5.4 retired, ledger truncated. No Scorer/Picker stages,
 > no `judge_v6`, no memory/rubric/composite weights. (The SELECTION picker is unchanged
 > since 2026-06-04; V7 (2026-06-17) and V7.1 (2026-06-19) changed only the trade EXIT and
 > the ledger `policy_version` — now `V7_1_TILTED_GIGO` — **not** the model registry below.)
@@ -19,7 +20,7 @@
 | Model | Role | Where it runs | Notes |
 |---|---|---|---|
 | **`gemini-3.5-flash`** | **Text generation** (the workhorse) | enrichment thesis, overnight report, x-poster text agents, blog-generator, eval **judges** | GA 2026-05-19. Global-endpoint only. Migrated from `gemini-3-flash-preview` 2026-05-27. Never touches the daily pick. |
-| **`gemini-3.1-pro-preview`** | **Reasoning** — the tournament judge (the one daily pick) | **signal-judge** `tournament_v1` | Deliberate pro tier. Runs the randomized bracket tournament: all enriched signals → 3 brackets × (batches ≤10, top-2 advance, 94→20→4→1) → consensus pick. Dead-simple prompt + daily report + per-contract JSON. **No** memory, rubric, or composite weights. Not migrated (not flash, not on cull list). |
+| **`gemini-3.1-pro-preview`** | **Reasoning** — the tournament judge (the one daily pick) | **signal-judge** `tournament_v1` | Deliberate pro tier. Runs the randomized bracket tournament: the capped tournament pool → 3 brackets × (batches ≤10, top-2 advance) → consensus pick. Dead-simple prompt + daily report + per-contract JSON. **No** memory, rubric, or composite weights. Not migrated (not flash, not on cull list). |
 | **`gemini-3-pro-image-preview`** | **Image generation** (Nano Banana Pro) | x-poster editorial/OG/brand images | Separate deprecation track from text models. |
 | **`gemini-2.5-pro`** | **Prompt tuning** (offline, not runtime) | `signal-judge/scripts/vapo_zeroshot.py` (VAPO lint) | Tuning/optimization only — never serves a live request. |
 | `gemini-3-flash-preview` | *(retired in this engine)* | only `agent-arena` (DEAD service) | On the 2026-06-15 cull list, but agent-arena is deprecated and not run. |
@@ -41,7 +42,7 @@ The general-purpose workhorse for everything that writes prose:
 - *(Flash never touches the daily pick. The Scorer stage it briefly ran was removed 2026-06-04 when the ranker first collapsed to `judge_v6` and then moved to the tournament — see history below.)*
 
 ### The daily pick (the tournament) → `gemini-3.1-pro-preview`
-- **signal-judge `tournament_v1`** (`JUDGE_MODEL`) — a randomized bracket tournament over all enriched signals: 3 brackets × (batches of ≤`TOURNEY_BATCH` ≤10 contracts, top-2 advance per batch, 94→20→4→1) → consensus pick. Dead-simple prompt, plus a daily report and a per-contract JSON verdict. **No** case-memory, **no** scoring rubric, **no** composite weights — pure head-to-head bracket. The judge call uses **google-genai direct** (`response_mime_type="application/json"`) with **bounded retry**. Stale liquidity fields (`recommended_volume`, `recommended_oi`, `volume_oi_ratio`, `call_vol_oi_ratio`, `put_vol_oi_ratio`) are **stripped** from the prompt; `recommended_spread_pct` **is** shown (now real after the 2026-06-04 #1 fix). Pro tier earns its keep on the single high-stakes decision; deliberately *not* downgraded to flash.
+- **signal-judge `tournament_v1`** (`JUDGE_MODEL`) — a randomized bracket tournament over the capped tournament pool: 3 brackets × (batches of ≤`TOURNEY_BATCH` ≤10 contracts, top-2 advance per batch) → consensus pick. Dead-simple prompt, plus a daily report and a per-contract JSON verdict. **No** case-memory, **no** scoring rubric, **no** composite weights — pure head-to-head bracket. The judge call uses **google-genai direct** (`response_mime_type="application/json"`) with **bounded retry**. Stale liquidity fields (`recommended_volume`, `recommended_oi`, `volume_oi_ratio`, `call_vol_oi_ratio`, `put_vol_oi_ratio`) are **stripped** from the prompt; `recommended_spread_pct` is not blocklisted but is **permanently NULL** on this Polygon plan (no NBBO served; spread gate retired 2026-06-05, see [[spread-gate-retired]]), so the judge never sees a spread value. Pro tier earns its keep on the single high-stakes decision; deliberately *not* downgraded to flash.
 
 ### Images → `gemini-3-pro-image-preview`
 - **x-poster** image generation (`IMAGE_MODEL`) + the `scripts/generate_*` brand/OG helpers.
@@ -66,9 +67,10 @@ The general-purpose workhorse for everything that writes prose:
 4. **Cohort attribution:** the legacy `v5_4_scorer_model` / `v5_4_picker_model` Firestore keys and the
    `signal_ranker_runs` table name were intentionally NOT renamed across the 2026-06-04 collapse +
    tournament (migration/webapp landmines). On the tournament path both `*_model` fields hold the single
-   `JUDGE_MODEL` and both `*_prompt_version` columns hold `7`. Segment EV by the `signal_ranker_runs`
+   `JUDGE_MODEL` and both `*_prompt_version` columns hold the pinned `JUDGE_PROMPT_VERSION`
+   (`10` as of `tournament_v1_3`, 2026-08-12). Segment EV by the `signal_ranker_runs`
    cohort label and **do not pool across boundaries**: **5 = two-stage Scorer/Picker, 6 = single
-   `judge_v6` (2026-06-04 only), 7 = `tournament_v1`** (live). Ledger rows carry
+   `judge_v6` (2026-06-04 only), 7 and above = the tournament era** (live). Ledger rows carry
    `policy_version='V7_1_TILTED_GIGO'` (V7.1 changed the trade EXIT, not the picker — the
    tournament selection cohort label `7` is unchanged); prior cohorts were truncated at each cutover.
 

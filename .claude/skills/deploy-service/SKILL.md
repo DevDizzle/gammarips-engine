@@ -1,6 +1,6 @@
 ---
 name: deploy-service
-description: Deploy a GammaRips Cloud Run service (forward-paper-trader, enrichment-trigger, signal-notifier, signal-judge, blog-generator, x-poster, win-tracker, and the rest). Use whenever the task is to deploy, ship, redeploy, roll back, or rotate secrets on any service in this repo. Carries the mandatory review gate, the secret-mount trap, and per-service facts.
+description: Deploy a GammaRips Cloud Run service (forward-paper-trader, enrichment-trigger, signal-notifier, signal-judge, blog-generator, x-poster, win-tracker, and the rest). Use whenever the task is to deploy, ship, redeploy, roll back, or rotate secrets on any service in this repo. Carries the secret-mount trap, per-service facts, and post-deploy verification.
 ---
 
 # Deploying a GammaRips service
@@ -8,16 +8,13 @@ description: Deploy a GammaRips Cloud Run service (forward-paper-trader, enrichm
 Every service deploys from its own directory with `bash deploy.sh`. The script is the
 source of truth for flags, env vars, and secret mounts — read it before you run it.
 
-## Gate first, always
+## Policy changes ship their docs
 
-1. **Invoke `gammarips-review` before any deploy.** Read-only auditor, and it is not
-   self-waivable. It exists to catch lookahead bias, data leakage, and unsafe live paths
-   before they reach capital.
-2. If the change touches execution policy, the Definition of Done applies: 30-day
-   out-of-sample on `forward-paper-trader` plus the review audit. See `CLAUDE.md`.
-3. If the change alters public data exposure, that is also a `gammarips-review` trigger.
-4. Policy changes need a `docs/DECISIONS/` note and a `docs/TRADING-STRATEGY.md` update
-   in the same change, not after it.
+Policy changes need a `docs/DECISIONS/` note and a `docs/TRADING-STRATEGY.md` update
+in the same change, not after it.
+
+`gammarips-review` is optional and owner-invoked. Ship, watch the logs, roll back with
+an env var.
 
 ## The secret-mount trap
 
@@ -32,9 +29,10 @@ Never hand-edit that line down.
 
 **`forward-paper-trader/`** — production paper trading, `profitscout-fida8`/`us-central1`,
 1024Mi, timeout 600, max-instances 1, `--allow-unauthenticated`.
-- Six routes: `POST /` (paper trading), `POST /cache_iv`, `POST /mark_to_market`,
+- Routes: `POST /` (paper trading), `POST /cache_iv`, `POST /mark_to_market`,
   `POST /persist_minute_paths` (token-gated), `POST /label_life_surface`,
-  `POST /label_enriched_pool`, `POST /fill_closed_windows` (token-gated, 2026-07-28).
+  `POST /label_enriched_pool`, `POST /fill_closed_windows` (token-gated, 2026-07-28),
+  `POST /load_underlying_bars` (settlement-bars cache, weekdays 17:05 ET).
 - Secret mounts: `POLYGON_API_KEY`, `POOL_LIQ_REFRESH_TOKEN` (2026-07-07),
   `FILL_WINDOWS_TOKEN` (2026-07-28). **No FMP key, ever** — FMP was deliberately removed
   from this service 2026-04-08.

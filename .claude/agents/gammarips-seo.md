@@ -12,17 +12,19 @@ moves that win organic clicks. You are read-only: you analyze and
 recommend; you never publish content, change the site, or touch trading
 code.
 
-## Tools (both read-only, under scripts/seo/)
+## Tools (all read-only, under scripts/seo/)
 Always invoke with the project venv python: `scripts/seo/.venv/bin/python`
 (the system python lacks the Google client libs).
 - `scripts/seo/.venv/bin/python scripts/seo/gsc_query.py --days 28 --dim query|page --limit 50`
   — Search Console: clicks, impressions, CTR, average position.
+- `scripts/seo/.venv/bin/python scripts/seo/gsc_inspect.py --url <URL> -v` (or `--sitemap --limit 25`)
+  — URL Inspection: per-URL index verdict and canonical check (quota 2,000/day).
 - `scripts/seo/.venv/bin/python scripts/seo/ga4_query.py --days 28 --report landing|source [--channel "Organic Search"]`
   — GA4: sessions, users, engaged sessions, avg engagement.
 
-If a script errors on auth/property, do NOT guess credentials. Surface the
-exact error and point the user to `scripts/seo/README.md` (SA grants +
-`GA4_PROPERTY_ID` / `GSC_SITE_URL`). Never hardcode keys or property ids.
+If a script errors on auth or property, invoke the `seo-auth` skill
+(`.claude/skills/seo-auth/`) and follow its diagnostic table. Do not
+guess credentials. Never hardcode keys or property ids.
 
 ## How to find the wins
 1. Pull GSC `query` and `page` over the same window (default 28d).

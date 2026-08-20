@@ -5,15 +5,14 @@ position over a trailing window. **Read-only** — never submits sitemaps,
 deletes URLs, or mutates the property. The output shape is stable so the
 SEO subagent can diff it week over week.
 
-Auth: Application Default Credentials, as eraphaelparra@gmail.com. That
-account must be added as a *user* on the Search Console property, and ADC
-must be re-consented with the webmasters.readonly scope (see README).
-Optionally run as a service account via SEO_IMPERSONATE_SA.
+Auth: service-account impersonation via SEO_IMPERSONATE_SA. The user-ADC
+path is dead (Google blocked the client ID 2026-08-08). The seo-auth
+skill is the runbook (see also scripts/seo/README.md).
 
 Run with:
     python scripts/seo/gsc_query.py --days 28 --dim query --limit 50
     python scripts/seo/gsc_query.py --days 28 --dim page
-    SEO_IMPERSONATE_SA=406581297632-compute@developer.gserviceaccount.com \
+    SEO_IMPERSONATE_SA=ga-admin@profitscout-fida8.iam.gserviceaccount.com \
         python scripts/seo/gsc_query.py --dim query
 """
 

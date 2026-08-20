@@ -28,7 +28,7 @@ Landing pages verified live (200) on 2026-07-09: `/developers`, `/pricing`, `/ho
 - **Expect a possible first-pass disapproval + appeal.** Options ads get auto-flagged even when compliant. If disapproved, appeal and state plainly: data/software vendor, no brokering, no advice, no signals. Budget a day for it.
 - **No returns/win/profit/guarantee/"signal" language, ever.** All copy in `rsa-ad-copy.txt` obeys this.
 
-> ✅ **`gammarips-review` SIGN-OFF — 2026-07-09: SHIP.** First pass returned FIX (track-record sitelink optics, premature self-certification, "Claude" vs claude.ai-web overreach, missing named negatives); all four fixed; clean re-review confirmed no new issues and all char limits/factual claims accurate. Assets are compliance-cleared. Re-run `gammarips-review` if any copy, keyword, or landing page changes.
+> ✅ **`gammarips-review` SIGN-OFF — 2026-07-09: SHIP.** First pass returned FIX (track-record sitelink optics, premature self-certification, "Claude" vs claude.ai-web overreach, missing named negatives); all four fixed; clean re-review confirmed no new issues and all char limits/factual claims accurate. Assets are compliance-cleared. A re-review after copy, keyword, or landing-page changes is optional and owner-invoked (2026-08-19).
 
 ## Measurement (for reading the test, NOT for bidding)
 - Import a **trial-start / signup** conversion from GA4 (`G-ZF0DQVQEKJ`) + Stripe.
@@ -41,7 +41,7 @@ At a ~$3.50 CPC, $20/day ≈ **5-6 clicks/day ≈ ~170 clicks/mo**. At a generou
 ## Kill metric (tie to the GTM gate)
 - **Day 14:** if AG1 (exact category) has **< ~20 impressions**, the category has no search volume yet — that's the finding. Shift the budget to AG2 adjacency, or reopen the free-surface fork (fork A) you passed on.
 - **Full-month probe (~$600):** if **zero trial starts**, do not keep spending on MCP-direct search. Options on the table: pivot to fork A (ads -> free web UI, cheaper/higher-volume, convert downstream), lean back on the free MCP directories, or pause paid entirely until the Oct 5 GTM gate.
-- Feeds the master gate in `docs/GTM-MCP-DIRECTORY-PLAN.md`: **Oct 5, 2026 — reevaluate ad spend with real CAC math only if >=1 paying sub exists.**
+- Feeds the master gate (recorded in `docs/archive/GTM-MCP-DIRECTORY-PLAN-2026-07-07.md` and memory `mcp-monetization-killswitch`): **Oct 5, 2026 — reevaluate ad spend with real CAC math only if >=1 paying sub exists.**
 
 ## Open items before you hit "Publish"
 1. **Pull Keyword Planner CPCs** for the AG1/AG2 terms. If top-of-page bids make $39/mo CAC impossible, that itself is the finding — say so before spending.

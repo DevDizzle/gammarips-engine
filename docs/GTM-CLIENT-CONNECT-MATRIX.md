@@ -27,6 +27,10 @@ video claims it, and rewrite the copy rules below once that is done.
 
 ## Copy rules that follow
 
+**PRE-OAUTH — superseded, do not quote in new copy.** OAuth `/pro`
+shipped 2026-08-19 (see the header). Rewrite these rules after the
+per-client sign-in verification pass.
+
 - The paid loop is a CLI story today: Claude Code, Codex, Cursor,
   Gemini CLI. Say so.
 - Chat clients (Claude.ai, ChatGPT, Grok) get the free tier now.

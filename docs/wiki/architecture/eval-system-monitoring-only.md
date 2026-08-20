@@ -13,7 +13,9 @@ never gates** a pick, a report, or a deploy. It exists because the production LL
 prompt/response/token-cost/latency; the eval layer logs and scores that output but does not
 sit in any decision path.
 
-Consequence: a bad eval score is a signal to investigate, not an automatic block — the gate
-that DOES matter is `gammarips-review` before a deploy. See `docs/EVAL-SYSTEM.md` for the
-current design; cost is read from Cloud Monitoring, not the trace table
-([[enrichment-cost-fix-topn-thinking-cap]]).
+Consequence: a bad eval score is a signal to investigate, not an automatic block. Nothing
+gates a deploy (`gammarips-review` is optional and owner-invoked since 2026-08-19). See
+`docs/EVAL-SYSTEM.md` for the current design. Cost caveat: `llm_traces_v1.cost_usd` is
+trustworthy only for rows from 2026-08-17 onward. For earlier rows read Cloud Monitoring
+`token_count` instead ([[llm-cost-from-billing-catalog]],
+[[enrichment-cost-fix-topn-thinking-cap]]).

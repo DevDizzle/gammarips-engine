@@ -19,3 +19,10 @@ in [[v7-1-tilted-gigo-live-policy]]. **BUT it has ZERO edge under the live same-
 exit** ([[v7-gigo-same-day-exit]]); the effect lives on a multi-day hold, and it decayed
 +16% → +1.7% on the newest slice. Treat as **proposer-only / fragile**: never load-bearing
 for a same-day trade; a forward 3-day label arm is accruing confirmation.
+
+**Amended 2026-08-20 (07-28 outcome).** The 2026-07-28 pool-composition study graded the
+tilt retire-worthy out of sample. The owner overrode that grade and kept the tilt (owner
+call 2026-07-28). The question is SETTLED until the live cohort reaches N≥30 closed
+trades from the current cohort start (`LIVE_COHORT_START_DATE` in
+`signal-notifier/main.py`) or the tilt underperforms. Do not re-raise before then. See
+FINDINGS_LEDGER §2026-07-28 (pool-of-50 composition hunt).

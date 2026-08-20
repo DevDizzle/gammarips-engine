@@ -16,5 +16,4 @@ This is why point-in-time discipline is enforced everywhere upstream: technicals
 are bounded to `scan_date` ([[pipeline-bug-hunt-2026-06-04]]), the regime feature is
 as-of scan_date close in the research substrate ([[regime-scan-date-leakage-fix]]), and
 session-frozen OI/volume are walled off from the judge
-([[oi-volume-session-frozen-walled-off]]). The leakage-safety audit is never owner-waivable
-(the 30-day-OOS ceremony is).
+([[oi-volume-session-frozen-walled-off]]). The leakage-safety audit is never owner-waivable.

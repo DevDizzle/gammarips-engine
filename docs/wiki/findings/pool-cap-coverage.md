@@ -13,5 +13,10 @@ of 50 almost never binds (>50 candidates on only 4/46 days). So the [[tourney-po
 can safely shrink **50→25**, roughly halving grounded-enrichment + tournament LLM cost.
 
 This is a ceiling test (does the winner survive the cap), NOT a test of pick quality inside
-the pool. The flip to 25 was PENDING behind the momentum-tilt's clean N≥15 read at the time
-of writing; the current effective cap is still 50.
+the pool. The effective cap at enrichment remains 50 (`ENRICH_TOP_N=50`). The old gating
+condition (the momentum-tilt's clean N≥15 read) is obsolete: the tilt question settled by
+owner override on 2026-07-28 ([[momentum-60d-enrichment-tilt]]). The 2026-08-19 cap-20
+admission-floor proposal was reviewed and NOT adopted (superseded the same day by the
+notifier print-floor raise; see the status header of
+docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md). The ceiling evidence in
+this note still stands.

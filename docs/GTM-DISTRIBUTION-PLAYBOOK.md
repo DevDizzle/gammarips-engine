@@ -1,8 +1,10 @@
 # GTM: Distribution playbook (the one-liner, Show HN, and where the link goes)
 
 Status: LIVE (2026-08-08). Operationalizes `docs/DECISIONS/2026-08-06-growth-sequence-video-hn-ads.md`.
+Master plan: `docs/GTM-ORGANIC-GROWTH-PLAN.md` (this doc covers Show HN
+mechanics + the surface list only).
 Companion: `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md` (the video), and the
-30-day null result logged in `docs/GTM-MCP-DIRECTORY-PLAN.md`.
+30-day null result logged in `docs/archive/GTM-MCP-DIRECTORY-PLAN-2026-07-07.md`.
 
 ## The core insight this playbook exists to preserve
 

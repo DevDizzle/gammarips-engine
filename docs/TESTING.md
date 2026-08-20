@@ -37,9 +37,5 @@ Provide a minimal validation checklist for changes to GammaRips execution policy
 ### 6. Outcome tracking sanity
 - verify downstream win tracking still resolves against the chosen ledger target and contract identity fields
 
-## Recommended first-morning review
-The current `forward-paper-trader/main.py` should get a deliberate cleanup review before it is trusted. Focus on:
-- table naming
-- policy metadata
-- secret hygiene
-- skip-reason correctness
+## Deploys
+For the deploy-time checklist, run the `/deploy-service` skill.

@@ -7,8 +7,9 @@ see `docs/DECISIONS/2026-04-09-eval-system-v1.md` for the posture.
 ## Architecture at a glance
 
 ```
-4 LLM-producing services (instrumented via libs/trace_logger)
-  enrichment-trigger, agent-arena, overnight-report-generator
+LLM-producing services (instrumented via libs/trace_logger)
+  enrichment-trigger, overnight-report-generator, signal-judge
+  (agent-arena is dead — frozen 2026-05-04; its old traces remain)
          │
          ▼
 profit_scout.llm_traces_v1   (append-only, one row per LLM call)
@@ -36,13 +37,18 @@ for the authoritative schema.
 
 Key columns:
 - `trace_id` — uuid4, primary key
-- `service` — `enrichment`, `agent_arena`, `report_generator`
+- `service` — `enrichment`, `report_generator`, `signal_judge` (`agent_arena` in historical rows only)
 - `call_site` — e.g. `fetch_and_analyze_news`, `round1_pick_claude`
 - `run_id` — correlates all traces in one service invocation
 - `prompt`, `response_text`, `response_parsed` — full payload (no redaction)
 - `prompt_hash`, `inputs_hash` — sha256 for drift detection
 - `input_tokens`, `output_tokens`, `latency_ms`, `cost_usd`
 - `status` — `ok` | `parse_error` | `api_error` | `timeout`
+
+**Cost caveat:** `cost_usd` is trustworthy only for rows from **2026-08-17**
+onward. Earlier rows used a stale price table (20-30x low). See
+`docs/DECISIONS/2026-08-17-llm-cost-accounting-fix.md` before you quote any
+historical cost from this table.
 
 ### `profit_scout.llm_eval_results_v1`
 
@@ -137,7 +143,7 @@ cleaned up by a shell `trap` in `deploy.sh`.
 
 Package contents:
 - `trace_logger/records.py` — `TraceRecord` dataclass, hash helpers
-- `trace_logger/pricing.py` — per-model `(in_per_1k, out_per_1k)` table
+- `trace_logger/pricing.py` — per-model `(in_per_1k, out_per_1k)` table, verified against the Cloud Billing Catalog API (re-verify command in its docstring); unknown models log a NULL `cost_usd`
 - `trace_logger/logger.py` — `TraceLogger` with fire-and-forget semantics
 
 ## Adding a new evaluator

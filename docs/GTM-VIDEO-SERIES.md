@@ -21,11 +21,13 @@ one: each ranks on its own phrase, and each Short is its own hook.
 | E1 | Claude Code | yes, full `/trade` via the harness | "The harness is free. The data is what costs money." |
 | E2 | Grok | free tier only unless the owner's UI test finds a header field | "Grok reads the free tier today. The paid tools need a key that Grok's connector dialog does not take yet." (or the verified line) |
 | E3 | Codex | yes, via `config.toml` `bearer_token_env_var` and the harness `AGENTS.md` | same as E1 |
-| E4 | Claude (claude.ai / Desktop) | free tier; pro only if the "Request headers" beta shows in the dialog | "Free tier now. Pro when the header beta reaches you, or use Claude Code." |
-| E5 | ChatGPT | free tier only | "ChatGPT cannot send our key. The paid tools need OAuth on our side. It is on the roadmap." |
+| E4 | Claude (claude.ai / Desktop) | yes, via OAuth sign-in on `/pro`, once that flow is verified in this client | "Add /pro as a connector, sign in once, and the paid tools work in the chat." (use the verified flow) |
+| E5 | ChatGPT | yes, via OAuth sign-in on `/pro`, once that flow is verified in this client | "Sign in with OAuth and the paid tools work inside ChatGPT." (use the verified flow) |
 | E6 | Cursor | yes | same as E1 |
 
-Do not record E5 until D4 (OAuth) is decided, so the line is right.
+OAuth `/pro` shipped 2026-08-19 (plan D4). Record E5 after one real
+ChatGPT OAuth sign-in is verified against the live `/pro` endpoint.
+The same verification rule applies to E4 for claude.ai.
 E2 waits on the owner's five-minute UI test.
 
 ## Episode template (4 to 8 min, one take where possible)

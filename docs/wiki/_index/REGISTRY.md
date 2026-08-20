@@ -5,16 +5,16 @@ One line per note: `[[slug]] — tag — one-line claim`. Schema + conventions:
 policy and why" — the live V7.1 surface is the Policy section, its evidence is in Findings.
 
 ## Policy (`policy/`) — live operating rules
-- [[v7-1-tilted-gigo-live-policy]] — policy-adopted — the live policy is V7.1 "Tilted GIGO" = V6 selection + V7 same-day exit + the momentum tilt (`policy_version='V7_1_TILTED_GIGO'`, cohort 2026-06-26)
+- [[v7-1-tilted-gigo-live-policy]] — policy-adopted — the live policy is V7.1 "Tilted GIGO" = V6 selection + V7 same-day exit + the momentum tilt (`policy_version='V7_1_TILTED_GIGO'`; cohort start lives in `signal-notifier/main.py`, 2026-08-13 as of the 08-12 reset)
 - [[bracket-tournament-selection]] — policy-adopted — one pick/day or none via a 3-bracket randomized tournament (consensus 3/3=high, no memory/rubric, fail-closed no fallback)
 - [[bullish-only-hard-gate]] — policy-adopted — BULLISH-only is a HARD gate (env-toggleable, overrides the bearish-regime caveat for now)
-- [[tourney-pool-cap-edge-rank]] — policy-adopted — pool is soft-edge-ranked then capped to TOURNEY_POOL_CAP (12→50; fallback skips the edge-cap)
+- [[tourney-pool-cap-edge-rank]] — policy-adopted — pool is soft-edge-ranked then capped to TOURNEY_POOL_CAP (live value 12, code default; fallback skips the edge-cap)
 - [[v7-gigo-same-day-exit]] — policy-adopted — live exit: 10:00 entry / +40% TP / −30% stop / flat 15:45 ET, no trail, no overnight; TIMEOUT>STOP>TARGET
-- [[live-oi-floor]] — policy-adopted — two-tier slate floor at ~09:52 ET (early prints, then OI_FLOOR=1000); a dropped candidate never comes back
+- [[live-oi-floor]] — policy-adopted — two-tier slate floor at ~09:52 ET (early prints, then OI_FLOOR=1000; print-floor raise 1→25 adopted 08-19, not yet deployed); a dropped candidate never comes back
 - [[no-liquid-candidates-no-pick]] — policy-adopted — when nothing clears the liquidity floors the engine stands down instead of ranking the reject pile
 - [[earnings-exclusion-rail]] — policy-adopted — safety rail 1: no earnings in the hold/exclusion window (literature-anchored)
 - [[regime-rail-vix-term]] — policy-adopted — safety rail 2: fail closed when VIX > VIX3M
-- [[entry-day-mark-and-limit]] — policy-adopted — published pick shows a FRESH entry-day mark + fair-value limit (display, not selection)
+- [[entry-day-mark-and-limit]] — policy-adopted — published pick shows a date-validated entry-day mark + fair-value limit (display, not selection); the mark is a delayed day.close and prior-session prices are REFUSED (amended 08-14)
 - [[scorecard-life-distributions]] — policy-adopted — public Track Record shows full-life distributions, not ROI under a fixed exit
 - [[public-tracks-pool-not-pick]] — policy-adopted — public surfaces track the ~50-name pool; the daily pick is private
 - [[market-holiday-standdown]] — policy-adopted — fail closed (no email/trade/tournament) on any non-trading day
@@ -31,7 +31,7 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[pipeline-bug-hunt-2026-06-04]] — architecture-fact — 13 silent data bugs fixed (fake spreads, divergence-flip order, technicals lookahead, stale fields)
 - [[oi-volume-session-frozen-walled-off]] — architecture-fact — OI/volume are session-frozen snapshots, walled off from the judge, used only in scanner ranking
 - [[ledger-cohort-version-labels]] — architecture-fact — cohort labels 5=two-stage, 6=judge_v6, 7=tournament; keep policy_version explicit
-- [[enrichment-cost-fix-topn-thinking-cap]] — architecture-fact — cost fix: grounding narrowed to top-50 BULLISH with thinking_budget=0; read cost from Monitoring not the trace table
+- [[enrichment-cost-fix-topn-thinking-cap]] — architecture-fact — cost fix: grounding narrowed to top-50 BULLISH with thinking_budget=0; the Monitoring-only cost rule holds only for trace rows before 2026-08-17
 - [[selection-vs-exclusion-filter-bars]] — architecture-fact — selection filters need OOS; exclusion filters deploy on literature/mechanism
 - [[labeled-v1-screen-not-validator]] — architecture-fact — signals_labeled_v1 is a frozen screen (kills bad ideas), never a validator
 - [[dataset-regime-confounded]] — architecture-fact — the Feb–Apr 2026 cohort is regime-confounded; do not conclude from it alone
@@ -43,6 +43,7 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[opportunity-surface-substrate]] — architecture-fact — enriched_option_outcomes captures MFE/MAE + mom_60 so the exit stays a free variable
 - [[option-minute-paths]] — architecture-fact — per-minute premium tape recovers first-crossing order and makes any exit rule scoreable
 - [[pool-liquidity-snapshot]] — architecture-fact — interval, cache-first pool-liquidity read for the MCP (distinct from the pick-time OI floor)
+- [[polygon-snapshot-never-zero-day-bar]] — architecture-fact — Polygon's option snapshot serves the prior session's bar instead of a zero, so day.volume alone can never mean "no prints today"; read day.last_updated
 - [[notifier-duplicate-send-guard]] — architecture-fact — pick-email guard is a transactional claim keyed on the ET run-day (600s deadline)
 - [[service-auth-hardening]] — architecture-fact — Cloud Run services are systemically --allow-unauthenticated; OIDC-then-lock (deploy.sh re-opens the door)
 - [[public-stats-fixed-dollar-sizing]] — architecture-fact — public ROI uses fixed-dollar ($500) sizing at the display layer
@@ -58,13 +59,14 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 
 ### Architecture — services, data-contract details, prior-era markers
 - [[eval-system-monitoring-only]] — architecture-fact — the LLM eval system is monitoring-first and never gates a pick/report/deploy
+- [[llm-cost-from-billing-catalog]] — architecture-fact — trace_logger prices from the Cloud Billing Catalog, unknown models log NULL; cost_usd is trustworthy only from 2026-08-17 (~26x low before)
 - [[content-services-x-poster-blog]] — architecture-fact — x-poster + blog-generator ADK services + shared content lib are the distribution layer
 - [[mcp-sole-attack-surface]] — architecture-fact — gammarips-mcp is the sole (sandboxed) attack surface for paid-agent interactions; never a pick endpoint
 - [[content-machine-weekly-cadence]] — architecture-fact — the 4-surface content machine (X/blog/reddit/email) runs weekly autonomous cadence off real ledger+report data
 - [[todays-pick-dual-write]] — architecture-fact — signal-notifier dual-writes todays_pick under {scan_date} AND {entry_day}
 - [[pipeline-cron-schedule]] — architecture-fact — daily cron order is enrichment → report → notifier; the report must be written before the pick runs
 - [[cohort-reset-on-filter-change]] — architecture-fact — truncate the ledger + start a fresh cohort whenever the selection filter materially changes
-- [[cohort-reset-live-oi]] — architecture-fact — the 2026-06-25 reset that set LIVE_COHORT_START_DATE=2026-06-26 for the live-OI regime
+- [[cohort-reset-live-oi]] — architecture-fact (SUPERSEDED) — the 2026-06-25 reset that set the then-current LIVE_COHORT_START_DATE=2026-06-26; three later resets, live value in signal-notifier/main.py
 - [[moneyness-sign-direction-aware]] — architecture-fact — moneyness_pct is direction-aware (positive = OTM) for both calls and puts
 - [[scanner-sector-detail-fetch]] — architecture-fact — the scanner fetches per-ticker SIC sector detail for movers only (fixed the NULL-sector bug)
 - [[sector-persisted-on-signals]] — architecture-fact — sector/industry is persisted onto signal docs for SEO internal-linking + related-signals
@@ -90,18 +92,25 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[path-calibrated-giveback]] — proven-on-cohort — excursion peaks are IV-calibrated and LATE; the real finding is the giveback (median winner keeps 31% of peak)
 - [[three-day-harvest-curve]] — proven-on-cohort — P(touch +20% in 3d)=51% but pops land day 2–3; fixed targets are EV-negative pool-wide
 - [[fixed-exit-composites-negative]] — proven-on-cohort — the whole pool under any fixed exit is negative; the exit is the free variable; never publish an ROI headline
+- [[ghost-rows-flatter-pool-composites]] — proven-on-cohort — ghost rows exit at fabricated near-flat marks (16.8% carry exactly −1.9608%), so every whole-pool composite is optimistic by construction (−4.67% vs tradeable −9.59%)
+- [[execution-risk-is-exit-certainty]] — proven-on-cohort — execution risk is exit certainty, not spread: stop fills slip one-sided (median −3.1%, thin names −10.3%), prints-by-10:00 is the dominant observable, premium does not predict liquidity
+- [[window-mismatch-3day-vs-same-day]] — proven-on-cohort — the harvest/surface views are 3-day while V7.1 exits same-day; quoting a 3-day statistic at a same-day decision inverts the answer
 - [[exit-velocity-same-day-lever]] — proven-on-cohort — the exit lever is SAME-DAY (velocity + halved tail), not the target magnitude
 - [[delta-trap-escape]] — proven-on-cohort — delta is the only contract feature separating won from lost; prefer "enough delta"
 - [[momentum-60d-enrichment-tilt]] — fragile-conditional — mom_60 ≥ +0.35 works on a 3-day hold, ZERO edge same-day; the ".1 Tilt", proposer-only
 - [[pool-cap-coverage]] — proven-on-cohort — the tournament pool can shrink 50→25 with no demonstrated loss of the winner
 - [[moneyness-band-10-13-otm]] — proven-on-cohort — the 10–13% OTM increment is additive; cap widened to 0.13, fallback pinned 0.10
 - [[premium-stop-earns-keep]] — proven-on-cohort (3-day era) — dropping the −60% premium stop was ZERO EV; on a short hold it behaves like a time-exit
-- [[entry-1000-et]] — policy-adopted — enter ~10:00 ET; earlier entries are a thin-tape mirage
+- [[entry-1000-et]] — policy-adopted — enter ~10:00 ET; earlier entries are a thin-tape mirage; the LATER-entry question is an OPEN owner call since 08-19
+- [[first-hour-bleed]] — proven-on-cohort — the day's bleed concentrates in the 10:00→11:00 window (−5.32% mean, tradeable N=548); a later entry loses less and gains less, no edge either way
 - [[voi-ratio-anti-edge]] — falsified-on-cohort — V/OI > 2 removes 55–63% of winners; anti-edge, gate relaxed
 - [[oi-not-quality-signal]] — falsified-on-cohort — OI is a fillability gate, not a quality lever (higher OI monotonically worse)
 - [[ride-winners-mean-reverts]] — falsified-on-cohort — chasing recent option winners is an anti-edge (0/17 clear zero)
 - [[premium-score-anti-predictive]] — falsified-on-cohort — premium_score as a gate is −3.5pp worse than no filter; flags are features, not gates
 - [[bracket-optimization-dead]] — falsified-on-cohort — 0/840 bracket variants profitable; it is not a bracket-tuning problem
+- [[overnight-hold-breaks-the-stop]] — falsified-on-cohort — PM entry / morning pop refuted: the overnight hold removes the stop (p05 −31% → −53%) and every liquid-tier PM variant is negative
+- [[contract-score-lead-dead]] — falsified-on-cohort — the cap-50-era contract_score lead (AUC 0.552) failed its pre-committed re-test (0.481, N=737); closed, never re-slice; no demonstrated within-pool ranking edge
+- [[catalyst-atr-inversion-refuted]] — falsified-on-cohort — the catalyst/ATR "inversions" are a between-day tape artifact (day-demeaned AUC 0.499, N=3,040); do not down-rank high-catalyst/high-ATR within a day
 - [[trailing-liquidity-floor-dead]] — falsified-on-cohort — trailing-volume floors do not separate fillable from unfillable; dead approach
 - [[open-untested-exit-hypotheses]] — untested-hypothesis — H19 (DTE 21–45) and H21 (exit-by-D2) remain untested; proposer color only
 - [[lit-audit-h11-h12-spread-moneyness]] — literature-established (SUPERSEDED) — H11 spread 10→8% and H12 moneyness 15→10%; both later superseded

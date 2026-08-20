@@ -15,8 +15,10 @@ The rank is a **SOFT pre-rank** (not a gate) by the 1,375-trade study's levers: 
 0.20–0.46, RR < 1.4, ATR-normalized move — all point-in-time / leakage-safe. The FALLBACK
 path inherits the [[bullish-only-hard-gate]] but SKIPS the edge-cap.
 
-`TOURNEY_POOL_CAP` history: introduced at default 12 (2026-06-11), then **raised to 50
-(env) on 2026-06-12** so that all ~50 grounded-enriched names seed the tournament — the
-current effective value is 50 (the cap now rarely binds; enrichment already narrows to
-top-50 upstream, see [[enrichment-cost-fix-topn-thinking-cap]]). Research shows the cap can
-shrink 50→25 with no demonstrated loss of the eventual winner ([[pool-cap-coverage]]).
+`TOURNEY_POOL_CAP` history: introduced at default 12 (2026-06-11). The 2026-06-12 note
+recorded a raise to 50 via env, but that raise is NOT true of the live service: **the
+live value is the code default 12**, with no deploy.sh override (verified; see
+docs/TRADING-STRATEGY.md, and do not "restore" 50). Enrichment already narrows to the
+top-50 BULLISH upstream ([[enrichment-cost-fix-topn-thinking-cap]]), then the edge-rank
+cap takes the top 12 into the tournament. Research shows a pool cap of 25 loses no
+demonstrated winner coverage ([[pool-cap-coverage]]).

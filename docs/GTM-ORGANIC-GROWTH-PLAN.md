@@ -41,8 +41,9 @@ first. Paid ads wait for a measured baseline.
 
 ## Sequence (amends 08-06 — the video and HN gates stay)
 
-1. Workstreams A + B: landing rewrite and the first guides. Land
-   these BEFORE Show HN, so HN traffic hits the new funnel.
+1. Workstream A landing rewrite: DONE, shipped 2026-08-15.
+   Workstream B first guides: land these BEFORE Show HN, so HN
+   traffic hits the new funnel.
 2. The video. Spec unchanged: `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`.
 3. Show HN per `docs/GTM-DISTRIBUTION-PLAYBOOK.md`. Gates unchanged:
    video live AND one real GA4-attributed checkout.
@@ -52,33 +53,18 @@ first. Paid ads wait for a measured baseline.
 
 ## Workstream A — landing page rewrite (repo: gammarips-webapp)
 
-Rails: branch first (main auto-deploys production). All copy goes
-through `gammarips-copywriter`. Ship with `/ship` from `~/workspace`.
-Write all new copy in STE.
-
-- A1. Fix the dead commands in
-  `src/components/landing/harness-cta.tsx:21`. The block teaches four
-  retired command names. The real loop is `/trade`, `/review`,
-  `/coach`. Keep the block in lockstep with the harness README.
-- A2. New hero block: the plain equation "MCP + harness = agentic
-  trading" and the three-layer product statement. Keep the video
-  iframe slot for the step-2 swap.
-- A3. New per-client connect component with tabs: Claude Code,
-  Claude, ChatGPT, Grok. Each tab shows the free ten-second connect
-  first, then the pro steps for that client.
-- A4. Reorder the page: hero → connect tabs → harness steps → today's
-  pool + the honesty section → pricing CTA → Lab → blog → FAQ.
-  Activation above the fold. Proof after.
-- A5. Keep the homepage meta description disclaimer-free. That scope
-  is SETTLED (memory `meta-description-disclaimer-scope-settled`).
-- Known and unrelated: 3 pre-existing tsc errors in
-  `src/app/signals/page.tsx` reproduce on clean main.
+**DONE — shipped 2026-08-15.** A1 to A5 landed: command fix, new
+hero, per-client connect tabs, page reorder, and the disclaimer-free
+homepage meta description. That disclaimer scope is SETTLED (memory
+`meta-description-disclaimer-scope-settled`).
 
 ## Client connect facts (verified 2026-08-15 from official docs)
 
 These facts bind the guides (B), the connect tabs (A3), and the
 videos (E). "Pro" = the client can send `Authorization: Bearer
 gr_live_...`. Full table with sources: `docs/GTM-CLIENT-CONNECT-MATRIX.md`.
+The table below is the 2026-08-15 pre-OAuth snapshot. The consequence
+note after it carries the 2026-08-19 OAuth update.
 
 | Client | Free tier | Pro tier today | How |
 |---|---|---|---|
@@ -90,11 +76,13 @@ gr_live_...`. Full table with sources: `docs/GTM-CLIENT-CONNECT-MATRIX.md`.
 | ChatGPT | yes (Plus/Pro/Business+, Developer mode, web only) | NO. ChatGPT cannot present API keys. Pro needs OAuth 2.1 on our server | Settings > Security and login > Developer mode > Plugins > + |
 | Grok | yes (custom connector, any public URL) | UNVERIFIED in the consumer UI; Grok Build CLI supports `--header` (paid) | grok.com/connectors > New Connector > Custom |
 
-Consequence: the paid loop is a CLI story today (Claude Code, Codex,
-Cursor, Gemini CLI). Chat clients get the free tier and an honest
-"pro needs X" line. The one product lever that changes this is
-OAuth 2.1 on the MCP (D4). Do not write copy that says ChatGPT or
-Grok can run the paid loop.
+Consequence (updated 2026-08-19): OAuth `/pro` is SHIPPED (D4). The
+CLI clients keep the Bearer-key paid path. Chat clients (ChatGPT,
+claude.ai, Grok) get the paid tier via OAuth sign-in on `/pro`. But
+re-verify each client against the live `/pro` endpoint, with one
+real sign-in per client, before any guide or video claims it. The
+matrix (`docs/GTM-CLIENT-CONNECT-MATRIX.md`) tracks that
+verification.
 
 ## Workstream B — how-to guides (blog section)
 
@@ -123,11 +111,10 @@ with <client>". Order below is the publish order.
   base. Retitle toward the intent phrase, add the loop, and state
   plainly: free tier now, pro when the "Request headers" beta
   reaches your account, or use Claude Code.
-- B5. "How to trade options with ChatGPT" — free tier only, said in
-  the first screen; Developer mode + Plugins steps; the honest line
-  "ChatGPT cannot send our key; the paid tools need OAuth, which is
-  on the roadmap (D4)". Publish after D4 is decided so the line is
-  right.
+- B5. "How to trade options with ChatGPT" — Developer mode + Plugins
+  steps; free tier first, then the paid path: OAuth sign-in on
+  `/pro` (D4, shipped 08-19). Verify one real ChatGPT OAuth sign-in
+  against the live `/pro` endpoint, then publish.
 - B6. "How to trade options with Cursor" — short; full paid loop.
 - B7. Pillar: "How agentic options trading actually works" — the hub
   page that links every guide, the Robinhood agentic account
@@ -184,35 +171,13 @@ result and the decision is recorded. Active placements only.
   `trader-harness-sync-apply-unsafe`).
 - D3. Plugin packaging: PARKED. The repo is the canonical wrapper.
   Look at this again after the guides ship.
-- D4. OAuth 2.1 on the MCP (MCP-V3-SPEC Phase 2b). **DECIDED 2026-08-15:
-  build it in anticipation, sequenced THIRD** (owner, later the same
-  day): first the landing page, then the YouTube content, then OAuth,
-  and OAuth must be live BEFORE the live-money trading agent debuts in
-  public. It is the one
-  lever that unlocks the PAID tier inside ChatGPT and claude.ai without
-  a beta. Measured first: 30 days of logs show 0 ChatGPT and 0 claude.ai
-  paywall hits, 3 from Grok; the build is a forecast bet on the
-  Robinhood agentic wave (Claude, ChatGPT, Grok, Cursor), not a demand
-  response. Shape: the authorization server lives on gammarips.com
-  (Firebase login + consent, DCR, PKCE, JWT access tokens, rotating
-  refresh); the MCP adds a `/pro` endpoint that requires auth and keeps
-  `/mcp` anonymous. Repos: gammarips-webapp + gammarips-mcp, each with
-  its own gate. Decision note: gammarips-mcp
-  `docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`. Also add a client
-  class to the `MCP_TOOL_CALL` meter so the weekly denial-by-client
-  read is one query.
-  **BUILT 2026-08-19** (owner pulled it forward: "we need OAuth so we
-  can run an agent headless in a VM"). Webapp branch
-  `oauth/authorization-server` (AS: `/.well-known/oauth-authorization-server`,
-  `/oauth/{authorize,consent,token,register,revoke,jwks}`, CIMD + DCR,
-  PKCE, RS256 tokens with `tier`, rotating refresh, `client_credentials`
-  machine clients on `/account`). MCP branch `oauth/pro-endpoint`
-  (`/pro`, JWT verification, discovery docs, meter `client_class`).
-  e2e with the real MCP SDK client: 24/24. **SHIPPED the same day:** PR #26
-  merged, MCP `gammarips-mcp-00044-2fq`; the JWKS key wiring (`912d3def`)
-  was the last rollout. Next: the webapp copy PR (`/developers`, discovery
-  files, connect tabs), then guides B4/B5 and videos E4/E5 can show a
-  person paying inside the chat client.
+- D4. OAuth 2.1 on the MCP. **DONE — shipped 2026-08-19** (decided
+  08-15, built and shipped 08-19: AS on gammarips.com, MCP `/pro`
+  auth-required, `/mcp` anonymous, e2e 24/24). Decision note:
+  gammarips-mcp `docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`.
+  Next: the webapp copy PR (`/developers`, discovery files, connect
+  tabs), then guides B4/B5 and videos E4/E5 after the per-client
+  sign-in verification.
 - D5. Connect tabs (A3) ship the four full-paid CLI clients as
   copy-paste steps and give the chat clients a free-tier step plus
   the honest pro line from the matrix. Never invent a step.
@@ -224,6 +189,5 @@ result and the decision is recorded. Active placements only.
   page.
 - Before HN: one real attributed checkout. This is the only
   unverified item from the 08-08 deploy.
-- Milestones: first external trials before the 08-17 checkpoint,
-  paying subscribers before 10-05 (memory
+- Milestone: paying subscribers before 10-05 (memory
   `mcp-monetization-killswitch`).

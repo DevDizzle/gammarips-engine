@@ -2,7 +2,7 @@ Status: active
 Type: policy
 Tag: policy-adopted
 Exit-context: n/a (a selection-time stand-down rule)
-Source: docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md; docs/research_reports/handoffs/2026-08-12-tournament-liquidity-regression.txt
+Source: docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md; docs/archive/research_reports/handoffs-2026-08/2026-08-12-tournament-liquidity-regression.txt
 Date: 2026-08-12
 
 # When nothing is tradeable, the engine says nothing

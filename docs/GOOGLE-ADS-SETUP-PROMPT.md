@@ -1,31 +1,36 @@
 # Google Ads Setup Prompt — GammaRips (agentic-trading data vendor)
 
-> **How to use this file.** Paste its contents (or its path) into a fresh Claude Code session running in `/home/user/gammarips-engine`. It reproduces the disciplined Google Ads process we ran for a sister product (TextTimeline) and adapts it to GammaRips. It references the TextTimeline ad assets as the concrete format template and encodes the reasoning behind every step. **Do not blindly copy TextTimeline — GammaRips is a different beast (see §1). Resolve the forks with the owner (Evan) before generating final assets.**
+> **Refreshed 2026-08-20** for the ~09-01 ads review. The `gtm/ads/` assets
+> already exist (built 2026-07-09). The job is now to review and finalize
+> them, not to produce them from scratch (see §0).
+
+> **How to use this file.** Paste its contents (or its path) into a fresh Claude Code session running in `~/workspace/projects/gammarips-engine`. It reproduces the disciplined Google Ads process we ran for a sister product (TextTimeline) and adapts it to GammaRips. It references the TextTimeline ad assets as the concrete format template and encodes the reasoning behind every step. **Do not blindly copy TextTimeline — GammaRips is a different beast (see §1). Resolve the forks with the owner (Evan) before generating final assets.**
 
 ---
 
 ## 0. The goal / deliverables
 
-Produce three paste-ready files in `gammarips-engine/gtm/ads/`, mirroring the TextTimeline templates exactly (same structure, char-counted, drop-in for the Google Ads UI):
+The three paste-ready files and the launch brief already exist in `gtm/ads/` (built 2026-07-09, mirroring the TextTimeline templates):
 
 - `gtm/ads/keywords.txt` — one keyword per line, match-type syntax included
 - `gtm/ads/negative-keywords.txt` — one per line, pasteable into the campaign negative list
 - `gtm/ads/rsa-ad-copy.txt` — Final URL, 15 headlines (≤30 ch), 4 descriptions (≤90 ch), display path (≤15 ch ×2), business name, 4–6 sitelinks (text ≤25 ch; 2 desc lines ≤35 ch; **unique text AND unique final URL each**), 8 callouts (≤25 ch)
+- `gtm/ads/README.md` — the launch brief (objective, campaign type, bidding, budget, geo, kill metric)
 
-Plus a short launch brief (objective, campaign type, bidding, budget, geo, kill metric) at the top of a `gtm/ads/README.md`.
+**The job now: review and finalize these assets for the ~09-01 ads review, not produce them again.** Check them against the live site, the current pricing, and §3.
 
-**Definition of done:** every asset within Google's char limits; every claim compliant with §3; the funnel fork (§1) resolved with Evan; assets pass `gammarips-review`.
+**Definition of done:** every asset within Google's char limits; every claim compliant with §3; the funnel fork (§1) confirmed with Evan; open items in `gtm/ads/README.md` resolved. A `gammarips-review` pass is optional and owner-invoked.
 
 ---
 
 ## 1. ⚠️ READ THIS FIRST — GammaRips is NOT TextTimeline
 
-TextTimeline works on Google because its buyer *actively searches* a high-intent query ("print text messages for court") and buys a $19–$99 one-time deliverable. **None of that is true here.** Before writing a single keyword, internalize these four facts from this repo (`README.md`, `CLAUDE.md`, `docs/GTM-MCP-DIRECTORY-PLAN.md`, `docs/TRADING-STRATEGY.md`):
+TextTimeline works on Google because its buyer *actively searches* a high-intent query ("print text messages for court") and buys a $19–$99 one-time deliverable. **None of that is true here.** Before writing a single keyword, internalize these four facts from this repo (`README.md`, `CLAUDE.md`, `docs/GTM-ORGANIC-GROWTH-PLAN.md`, `docs/TRADING-STRATEGY.md`):
 
 1. **The paid product is `gammarips-mcp` — an MCP data vendor at ~$39/mo** for *bring-your-own-agent* traders. It sells **data + tool primitives + methodology, NOT a pick, NOT a return, NOT advice.** The free anon tier (8 keyless tools) + the free web UI (`gammarips.com`) are the top-of-funnel.
-2. **The paid buyer is largely NOT on Google.** Our own GTM doc: *"they discover tools in MCP directories and registries, not on Google… only then decide if paid acquisition can ever pencil at $39/mo."* Directories (cursor.directory, Smithery, PulseMCP, Glama, mcp.so, Docker MCP catalog) are the primary channel; **Google Ads is an unproven, possibly-uneconomic secondary channel.** The GTM gate is **Oct 5, 2026** — ad spend is explicitly to be revisited *with real CAC math only if ≥1 paying sub exists.*
+2. **The paid buyer is largely NOT on Google.** The MCP-directory channel is DEAD: a 30-day null result, DECIDED 2026-08-06 (`docs/archive/GTM-MCP-DIRECTORY-PLAN-2026-07-07.md`) — do not re-propose it. The plan of record is organic (`docs/GTM-ORGANIC-GROWTH-PLAN.md`: guides, video, Show HN); **Google Ads is an unproven, possibly-uneconomic secondary channel** reviewed ~09-01 on the measured organic CVR. The GTM gate is **Oct 5, 2026** — ad spend is explicitly to be revisited *with real CAC math only if ≥1 paying sub exists.*
 3. **Finance is a Google Ads RESTRICTED category.** Options/derivatives content can trip the *Complex Speculative Financial Products* policy (certification + geo-restriction in some regions), the *Financial products and services* policy, and the *get-rich-quick* prohibition. Advertiser identity verification is required. See §3 — this is the single biggest execution risk.
-4. **"Data, not advice / not a return" is an OWNER-LOCKED compliance rule** (CLAUDE.md, 2026-07-02), enforced by `gammarips-review` and the rubric in `libs/gammarips_content/`. Ad copy that promises profit, returns, win rates, or "signals that make money" **violates both our own rule and Google policy.** Advertise the DATA and the TOOL. Never the outcome.
+4. **"Data, not advice / not a return" is an OWNER-LOCKED compliance rule** (CLAUDE.md, 2026-07-02), enforced by the rubric in `libs/gammarips_content/`. Ad copy that promises profit, returns, win rates, or "signals that make money" **violates both our own rule and Google policy.** Advertise the DATA and the TOOL. Never the outcome.
 
 ### The funnel fork you MUST resolve with Evan before generating assets
 Because the paid buyer isn't on Google, "run ads for agentic trading" almost certainly should **not** mean "sell $39/mo MCP subscriptions directly off Search." The realistic options — get Evan to pick (recommend A, and keep C tiny):
@@ -34,7 +39,7 @@ Because the paid buyer isn't on Google, "run ads for agentic trading" almost cer
 - **B) Direct-to-paid MCP (skeptical).** Buy the emerging, near-zero-volume "agentic/MCP trading data" category → land on `/pricing` or `/developers`. High intent but almost no search volume today; likely a handful of clicks. Only worth a *tiny* exact-match ad group as a category-staking experiment.
 - **C) Brand/defense.** `gammarips` brand terms — cheap, optional.
 
-**If Evan hasn't said otherwise, propose A as the primary campaign + a small C, and treat B as one low-budget exact-match ad group. Do not assume; ask.**
+**Evan resolved this fork on 2026-07-09: MCP-direct (B) primary, with brand defense** (`gtm/ads/README.md`). Confirm it still stands at the ~09-01 review before you change any asset. Do not silently flip to A.
 
 ---
 
@@ -42,13 +47,13 @@ Because the paid buyer isn't on Google, "run ads for agentic trading" almost cer
 
 Open the whole TextTimeline ads folder and read all three files as the **format template**:
 
-- `/home/user/.openclaw/workspace/projects/texttimeline/gtm/ads/keywords.txt`
-- `/home/user/.openclaw/workspace/projects/texttimeline/gtm/ads/negative-keywords.txt`
-- `/home/user/.openclaw/workspace/projects/texttimeline/gtm/ads/rsa-ad-copy.txt`
+- `~/workspace/projects/texttimeline/gtm/ads/keywords.txt`
+- `~/workspace/projects/texttimeline/gtm/ads/negative-keywords.txt`
+- `~/workspace/projects/texttimeline/gtm/ads/rsa-ad-copy.txt`
 
 Reasoning/spec for the whole campaign (read for the *why*, not to copy the family-law specifics):
-- `/home/user/.openclaw/workspace/projects/texttimeline/docs/EXEC-PLANS/active/016-consumer-relaunch-and-serp-offensive.md` → **Appendix A** (full ads spec: bidding, geo, negatives rationale, budget math, policy notes)
-- `/home/user/.openclaw/workspace/projects/texttimeline/NEXT_SESSION_PROMPT.md` → the **2026-07-09 handoff block** (the launch decisions + why)
+- `~/workspace/projects/texttimeline/docs/EXEC-PLANS/active/016-consumer-relaunch-and-serp-offensive.md` → **Appendix A** (full ads spec: bidding, geo, negatives rationale, budget math, policy notes)
+- `~/workspace/projects/texttimeline/NEXT_SESSION_PROMPT.md` → the **2026-07-09 handoff block** (the launch decisions + why)
 
 | # | Step (TextTimeline) | The reasoning | How it changes for GammaRips |
 |---|---|---|---|
@@ -71,8 +76,8 @@ Google's financial-ad policies change; **do not trust this from memory — WebSe
 - **Complex speculative financial products** (CFDs, rolling spot forex, spread betting — and options/derivatives can be read in): often **restricted, certification-required, and geo-limited.** Confirm whether an options-*flow-data* vendor (we don't broker or advise) is in or out of scope. Our data-vendor framing is the argument for "out of scope," but Google may still gate it — be ready to certify or geo-restrict.
 - **Advertiser identity / business verification:** required; complete same-day when prompted or ads pause.
 - **Prohibited: get-rich-quick.** No "make money", "guaranteed", "double your account", "profit in 3 days", "win rate", "beat the market". This aligns exactly with our owner-locked rule.
-- **The safe posture (also the true one): advertise the DATA and the TOOL, never the outcome.** e.g. "Anti-firehose options-flow data for your trading agent" / "Point-in-time features + realized MFE/MAE outcome surfaces via MCP" / "Curated daily pool, not a firehose" / "Free anon tier, no pick endpoint, not advice." Mirror the directory copy already vetted in `docs/GTM-MCP-DIRECTORY-PLAN.md` (PulseMCP line) and the compliance rubric in `libs/gammarips_content/`.
-- **Every public-facing ad asset goes through `gammarips-review`** before launch, same as any public data-exposure change. Append/repeat the `Not advice.` framing where natural.
+- **The safe posture (also the true one): advertise the DATA and the TOOL, never the outcome.** e.g. "Anti-firehose options-flow data for your trading agent" / "Point-in-time features + realized MFE/MAE outcome surfaces via MCP" / "Curated daily pool, not a firehose" / "Free anon tier, no pick endpoint, not advice." Mirror the vetted vendor copy (archived directory plan `docs/archive/GTM-MCP-DIRECTORY-PLAN-2026-07-07.md`, PulseMCP line) and the compliance rubric in `libs/gammarips_content/`.
+- A `gammarips-review` pass on the ad assets is **optional and owner-invoked**. Append/repeat the `Not advice.` framing where natural.
 
 ---
 
@@ -109,11 +114,11 @@ Google's financial-ad policies change; **do not trust this from memory — WebSe
 ---
 
 ## 6. Governance
-- Honor this repo's rules exactly as a TextTimeline session honors `.claude/rules/` — `data-not-advice` framing, leakage-safety, and **`gammarips-review` before any public-facing change** (that includes live ad copy).
+- Honor this repo's rules exactly as a TextTimeline session honors `.claude/rules/` — `data-not-advice` framing and leakage-safety are non-negotiable. `gammarips-review` is optional and owner-invoked (2026-08-19).
 - Keep `gtm/ads/` as the source of truth for what's in the account; if Evan edits in the UI, reconcile back to the files.
 - End the working turn with a clear status and the open decisions listed for Evan.
 
 ---
 
 ### TL;DR for the session
-Read the TextTimeline `gtm/ads/` folder for the *format*, read this repo's README/CLAUDE/GTM-MCP doc for the *reality*, resolve the funnel fork with Evan (recommend: ads → free surface as top-of-funnel), verify live financial-ad policy, advertise **the data not the outcome**, and produce the three `gtm/ads/` files + a launch brief — all through `gammarips-review`.
+Read the TextTimeline `gtm/ads/` folder for the *format*, read this repo's README/CLAUDE/GTM-ORGANIC-GROWTH-PLAN for the *reality*, confirm the funnel fork with Evan (the 07-09 call was MCP-direct primary, see `gtm/ads/README.md`), verify live financial-ad policy, advertise **the data not the outcome**, and review/finalize the existing `gtm/ads/` files + launch brief. A `gammarips-review` pass is optional and owner-invoked.

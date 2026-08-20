@@ -1,3 +1,7 @@
+> **CHANNEL DEAD — 30-day null result, DECIDED 2026-08-06**
+> (`docs/DECISIONS/2026-08-06-growth-sequence-video-hn-ads.md`). Do not
+> re-run the click-pack. Kept as the log of what was submitted.
+
 # GTM: MCP Directory Listings Plan + Reevaluation Gate
 
 **Created 2026-07-07 (go-live day). Owner-requested: get listed in the top MCP directories before any ad spend, with a hard timeline — if no paying subs by the gate date, reevaluate the business.**

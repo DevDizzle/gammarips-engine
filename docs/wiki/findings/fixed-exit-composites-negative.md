@@ -12,7 +12,8 @@ mean **+15.6% but median −100%**, 60% expire worthless, WR 28.0%. The positive
 robust — excluding the top 10 of 1,316 trades flips it negative; by month Apr +57.5% / May
 −1.3% / Jun −0.1% (walk-forward halves +39.5% → −8.3%): April-melt-up fuel, not selection
 alpha. Under the live same-day GIGO exit the whole-pool composite is likewise robustly
-negative (−2 to −6%/day, WR ~30%).
+negative (−2 to −6%/day, WR ~30%), and even that number is optimistic by construction:
+ghost rows drag it toward zero ([[ghost-rows-flatter-pool-composites]]).
 
 Two hard consequences: (1) **NEVER publish ITM% or a "floor mean" or a tradeable-ROI Flow
 Index** — both backfire on inspection; sell the opportunity surface, not a return. (2) The

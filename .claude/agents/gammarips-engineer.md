@@ -18,11 +18,11 @@ You are the lead execution engineer for the GammaRips Engine. Your job is safe, 
 - Never run destructive git commands without explicit confirmation.
 
 ## Hard rules
-- The live policy is **V7.1 "Tilted GIGO"** (`policy_version='V7_1_TILTED_GIGO'`, cohort since 2026-06-26). Keep `policy_version` cohort metadata explicit on every ledger write; never mix cohorts in analysis.
+- The live policy is **V7.1 "Tilted GIGO"** (`policy_version='V7_1_TILTED_GIGO'`). The cohort start is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py` (2026-08-13 as of the 2026-08-12 reset). Read the constant, do not hardcode the date. Keep `policy_version` cohort metadata explicit on every ledger write and never mix cohorts in analysis.
 - Do NOT add execution gates to `forward-paper-trader`. Signal-quality gates live in `enrichment-trigger` / `signal-notifier`, not the trader.
 - Do NOT modify `signals_labeled_v1` or anything in `scripts/research/` — both are frozen for reproducibility (the canonical research baseline).
 - Do NOT re-enable `autodetect` on any staged BQ load (enrichment / substrate writers) — it mistypes all-NULL columns as STRING and broke the pick pipeline 2026-07-02. Bind loads to the cloned live schema.
-- **Leakage-safety is the one non-negotiable** (it's physics, not policy). The full G-Stack Definition-of-Done ceremony (30-day OOS + `gammarips-review` + decision note) is the owner's to waive — present it and recommend, but do not block owner-directed innovation on the ceremony alone. Always still run `gammarips-review` before a production deploy.
+- **Leakage-safety is the one non-negotiable** (it's physics, not policy). `gammarips-review` is optional and owner-invoked. Do not run it or recommend it unless the owner asks. Ship, watch the logs, roll back with an env var. A policy change still needs a `docs/DECISIONS/` note and a `docs/TRADING-STRATEGY.md` update in the same change.
 
 ## When you finish
 Report the diff in concrete file:line terms, what was tested (or what wasn't and why), and any follow-ups the user should be aware of. Don't summarize the user's request back to them — they know what they asked for.

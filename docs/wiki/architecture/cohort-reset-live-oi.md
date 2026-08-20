@@ -1,4 +1,4 @@
-Status: active
+Status: superseded
 Type: architecture
 Tag: architecture-fact
 Exit-context: n/a
@@ -14,7 +14,12 @@ reset three days earlier. The dumped rows included TTWO (already floor-excluded)
 lone trade the scorecard was showing), and AFL (the INVALID_LIQUIDITY pick that motivated the
 floor).
 
-This is the reset that set the current `LIVE_COHORT_START_DATE='2026-06-26'`
+This is the reset that set the then-current `LIVE_COHORT_START_DATE='2026-06-26'`
 ([[v7-1-tilted-gigo-live-policy]]) — an instance of the reset-on-filter-change practice
 ([[cohort-reset-on-filter-change]]), here for a selection-regime change (fresh liquidity read)
 rather than an exit change.
+
+**Superseded 2026-08-20.** The cohort has reset again three times since (07-28, 08-07,
+08-12). The live value is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py`
+(2026-08-13 as of the 2026-08-12 reset). This note stays as the record of the 06-25
+reset only.

@@ -17,13 +17,20 @@ verify a GSC "issue fixed" validation actually held. Inspection quota is
 
 ## Auth — read this before debugging a 403
 
-**Invoke the `seo-auth` skill.** It carries the diagnostic table (three different
-403s look identical), the permanent service-account fix, and the traps. The
-sections below are the historical user-credential path, kept for reference —
-prefer `SEO_IMPERSONATE_SA` over re-consenting ADC.
+Auth is service-account impersonation. This is the only path that works:
 
-`reauth.sh` requires a real terminal. Without a TTY it exits 2 with instructions
-rather than crashing on gcloud's stdin prompt.
+```bash
+export SEO_IMPERSONATE_SA=ga-admin@profitscout-fida8.iam.gserviceaccount.com
+```
+
+The `seo-auth` skill (`.claude/skills/seo-auth/`) is the runbook. It carries
+the diagnostic table (three different 403s look identical), the one-time IAM
+binding, the property grants, and the traps. Invoke it on any auth failure.
+
+**The user-ADC path is DEAD.** Google blocked the shared gcloud client ID from
+the Search Console and Analytics scopes (confirmed 2026-08-08). Do not run
+`gcloud auth application-default login` with those scopes. `reauth.sh` is
+decommissioned.
 
 ## One-time setup
 
@@ -37,24 +44,12 @@ uv pip install --python scripts/seo/.venv/bin/python \
 The venv is git-ignored. Always run the scripts with its python:
 `scripts/seo/.venv/bin/python`.
 
-### 2. Grant your Google account access
-We auth via Application Default Credentials as **eraphaelparra@gmail.com**.
-Grant that account:
+### 2. Set up impersonation
+Follow Path A in the `seo-auth` skill: the token-creator IAM binding, the SA
+grants on the Search Console and GA4 properties, and the
+`SEO_IMPERSONATE_SA` export (persist it in `~/.bashrc`).
 
-- **GA4** → Admin → Property Access Management → add the email as **Viewer**
-- **Search Console** → Settings → Users and permissions → add the email as **Full** or **Restricted** user
-
-### 3. Re-consent ADC with the analytics + search-console scopes
-A plain `gcloud auth application-default login` does NOT carry the GA4 /
-Search Console read scopes, so the API calls will 403 even with property
-access. Re-run login with the scopes explicitly (one time):
-
-```bash
-gcloud auth application-default login \
-  --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/webmasters.readonly,https://www.googleapis.com/auth/cloud-platform
-```
-
-### 4. Tell the scripts where to look
+### 3. Tell the scripts where to look
 ```bash
 export GA4_PROPERTY_ID=123456789          # numeric id, no 'properties/' prefix
 export GSC_SITE_URL=sc-domain:gammarips.com   # or https://gammarips.com/
@@ -62,10 +57,10 @@ export GSC_SITE_URL=sc-domain:gammarips.com   # or https://gammarips.com/
 
 ## Auth notes
 
-- Locally, ADC resolves to your user account — that's why we grant
-  **eraphaelparra@gmail.com** on the properties directly.
-- `SEO_IMPERSONATE_SA` is still supported if you ever want to run these as
-  a service account (e.g. from Cloud Run); leave it unset to run as you.
+- `SEO_IMPERSONATE_SA` must be set. If you leave it unset, the scripts run
+  as your user ADC, which can no longer get the scopes (dead path above).
+- Plain ADC (no extra scopes) as eraphaelparra@gmail.com still supplies the
+  source credentials that impersonation builds on.
 
 ## Examples
 ```bash

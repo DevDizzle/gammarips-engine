@@ -23,4 +23,5 @@ rests on velocity + tail reduction. See [[exit-velocity-same-day-lever]].
 
 Consequence for research: any edge cited to justify a live trade must be proven under this
 same-day exit-context. Multi-day-hold findings (e.g. [[momentum-60d-enrichment-tilt]]) do
-NOT transfer.
+NOT transfer. The 2026-08-19 PM-entry study independently re-confirmed the same-day exit
+on a new substrate: an overnight hold removes the stop ([[overnight-hold-breaks-the-stop]]).

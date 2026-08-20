@@ -15,6 +15,7 @@ replaced an implicit "1 contract per trade" assumption that let a single expensi
 dominate invested-capital math.
 
 Both this and `LIVE_COHORT_START_DATE` live as constants in `signal-notifier/main.py` (the
-cohort-start value is era-specific and has been reset several times — the live value is
-`2026-06-26`, see [[v7-1-tilted-gigo-live-policy]]). The durable convention is the
+cohort-start value is era-specific and has been reset several times — the live value
+lives in `signal-notifier/main.py` (2026-08-13 as of the 2026-08-12 reset), see
+[[v7-1-tilted-gigo-live-policy]]). The durable convention is the
 display-layer fixed-dollar sizing, not the specific 2026-05 dates in the source decision.

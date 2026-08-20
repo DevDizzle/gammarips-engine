@@ -89,9 +89,6 @@ with `webmasters.readonly` or `analytics.readonly`, **stop** — that is the loo
 this skill exists to end. Go to Path A. `scripts/seo/reauth.sh` is retained only
 for its guard rails and should be considered decommissioned.
 
-The rest of this section is kept as an archaeological record so the failure is
-recognized instantly and not re-litigated.
-
 ### Why it looked like a TTY problem for so long
 
 Two unrelated failures stacked, and each hid the other:
@@ -106,41 +103,21 @@ Two unrelated failures stacked, and each hid the other:
 So every earlier session "fixed" problem 1, hit problem 2, and read it as another
 scope lapse. Both are now moot: Path A avoids user OAuth entirely.
 
-### The historical trap detail
+### FIFO holder recipe (reusable for any stdin-interactive CLI)
 
-`gcloud auth application-default login` prompts on stdin for a verification code.
-
-- The `!` prefix in Claude Code runs **without a TTY** → `gcloud crashed (EOFError)`.
-- `scripts/seo/reauth.sh` has the same problem for the same reason.
-- Backgrounding it with `< fifo` and holding the write end with `exec 3>fifo`
-  **also fails** — the Bash tool's shell exits, fd 3 closes, gcloud reads EOF.
-
-The write end needs a process that outlives the shell.
-
-### The working recipe
+The write end of the FIFO must belong to a process that outlives the Bash
+tool's shell:
 
 ```bash
 S=<scratchpad>
-rm -f $S/authfifo $S/auth.log; mkfifo $S/authfifo
-nohup gcloud auth application-default login --no-launch-browser \
-  --scopes=https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/webmasters.readonly,https://www.googleapis.com/auth/cloud-platform \
-  < $S/authfifo > $S/auth.log 2>&1 &
-nohup sleep 2400 > $S/authfifo &        # <-- holds the FIFO open; this is the whole trick
-sleep 6
-pgrep -f "auth application-default login" >/dev/null && echo WAITING || echo DEAD
-grep -oE 'https://accounts\.google\.com/o/oauth2/auth[^ ]*' $S/auth.log | head -1
+mkfifo $S/fifo
+nohup <interactive-cli> < $S/fifo > $S/out.log 2>&1 &
+nohup sleep 2400 > $S/fifo &   # holds the FIFO open (the whole trick)
+echo "<answer>" > $S/fifo      # later: deliver the prompt answer
 ```
 
-Give the owner the URL, get the `4/...` code back **in chat**, then deliver it:
-
-```bash
-echo "4/0AX4..." > $S/authfifo
-sleep 5 && tail -3 $S/auth.log        # confirm credentials were saved
-```
-
-This recipe successfully reaches the consent screen. The consent screen then
-blocks. Kept only because the FIFO holder trick is reusable for *any* stdin-
-interactive CLI run from the Bash tool.
+For this auth flow the recipe reaches the consent screen, which then blocks.
+Keep the trick for other stdin-interactive CLIs. Do not use it to retry Path B.
 
 ---
 

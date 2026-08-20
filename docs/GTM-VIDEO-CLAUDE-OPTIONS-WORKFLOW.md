@@ -143,8 +143,9 @@ small bullish pool, two safety rails), then run `/trade` and get out of the way.
       the agent rejecting most of the pool, and the negative-composite disclosure.
 - [ ] Blur/skip anything showing the private tournament pick or operator email.
 - [ ] UTM links in description; confirm GA4 picks up `utm_source=youtube`.
-- [ ] After publish: iframe swap on `landing/video-led`, then `/ship` from
-      workspace root; X unpin 03-14 post, pin this.
+- [ ] After publish: uncomment the iframe slot in
+      `src/components/landing/hero.tsx` on a fresh branch off `main`, then
+      `/ship` from workspace root; X unpin 03-14 post, pin this.
 - [ ] Measure: YouTube CTR/retention, GA4 youtube-source sessions, begin_checkout
       from youtube source. This traffic is the organic CVR baseline the ads
       decision (memory `owner-goal-100-paid-subs-eoy2026`) is waiting on.

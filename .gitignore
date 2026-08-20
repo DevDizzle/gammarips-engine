@@ -44,10 +44,11 @@ build/
 _archive/*
 !_archive/research_reports_2026-04/
 
-# Firebase CLI debug log — regenerable local noise, root only. Anchored with a
-# leading slash on purpose: an unanchored pattern would also swallow the copy
-# archived under docs/archive/assets/ (2026-08-10 root cleanup).
+# Firebase CLI debug log — regenerable local noise. The archived copy under
+# docs/archive/assets/ was untracked in the 2026-08-20 hygiene pass (local
+# copy stays on disk).
 /firebase-debug.log
+docs/archive/assets/firebase-debug.log
 
 # Cache dirs
 .mypy_cache/
@@ -86,6 +87,10 @@ dbt-runner/dbt/
 # SEO scripts local venv
 scripts/seo/.venv/
 
-# Realized-option-PnL label artifact (738K binary; regenerate via realized_option_label.py)
-backtesting_and_research/realized_label.pkl
+# Research output artifacts — binaries and fetch logs, regenerable from the
+# dated scripts. Untracked in the 2026-08-20 hygiene pass (local copies stay).
+backtesting_and_research/*.parquet
+backtesting_and_research/*.pkl
+backtesting_and_research/*.log
+.scratch/
 .gstack/

@@ -9,15 +9,15 @@ Curated knowledge base for the strategy research effort. Read top-down.
 
 ## Start here
 
-1. **[`INTELLIGENCE_BRIEF.md`](INTELLIGENCE_BRIEF.md)** — top-of-stack 2-page brief. Where we are, what we know, open hypotheses (H1–H8), hard constraints. Read this first.
-2. **[`FINDINGS_LEDGER.md`](FINDINGS_LEDGER.md)** — durable evidence base. Every numeric finding from the 12 source reports, organized by topic, with the actual tables preserved verbatim. Citations back to the archived originals.
-3. **[`STRATEGY_PLAYBOOK.md`](STRATEGY_PLAYBOOK.md)** — forward-looking strategy menu. Each open hypothesis as a one-pager: thesis, mechanics, validation criteria, and prior evidence.
+0. **[`../wiki/_index/REGISTRY.md`](../wiki/_index/REGISTRY.md)** — the one-claim compiled layer. Start here for any "what is true about lever X" question.
+1. **[`INTELLIGENCE_BRIEF.md`](INTELLIGENCE_BRIEF.md)** — top-of-stack brief. Current beliefs, narrative, and open questions.
+2. **[`FINDINGS_LEDGER.md`](FINDINGS_LEDGER.md)** — durable evidence base. Read it by index section only, never whole. Wiki notes cite it by section anchor.
 
 ## Live handoff
 
 - **`../../NEXT_SESSION_PROMPT.md`** — at repo root. The cold-start briefing for the next session. Updated in place when work pauses.
 
-## Archived V1/V5.4-era reports + handoffs (2026-07-17)
+## Archived reports + handoffs
 
 Moved to [`../archive/research_reports/`](../archive/research_reports/) — historical, not
 authoritative:
@@ -27,6 +27,11 @@ authoritative:
 - `2026-04-17-cohort-scan-labeled-v1.md`, `V5_4_METHODOLOGY_AUDIT_2026_05_09.md`.
 - `handoffs/` — the Deep Research prompts + outputs (volatility-idiosyncratic trap dx,
   Feb–Apr 2026 regime characterization).
+- `STRATEGY_PLAYBOOK.md` — V4-era hypothesis menu, archived 2026-08-20. All of its
+  hypotheses are resolved or superseded. Successors: `docs/TRADING-STRATEGY.md` +
+  the wiki registry + `INTELLIGENCE_BRIEF.md`.
+- `handoffs-2026-08/` — the eight 2026-08 inter-repo handoffs, archived 2026-08-20.
+  All raised items are closed by shipped fixes or `docs/DECISIONS/` notes.
 
 ## Archive — original per-experiment reports
 

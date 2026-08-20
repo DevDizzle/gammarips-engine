@@ -1,5 +1,10 @@
 # Strategy Playbook — GammaRips
 
+> **ARCHIVED 2026-08-20.** This is the April-2026 (pre-V6) strategy menu. Every H1-H8
+> hypothesis in it is resolved, superseded, or refuted. Successors: `docs/TRADING-STRATEGY.md`
+> (live policy), `docs/wiki/_index/REGISTRY.md` (compiled claims), and
+> `docs/research_reports/INTELLIGENCE_BRIEF.md` (current beliefs). Kept verbatim as history.
+
 > Forward-looking design space. Each section is a strategy candidate with thesis, mechanics, validation criteria, and the prior evidence that supports or refutes it. Read alongside `INTELLIGENCE_BRIEF.md` (top-of-stack) and `FINDINGS_LEDGER.md` (evidence base).
 
 The strategy hypotheses are stable-IDed (H1, H2, …) so future sessions can reference them by ID. Order is the recommended experiment sequence.

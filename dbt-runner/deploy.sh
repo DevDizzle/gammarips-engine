@@ -3,7 +3,8 @@
 #
 # PRECONDITIONS (do NOT skip):
 #   1. The dbt layer has had a green live `dbt build` at least once (operator OAuth).
-#   2. gammarips-review has passed on this service (it schedules a live BQ build).
+#   2. Optional: ask the owner if they want a gammarips-review pass (it schedules a
+#      live BQ build). The review is owner-invoked, never a gate.
 #
 # Vendors the dbt/ project into ./dbt (gitignored) so `gcloud run deploy --source=.`
 # from this directory has the project in its build context, then cleans it up.

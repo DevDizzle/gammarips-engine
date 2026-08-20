@@ -1,4 +1,9 @@
 #!/bin/bash
+# HISTORICAL — DEAD. Do not run this script.
+# This is the 2026-02 Functions -> Cloud Run migration script, kept as a record.
+# Successors: each service's own deploy.sh plus the /deploy-service skill.
+# The --allow-unauthenticated flags below contradict the 2026-07-02 service-auth
+# hardening and the 2026-08-07 IAM lockdown decisions.
 set -e
 
 PROJECT="profitscout-fida8"

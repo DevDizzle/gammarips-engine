@@ -1,5 +1,10 @@
 # 2026-07-17 — Simplification Replan (MASTER, 4 plans)
 
+> **EXECUTED — archived 2026-08-20.** All four plans shipped: the 9-tool MCP v4 map is the
+> live tool surface, the trader skill upgrade and public-repo pass landed, the webapp
+> skeleton shipped, and the engine wiki distill is `docs/wiki/`. This is history, not a
+> plan of record.
+
 **Status: RATIFIED by owner 2026-07-17. This is the plan of record.** Slice files with
 per-repo checklists: `gammarips-mcp/REPLAN-2026-07-17.md`, `gammarips-trader/REPLAN-2026-07-17.md`,
 `gammarips-webapp/REPLAN-2026-07-17.md`. Memory digest: `project_simplification_replan_2026_07_17`
