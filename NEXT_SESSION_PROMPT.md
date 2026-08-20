@@ -7,22 +7,21 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## Active workstream — commit the 08-19/08-20 work
-The working tree holds two coherent uncommitted lanes. Nothing is committed.
-`PRINT_FLOOR_MIN=25` shipped and the score floor was accepted at 1 on 08-20
-(`docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`).
-1. **Commit lane A (08-19 research):** 4 `backtesting_and_research/2026-08-19_*.py`
-   scripts, `docs/EXECUTION-RISK-GUIDELINES.md`, the NOT-ADOPTED decision note
-   `docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md`, the pre-registered
-   `docs/EXEC-PLANS/2026-08-19-pool-benchmark-test-spec.md` (amended pre-data 08-20;
-   do NOT modify after data), plus ledger/brief/wiki additions.
-2. **Commit lane B (08-20 scaffold cleanup):** ~70 files — docs synced to code, all
-   retired-gate language scrubbed, 9 new wiki notes, archive moves (staged), memory
-   maintenance, settings prune. Audit + edit trail in this session's transcript.
-3. **Run the pool-vs-benchmark test** per the pre-registered spec (blocked behind the
-   POLYGON_API_KEY rotation it names).
-Open owner call from the 08-19 research (flagged once, do not re-raise): later
-same-day entry ([[first-hour-bleed]]).
+## Active workstream — run the two pre-registered studies
+All 08-19/08-20 work is COMMITTED AND PUSHED (research, scaffold cleanup,
+print-floor-25 deploy + cohort 2026-08-21, score floor accepted at 1:
+`docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`).
+1. **Liquid-universe funnel study** per the pre-registered
+   `docs/EXEC-PLANS/2026-08-20-liquid-universe-funnel-spec.md` (owner-directed
+   08-20). Start with Phase 0 (BigQuery-only data audit, runnable now). The
+   B-vs-C control arm answers "does relative-UOA carry signal"; executability
+   alone is NOT the profit claim. Frozen once data is pulled.
+2. **Pool-vs-benchmark test** per `docs/EXEC-PLANS/2026-08-19-pool-benchmark-test-spec.md`
+   (amended pre-data 08-20; do NOT modify after data). Share pulls + window
+   with study 1 where possible.
+Both Polygon-dependent phases wait for the POLYGON_API_KEY rotation (owner
+queue). Open owner call from the 08-19 research (flagged once, do not
+re-raise): later same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM (compressed; shipped state in memory `oauth-as-built-2026-08-19`)
 - OAuth AS + `/pro` LIVE since 08-19 (e2e 24/24 on prod). Secrets owner call is
