@@ -52,7 +52,11 @@ same-day entry ([[first-hour-bleed]]).
 - win-tracker redeploy (committed + pushed `d44a272`); verify x-poster +
   blog-generator redeployed so the vendored cohort pin carries 2026-08-21 (redeploy
   needed; blog-generator's Mon 05:00 cron exposure unchanged).
-- Webapp score-claim scrub PR pending merge (copywriter + `/ship` gate).
+- 🔴 MCP deploy pending: `2fb5224` (score-floor truth + cohort 2026-08-21 mirror)
+  is pushed, NOT deployed — subscribers read the old text until it ships. One
+  command in `~/workspace/MCP-DEPLOY.txt`.
+- Webapp score-claim scrub PR #27 pending merge (copywriter + `/ship` gate;
+  merge auto-deploys production).
 - Compliance substring misfires (`'for you'`, `'guaranteed'` negations,
   `libs/gammarips_content/compliance.py:125`); `$19`/`Starter tier` not in aliases.
 - Organic Social halved (67→35 sessions/28d) — x-poster lane needs its own look.
