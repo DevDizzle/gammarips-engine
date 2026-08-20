@@ -10,12 +10,13 @@ V7.1 = V6 bracket-tournament SELECTION + V7 same-day intraday EXIT + the ".1"
 60-day-momentum enrichment tilt (`docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md`).
 
 **Cohort:** the live value is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py`
-(2026-08-13 as of the 2026-08-12 reset). Do not cache the date in docs. Reset
+(2026-08-21 as of the 2026-08-20 reset). Do not cache the date in docs. Reset
 history in one line: 06-25 (live-OI floor), 07-28 (tournament-liquidity upgrade,
 entry 07-29), 08-07 (stale-day-bar fix, entry 08-10), 08-12 (fail-soft restore
-lockdown, entry 08-13). The 06-04 V6 launch and the 06-22 V7.1 relabel truncated
-the ledger. The four later resets kept all rows and moved the date filter only.
-See `docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md`.
+lockdown, entry 08-13), 08-20 (print floor 25, entry 08-21). The 06-04 V6 launch
+and the 06-22 V7.1 relabel truncated the ledger. The five later resets kept all
+rows and moved the date filter only.
+See `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`.
 
 ## Objective
 Generate at most one high-conviction options alert per trading day, execute it
@@ -63,8 +64,13 @@ Order: scan → enrichment → notifier rails → BULLISH gate + cap → liquidi
 floors → tournament. Each item cites its decision note.
 
 **Enrichment (`enrichment-trigger`) defines "enriched":**
-- `overnight_score >= 4` floor, a floor not a ceiling
-  (2026-06-05, `docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md`).
+- `overnight_score >= 1` floor. The 2026-06-05 `>= 4` decision never ran: the
+  deploy.sh env pin (`MIN_ENRICHMENT_SCORE=1`, set 2026-04-20) overrides the
+  code default, so production has enriched at `>= 1` throughout. Accepted as
+  the policy 2026-08-20 (owner call): the floor is measured cosmetic — removing
+  `>= 4` changes the top-50 pool on 1 of 20 days (FINDINGS_LEDGER §Pool
+  tradeability). See
+  `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`.
 - Directional UOA > $500K (`call_uoa_depth` if bullish, `put_uoa_depth` if bearish).
 - Spread gate RETIRED: this Polygon plan serves no options NBBO, so
   `recommended_spread_pct` is permanently NULL
@@ -108,11 +114,13 @@ true of the live service. The live value is the code default 12.
 - **Tier 1, early-print floor.** The `day` bar is date-validated in ET. A bar
   dated before today counts as a KNOWN 0 prints
   (2026-08-07, `docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md`).
-  `PRINT_FLOOR_MIN`: code default 1. The owner adopted raising it to 25 on
-  2026-08-19, not yet deployed (live env still 1 as of 2026-08-20). The adoption
-  is recorded in the header of
-  `docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md`. That note's
-  enrichment admission-floor design was NOT adopted.
+  `PRINT_FLOOR_MIN=25` (live env; code default 1; deployed 2026-08-20, adopted
+  2026-08-19). Measured over 31 days: slate ghost rate 36.7% → 9.4%, tradeable
+  share 25.4% → 62.6%, ~3% of days fall below `TOURNEY_MIN` (a legitimate
+  no-pick day). Cohort reset to 2026-08-21 with the change. Rollback lever:
+  `PRINT_FLOOR_MIN=1`. See
+  `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`;
+  the 08-19 note's enrichment admission-floor design was NOT adopted.
 - **Tier 2, live-OI floor.** Fresh open interest is re-fetched per candidate
   from Polygon at pick time. Candidates below `OI_FLOOR` are dropped
   (live env 1000, code default 200)

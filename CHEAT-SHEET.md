@@ -1,7 +1,7 @@
 # GammaRips Cheat Sheet — V7.1 "Tilted GIGO"
 
 ## What this system does
-Scans overnight unusual options activity → a randomized bracket **tournament** over the enriched BULLISH pool picks one trade per day → emails you the pick (clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM using the **published limit price** → stop + target pre-set → **flat by 3:45 PM the SAME day** (no overnight, no trail). Public live-stats panel (`cohort_stats/current`) reflects the live cohort (`policy_version='V7_1_TILTED_GIGO'`, reset to 2026-08-13 for fail-soft-restore-closed selection, see `docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md`).
+Scans overnight unusual options activity → a randomized bracket **tournament** over the enriched BULLISH pool picks one trade per day → emails you the pick (clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM using the **published limit price** → stop + target pre-set → **flat by 3:45 PM the SAME day** (no overnight, no trail). Public live-stats panel (`cohort_stats/current`) reflects the live cohort (`policy_version='V7_1_TILTED_GIGO'`, reset to 2026-08-21 for the print-floor-25 selection, see `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`).
 
 ## Your daily routine
 | Time | Action |
@@ -25,10 +25,10 @@ The email + webapp show a **fresh entry-day mark** (a delayed same-day price, da
 
 ## The signal filter (what reaches your inbox)
 V7.1 has **no execution-side gates** — selection is the tournament. Upstream, only the enrichment bar + a hard direction gate + a liquidity floor + two safety rails apply:
-1. Overnight score ≥ 4 (enrichment floor; EV inverts at ≥ 7)
+1. Overnight score ≥ 1 (floor accepted at 1, 2026-08-20 — cosmetic; the UOA bar + top-50 cap do the filtering; EV inverts at ≥ 7)
 2. Directional UOA > $500K (enrichment)
 3. **BULLISH-only** (hard gate — the edge levers are call-delta-defined)
-4. **Early-print floor + Live OI ≥ 1000** at pick time (two-tier, live since 2026-07-28): a contract showing a known **0 prints** at the ~09:52 delayed read is dropped (0 prints → 68% chance the day stays untradeable); live OI stays as the secondary floor (FRESH open interest, not stale scan-time OI, 2026-06-25)
+4. **Early-print floor + Live OI ≥ 1000** at pick time (two-tier): a contract with fewer than **25 KNOWN prints** at the ~09:52 delayed read is dropped (`PRINT_FLOOR_MIN=25`, raised from 1, live 2026-08-20); live OI stays as the secondary floor (FRESH open interest, not stale scan-time OI, 2026-06-25)
 5. **No earnings during the hold** — exclude any ticker reporting in the hold window. Literature-anchored hard rule (De Silva et al. 2026 *Review of Finance*). Fail-closed if the earnings calendar is unreachable.
 6. **VIX ≤ VIX3M** — skip the whole day if backwardation.
 

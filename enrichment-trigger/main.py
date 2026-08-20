@@ -3,8 +3,10 @@ Overnight Edge Enrichment Trigger
 Cloud Function: enrichment_trigger (HTTP)
 Project: profitscout-fida8
 
-Reads today's overnight_signals where score >= 6,
-then triggers news + technicals enrichment for those tickers only.
+Reads today's overnight_signals where score >= MIN_ENRICHMENT_SCORE (1 —
+accepted as the de-facto floor 2026-08-20; the score floor is cosmetic, the
+UOA + BULLISH + top-N cap do the filtering), then triggers news + technicals
+enrichment for those tickers only.
 """
 
 import io
@@ -42,7 +44,7 @@ GCS_BUCKET = os.getenv("GCS_BUCKET", "profit-scout-data")
 SIGNALS_TABLE = f"{PROJECT_ID}.{DATASET}.overnight_signals"
 # Floor only (drops proven-bad score<=3 dregs); NOT a ceiling — score EV
 # inverts at >=7. Env override preserved.
-MIN_SCORE = int(os.getenv("MIN_ENRICHMENT_SCORE", "4"))
+MIN_SCORE = int(os.getenv("MIN_ENRICHMENT_SCORE", "1"))  # 1 = de-facto floor since 2026-04-20, accepted by owner call 2026-08-20; the >=4 default (06-05) never ran because the deploy.sh env pin wins. See docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md.
 
 # Polygon
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip()

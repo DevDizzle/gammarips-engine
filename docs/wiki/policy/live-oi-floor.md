@@ -2,7 +2,7 @@ Status: active
 Type: policy
 Tag: policy-adopted
 Exit-context: n/a (a pick-time liquidity refresh, not an edge)
-Source: docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md; docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md; docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md; docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md; docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md (status header)
+Source: docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md; docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md; docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md; docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md; docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md (status header); docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md
 Date: 2026-08-12
 
 # The two-tier slate floor at the ~09:52 ET pick
@@ -11,11 +11,11 @@ Date: 2026-08-12
 **two floors** before the tournament sees the slate:
 
 1. **PRIMARY — early prints.** Drop a contract whose entry-day print count is a KNOWN int
-   below `PRINT_FLOOR_MIN` (code default 1). The owner adopted a raise to 25 on
-   2026-08-19 (ghost rate 36.7%→9.4% over 31 days, at the cost of ~3% of days falling
-   below `TOURNEY_MIN`; recorded in the status header of
-   docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md). The raise is NOT yet
-   deployed: the live env value is still 1 as of 2026-08-20. The count is date-validated
+   below `PRINT_FLOOR_MIN` (live env **25** since 2026-08-20, raised from 1; ghost rate
+   36.7%→9.4% over 31 days, at the cost of ~3% of days falling below `TOURNEY_MIN` —
+   those are legitimate no_liquid_candidates no-pick days; adopted 2026-08-19, deployed
+   2026-08-20 on `signal-notifier-00062-wvm`, see
+   docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md). The count is date-validated
    against `day.last_updated`, because Polygon serves the prior session's bar rather than
    a zero ([[polygon-snapshot-never-zero-day-bar]]). A fetch failure is UNKNOWN,
    not zero: that row is KEPT and falls through to the OI floor (fail-open per row).
@@ -43,6 +43,6 @@ gates STRICT days only — the fallback path bypasses it. Neither floor measures
 or dollar depth**, which is what actually decides whether the position can be exited
 ([[spread-gate-retired]]); both are proxies, and a 44.6%-spread contract cleared them on
 2026-08-12. The cohort was reset when the OI floor landed (06-25), again when the print
-floor started firing (08-07), and again for the 08-12 restore change: the current cohort
-starts 2026-08-13 (`LIVE_COHORT_START_DATE` in `signal-notifier/main.py`, owner call
-after review challenged the original no-reset call).
+floor started firing (08-07), again for the 08-12 restore change, and again when the
+print floor rose to 25 (08-20): the current cohort starts 2026-08-21
+(`LIVE_COHORT_START_DATE` in `signal-notifier/main.py`).

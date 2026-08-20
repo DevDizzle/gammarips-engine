@@ -19,7 +19,7 @@ This is the reset that set the then-current `LIVE_COHORT_START_DATE='2026-06-26'
 ([[cohort-reset-on-filter-change]]), here for a selection-regime change (fresh liquidity read)
 rather than an exit change.
 
-**Superseded 2026-08-20.** The cohort has reset again three times since (07-28, 08-07,
-08-12). The live value is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py`
-(2026-08-13 as of the 2026-08-12 reset). This note stays as the record of the 06-25
+**Superseded 2026-08-20.** The cohort has reset again four times since (07-28, 08-07,
+08-12, 08-20). The live value is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py`
+(2026-08-21 as of the 2026-08-20 reset). This note stays as the record of the 06-25
 reset only.

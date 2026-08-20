@@ -16,6 +16,6 @@ dominate invested-capital math.
 
 Both this and `LIVE_COHORT_START_DATE` live as constants in `signal-notifier/main.py` (the
 cohort-start value is era-specific and has been reset several times — the live value
-lives in `signal-notifier/main.py` (2026-08-13 as of the 2026-08-12 reset), see
+lives in `signal-notifier/main.py` (2026-08-21 as of the 2026-08-20 reset), see
 [[v7-1-tilted-gigo-live-policy]]). The durable convention is the
 display-layer fixed-dollar sizing, not the specific 2026-05 dates in the source decision.

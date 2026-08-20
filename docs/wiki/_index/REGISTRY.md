@@ -5,12 +5,12 @@ One line per note: `[[slug]] — tag — one-line claim`. Schema + conventions:
 policy and why" — the live V7.1 surface is the Policy section, its evidence is in Findings.
 
 ## Policy (`policy/`) — live operating rules
-- [[v7-1-tilted-gigo-live-policy]] — policy-adopted — the live policy is V7.1 "Tilted GIGO" = V6 selection + V7 same-day exit + the momentum tilt (`policy_version='V7_1_TILTED_GIGO'`; cohort start lives in `signal-notifier/main.py`, 2026-08-13 as of the 08-12 reset)
+- [[v7-1-tilted-gigo-live-policy]] — policy-adopted — the live policy is V7.1 "Tilted GIGO" = V6 selection + V7 same-day exit + the momentum tilt (`policy_version='V7_1_TILTED_GIGO'`; cohort start lives in `signal-notifier/main.py`, 2026-08-21 as of the 08-20 reset)
 - [[bracket-tournament-selection]] — policy-adopted — one pick/day or none via a 3-bracket randomized tournament (consensus 3/3=high, no memory/rubric, fail-closed no fallback)
 - [[bullish-only-hard-gate]] — policy-adopted — BULLISH-only is a HARD gate (env-toggleable, overrides the bearish-regime caveat for now)
 - [[tourney-pool-cap-edge-rank]] — policy-adopted — pool is soft-edge-ranked then capped to TOURNEY_POOL_CAP (live value 12, code default; fallback skips the edge-cap)
 - [[v7-gigo-same-day-exit]] — policy-adopted — live exit: 10:00 entry / +40% TP / −30% stop / flat 15:45 ET, no trail, no overnight; TIMEOUT>STOP>TARGET
-- [[live-oi-floor]] — policy-adopted — two-tier slate floor at ~09:52 ET (early prints, then OI_FLOOR=1000; print-floor raise 1→25 adopted 08-19, not yet deployed); a dropped candidate never comes back
+- [[live-oi-floor]] — policy-adopted — two-tier slate floor at ~09:52 ET (early prints `PRINT_FLOOR_MIN=25` since 08-20, then OI_FLOOR=1000); a dropped candidate never comes back
 - [[no-liquid-candidates-no-pick]] — policy-adopted — when nothing clears the liquidity floors the engine stands down instead of ranking the reject pile
 - [[earnings-exclusion-rail]] — policy-adopted — safety rail 1: no earnings in the hold/exclusion window (literature-anchored)
 - [[regime-rail-vix-term]] — policy-adopted — safety rail 2: fail closed when VIX > VIX3M
@@ -25,7 +25,7 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 
 ## Architecture (`architecture/`) — pipeline / data-contract facts
 - [[selection-gates-removed]] — architecture-fact — all selection gates removed 2026-06-04; all enriched signals reach the tournament
-- [[enrichment-definition]] — architecture-fact — "enriched" = overnight_score ≥ 4 (floor, EV inverts ≥7) + directional UOA > $500K (all directions)
+- [[enrichment-definition]] — architecture-fact — "enriched" = overnight_score ≥ 1 (floor accepted at 1 on 08-20, cosmetic; EV inverts ≥7) + directional UOA > $500K (all directions)
 - [[spread-gate-retired]] — architecture-fact — no Polygon NBBO quotes; spread permanently NULL; prices off last-trade/day-close
 - [[assert-no-leakage-gate]] — architecture-fact — every candidate is assert_no_leakage-checked before the LLM (the one non-negotiable)
 - [[pipeline-bug-hunt-2026-06-04]] — architecture-fact — 13 silent data bugs fixed (fake spreads, divergence-flip order, technicals lookahead, stale fields)

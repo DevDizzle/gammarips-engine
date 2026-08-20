@@ -22,9 +22,13 @@ echo "Deploying $SERVICE_NAME to Cloud Run in project $PROJECT_ID..."
 # requires the 09:52 ET cron; at 09:45 the delayed feed shows nothing):
 #   PRINT_FLOOR_ENABLED=true  kill switch — false = bit-identical pre-2026-07-28
 #                             single-tier OI-floor behavior
-#   PRINT_FLOOR_MIN=1         a contract must show >= this many KNOWN prints at
-#                             the ~09:52 read to stay (None = unknown = kept)
-# See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md.
+#   PRINT_FLOOR_MIN=25        a contract must show >= this many KNOWN prints at
+#                             the ~09:52 read to stay (None = unknown = kept).
+#                             Raised 1 -> 25 on 2026-08-20 (owner call 08-19):
+#                             ghost rate 36.7% -> 9.4% over 31 measured days.
+#                             Rollback lever: set 1.
+# See docs/DECISIONS/2026-07-28-tournament-liquidity-upgrade.md and
+# docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md.
 #
 # Fail-soft restore mode (2026-08-12). A candidate that fails a liquidity floor
 # must never become the pick. The old always-on restore fed the rejects to a
@@ -65,7 +69,7 @@ gcloud run deploy $SERVICE_NAME \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=1 \
-  --set-env-vars="SIGNAL_JUDGE_URL=https://signal-judge-406581297632.us-central1.run.app,OI_FLOOR=1000,TOURNEY_MIN=8,LIQUIDITY_TILT=true,PRINT_FLOOR_ENABLED=true,PRINT_FLOOR_MIN=1,PRINT_VALID_AFTER_ET_MIN=590,PRINT_BAR_MAX_AGE_DAYS=10,FAILSOFT_RESTORE_MODE=none,LIVE_FETCH_MIN_OK_FRAC=0.5" \
+  --set-env-vars="SIGNAL_JUDGE_URL=https://signal-judge-406581297632.us-central1.run.app,OI_FLOOR=1000,TOURNEY_MIN=8,LIQUIDITY_TILT=true,PRINT_FLOOR_ENABLED=true,PRINT_FLOOR_MIN=25,PRINT_VALID_AFTER_ET_MIN=590,PRINT_BAR_MAX_AGE_DAYS=10,FAILSOFT_RESTORE_MODE=none,LIVE_FETCH_MIN_OK_FRAC=0.5" \
   --set-secrets="MAILGUN_API_KEY=MAILGUN_API_KEY:latest,MAILGUN_DOMAIN=MAILGUN_DOMAIN:latest,FMP_API_KEY=FMP_API_KEY:latest,POLYGON_API_KEY=POLYGON_API_KEY:latest,POOL_LIQ_REFRESH_TOKEN=POOL_LIQ_REFRESH_TOKEN:latest" \
   --service-account="firebase-adminsdk-fbsvc@$PROJECT_ID.iam.gserviceaccount.com"
 

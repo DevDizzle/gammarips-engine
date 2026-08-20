@@ -7,8 +7,10 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## Active workstream — commit the 08-19/08-20 work, then ship the print floor
+## Active workstream — commit the 08-19/08-20 work
 The working tree holds two coherent uncommitted lanes. Nothing is committed.
+`PRINT_FLOOR_MIN=25` shipped and the score floor was accepted at 1 on 08-20
+(`docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`).
 1. **Commit lane A (08-19 research):** 4 `backtesting_and_research/2026-08-19_*.py`
    scripts, `docs/EXECUTION-RISK-GUIDELINES.md`, the NOT-ADOPTED decision note
    `docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md`, the pre-registered
@@ -17,17 +19,10 @@ The working tree holds two coherent uncommitted lanes. Nothing is committed.
 2. **Commit lane B (08-20 scaffold cleanup):** ~70 files — docs synced to code, all
    retired-gate language scrubbed, 9 new wiki notes, archive moves (staged), memory
    maintenance, settings prune. Audit + edit trail in this session's transcript.
-3. **Ship `PRINT_FLOOR_MIN=25` on signal-notifier** — owner call 08-19, NOT deployed:
-   live env verified `=1` on 08-20, `deploy.sh` pins 1. Update the deploy.sh pin in the
-   same change. `/deploy-service`.
-4. 🔴 **Production drift found 08-20: `MIN_ENRICHMENT_SCORE=1` is live** on
-   enrichment-trigger (env wins over the code default 4). Docs and the owner-approved
-   policy say score≥4; deploy.sh has pinned 1 since 04-13. Owner call: set 4 or record
-   why 1 stands. Do not change the env without his answer.
-5. **Run the pool-vs-benchmark test** per the pre-registered spec (blocked behind the
+3. **Run the pool-vs-benchmark test** per the pre-registered spec (blocked behind the
    POLYGON_API_KEY rotation it names).
-Open owner calls from the 08-19 research (each flagged once, do not re-raise): later
-same-day entry ([[first-hour-bleed]]), ghost-free pool shape (decision-note header).
+Open owner call from the 08-19 research (flagged once, do not re-raise): later
+same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM (compressed; shipped state in memory `oauth-as-built-2026-08-19`)
 - OAuth AS + `/pro` LIVE since 08-19 (e2e 24/24 on prod). Secrets owner call is
@@ -55,8 +50,9 @@ same-day entry ([[first-hour-bleed]]), ghost-free pool shape (decision-note head
 - Record the disposition of the PASSED 08-17 zero-trials kill-switch gate (one answer,
   then the note settles; memory `mcp-monetization-killswitch`). The 10-05 gate stands.
 - win-tracker redeploy (committed + pushed `d44a272`); verify x-poster +
-  blog-generator redeployed after `d44a272` so the vendored cohort pin carries
-  2026-08-13 (blog-generator's Mon 05:00 cron is the exposure).
+  blog-generator redeployed so the vendored cohort pin carries 2026-08-21 (redeploy
+  needed; blog-generator's Mon 05:00 cron exposure unchanged).
+- Webapp score-claim scrub PR pending merge (copywriter + `/ship` gate).
 - Compliance substring misfires (`'for you'`, `'guaranteed'` negations,
   `libs/gammarips_content/compliance.py:125`); `$19`/`Starter tier` not in aliases.
 - Organic Social halved (67→35 sessions/28d) — x-poster lane needs its own look.
@@ -64,6 +60,8 @@ same-day entry ([[first-hour-bleed]]), ghost-free pool shape (decision-note head
   `status: published`; lx6bb stray docs call; Cursor listing v4; X pins/bio; Stripe MCP.
 
 ## Watch / dated checkpoints
+- First pick under `PRINT_FLOOR_MIN=25`: next 09:52 ET run. Expect a thinner slate. A
+  `no_liquid_candidates` no-pick day is correct.
 - 🔴 One trial checkout to confirm `purchase` attaches to a real GA4 session — the only
   unverified item from 08-08, gates Show HN.
 - Owner's 08-13 trial conversion: `invoice.paid` on the new webhook path + `proUntil`
@@ -104,6 +102,6 @@ same-day entry ([[first-hour-bleed]]), ghost-free pool shape (decision-note head
 ## Live posture
 - V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` (rewritten lean 08-20) + wiki
   `REGISTRY.md` + `CHEAT-SHEET.md`. Cohort start: `LIVE_COHORT_START_DATE` in
-  `signal-notifier/main.py` (2026-08-13; never hardcode it in docs).
+  `signal-notifier/main.py` (2026-08-21; never hardcode it in docs).
 - Owner trades LIVE (Robinhood since 07-09). Daily crons run; MCP paywall ENFORCE.
 - Health: operator digest 07:15 ET weekdays; SEO auth via the `seo-auth` skill.

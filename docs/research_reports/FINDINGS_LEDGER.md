@@ -38,7 +38,7 @@ Read this file by section, never whole. Status legend: **LIVE-DOCTRINE** (claim 
 | §2026-08-19 (execution) | execution risk is exit certainty, not spread; stop fills slip one-sided | LIVE-DOCTRINE | [[execution-risk-is-exit-certainty]] |
 | §2026-08-19 (tradeable subset) | ghosts flattered the pool (-4.67% vs -9.59%); contract_score re-test FAILS | LIVE-DOCTRINE | [[ghost-rows-flatter-pool-composites]], [[contract-score-lead-dead]] |
 | §2026-08-19 (bracket sweep, tradeable) | 0/432 on the honest substrate; the ghost objection is closed | LIVE-DOCTRINE | [[bracket-optimization-dead]] |
-| §2026-08-19 (pool construction) | ghost-free pool of 50 impossible; outcome: PRINT_FLOOR_MIN=25 adopted, not yet deployed | LIVE-DOCTRINE | [[live-oi-floor]] |
+| §2026-08-19 (pool construction) | ghost-free pool of 50 impossible; outcome: PRINT_FLOOR_MIN=25 deployed 2026-08-20 | LIVE-DOCTRINE | [[live-oi-floor]] |
 | §2026-08-19 (entry hour) | 10:00-11:00 carries the whole day's bleed; later entry is an open owner call | LIVE-DOCTRINE (owner call open) | [[first-hour-bleed]] |
 
 ---
@@ -283,7 +283,7 @@ Source: `_archive/research_reports_2026-04/WINNING_FILTER_DISCOVERY_V1.md`.
 
 ## Dead-ends — option-PnL gate discovery (2026-06-05, workflow `wf_16b5c00d-347`)
 
-Multi-agent fan-out over 8 feature families + walk-forward / day-block-bootstrap validation on the REAL option-PnL bracket-replay label (`analysis_option_pnl.parquet`, **N=1375 FILLED**, entry_day 2026-04-13…05-29, 33 days). Full-pool baseline mean `realized_ret = -0.0044` (win 0.413). **The only robust, leakage-clean, breadth-viable lever was DIRECTION** (bullish-only EV +0.0411 / win 0.470 / ~26 per day; bearish -0.0771) — and the owner declined to bake in bullish-only (the bearish penalty is almost certainly regime-conditional, untestable here: `vix3m_at_enrich` had near-zero variance 19.45–21.51, single 2026-Q1/Q2 war-chop window). Decision: keep all directions, shelve "exclude bearish" to an N≥15 live-cohort revisit; deploy the `overnight_score >= 4` floor only. Everything below was tested as an EV gate and FAILED:
+Multi-agent fan-out over 8 feature families + walk-forward / day-block-bootstrap validation on the REAL option-PnL bracket-replay label (`analysis_option_pnl.parquet`, **N=1375 FILLED**, entry_day 2026-04-13…05-29, 33 days). Full-pool baseline mean `realized_ret = -0.0044` (win 0.413). **The only robust, leakage-clean, breadth-viable lever was DIRECTION** (bullish-only EV +0.0411 / win 0.470 / ~26 per day; bearish -0.0771) — and the owner declined to bake in bullish-only (the bearish penalty is almost certainly regime-conditional, untestable here: `vix3m_at_enrich` had near-zero variance 19.45–21.51, single 2026-Q1/Q2 war-chop window). Decision: keep all directions, shelve "exclude bearish" to an N≥15 live-cohort revisit; deploy the `overnight_score >= 4` floor only (**correction 2026-08-20: that floor never ran in production** — see the method caveats below). Everything below was tested as an EV gate and FAILED:
 
 | # | Candidate gate | Verdict |
 |---|---|---|
@@ -293,7 +293,7 @@ Multi-agent fan-out over 8 feature families + walk-forward / day-block-bootstrap
 | 4 | Catalyst-type exclusion | **DEAD.** Selection artifact; CI overlaps baseline; picked from 18-category dispersion (multiple comparisons). |
 | 5 | `call+put_active_strikes >= 10` | **Not a gate.** Clean and NOT a recency artifact, but the increment over bullish-only is within day-block noise — best used as a tournament TIE-BREAKER, not a gate. |
 
-**Method caveats:** thin (33 days, single regime); 76% of exits are TIMEOUT (3-day option drift dominates, the bracket rarely fires); mild liquidity-survivorship bias (INVALID_LIQUIDITY / CACHE_EMPTY dropped). PROPOSAL pending `gammarips-review` + N≥15 lock; only the `score >= 4` floor shipped. Full context: `docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md`.
+**Method caveats:** thin (33 days, single regime); 76% of exits are TIMEOUT (3-day option drift dominates, the bracket rarely fires); mild liquidity-survivorship bias (INVALID_LIQUIDITY / CACHE_EMPTY dropped). PROPOSAL pending `gammarips-review` + N≥15 lock; only the `score >= 4` floor was decided for ship. **Correction 2026-08-20: the `>= 4` floor never ran in production.** The `deploy.sh` env pin `MIN_ENRICHMENT_SCORE=1` (set 2026-04-20) overrode the code default, and the env wins. The owner accepted the de-facto floor of 1 on 2026-08-20 — measured cosmetic (see §2026-07-28 (evening) — tradeability, and `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`). Full context: `docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md`.
 
 ---
 
@@ -1291,8 +1291,10 @@ The recommended admission-floor design was built the same day and lost review. T
 found a `next_url`-lossy enumeration leg and an unreachable fail-open guard. The design was
 reverted and is NOT ADOPTED (`docs/DECISIONS/2026-08-19-pool-liquidity-floor-and-cap-20.md`).
 In its place the owner adopted `PRINT_FLOOR_MIN` 1 to 25 on `signal-notifier` (2026-08-19).
-That raise is adopted but NOT YET DEPLOYED: the live Cloud Run env still reads 1 as of
-2026-08-20, and `deploy.sh` still pins 1. The evidence tables above stand unchanged.
+The raise DEPLOYED 2026-08-20 (`signal-notifier-00062-wvm`, env verified `=25`), and the
+cohort reset to `LIVE_COHORT_START_DATE='2026-08-21'` (the fifth reset). See
+`docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`. The evidence
+tables above stand unchanged.
 
 ### Caveats
 
