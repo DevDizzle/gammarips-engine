@@ -7,6 +7,25 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
+## START HERE (next session)
+Owner has ~90 min of clicks pending in `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`
+(items 1-5 in order: test checkout, merge harness PR #3, Stripe prices + merge
+webapp PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not ready,
+work the NO-OWNER QUEUE below and leave the run-sheet as is.
+
+NO-OWNER QUEUE (in this order, each shippable alone):
+1. Fix the report-vs-regime VIX as-of mismatch (Open engineering, first red item).
+   It is visible in the HN demo GIF.
+2. MCP repo: add `title` + `readOnlyHint` to all 9 tools (Connectors Directory
+   gate). Own review gate, own commit, redeploy per that repo.
+3. Draft the creator pitch + Stripe promo-code design (free Pro + rev share) into
+   `docs/GTM-CREATOR-PROGRAM.md`, short.
+4. Draft the Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) and the dev.to
+   syndication post into `~/workspace/GAMMARIPS-POSTS.txt`. Owner posts.
+5. Guide B2 ("How to trade options with Claude Code") as markdown + the publish
+   script `scripts/blog/publish_guide.py` (plan §B9). Not published without `/ship`.
+6. Fix the `'for you'` compliance substring misfire.
+
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision: `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`.
 Owner steps, in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08-22`.
