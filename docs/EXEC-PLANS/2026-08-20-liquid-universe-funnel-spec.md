@@ -1,6 +1,6 @@
 # 2026-08-20 — Liquid-universe funnel: pre-registered study spec
 
-**Status: PRE-REGISTERED, NOT RUN. FROZEN as of 2026-08-20.** Owner directed
+**Status: RUN 2026-08-22, result RULE 2 (`FINDINGS_LEDGER.md` §2026-08-22). FROZEN as of 2026-08-20.** Owner directed
 2026-08-20. An adversarial review (gammarips-researcher, same day, pre-data)
 found 2 blockers and 10 fix-before-freeze defects in the first draft; all are
 folded in below. Amendments after this point are allowed only before any data

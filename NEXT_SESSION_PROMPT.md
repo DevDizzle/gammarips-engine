@@ -48,12 +48,10 @@ Owner steps, in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-
   ~2,700 `/mcp` POSTs, all monitors and crawlers, zero external humans.
 
 ## Research (parked behind GTM, state intact)
-1. Liquid-universe funnel: screen + compute DONE (57 days, B = 545 legs, Rule 0
-   pre-check PASS, overlap with the production pool 2-5%, earnings rail NOT
-   applied: FMP plan, dated spec note). Outcome phase launched:
-   `2026-08-20_liquid_universe_outcomes.py pull|metrics`, log
-   `cache/lu_outcomes.log`. Read the DECISION line there, then write the ledger
-   section + brief + owner package (spec deliverables).
+1. Liquid-universe funnel: DONE 08-22, RULE 2 (null on signal, +0.4pp CI
+   [-1.7, 2.1]); executability UNFILLABLE 40.5% -> 6.1%. Ledger §2026-08-22,
+   brief top entry, wiki [[liquid-universe-uoa-null]]. OWNER CALL (flag once):
+   ship the liquid universe on executability grounds, or not. No prod change.
 2. Pool-vs-benchmark: §9 balance gate PASSED (ledger §F). Full 87-date draw:
    `cache/s2_full2.log`. Then `2026-08-20_pool_benchmark_outcomes.py
    pull|load|metrics` (control tape to `control_minute_paths`, H1-H3).

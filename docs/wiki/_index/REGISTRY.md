@@ -93,6 +93,7 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 - [[three-day-harvest-curve]] — proven-on-cohort — P(touch +20% in 3d)=51% but pops land day 2–3; fixed targets are EV-negative pool-wide
 - [[fixed-exit-composites-negative]] — proven-on-cohort — the whole pool under any fixed exit is negative; the exit is the free variable; never publish an ROI headline
 - [[ghost-rows-flatter-pool-composites]] — proven-on-cohort — ghost rows exit at fabricated near-flat marks (16.8% carry exactly −1.9608%), so every whole-pool composite is optimistic by construction (−4.67% vs tradeable −9.59%)
+- [[liquid-universe-uoa-null]] — null-on-cohort — relative UOA z>=2 inside the top-100 liquid universe = liquidity-matched random (same-day median MFE +0.4pp, CI [-1.7, 2.1]); the liquid universe alone takes UNFILLABLE 40.5% -> 6.1%
 - [[execution-risk-is-exit-certainty]] — proven-on-cohort — execution risk is exit certainty, not spread: stop fills slip one-sided (median −3.1%, thin names −10.3%), prints-by-10:00 is the dominant observable, premium does not predict liquidity
 - [[window-mismatch-3day-vs-same-day]] — proven-on-cohort — the harvest/surface views are 3-day while V7.1 exits same-day; quoting a 3-day statistic at a same-day decision inverts the answer
 - [[exit-velocity-same-day-lever]] — proven-on-cohort — the exit lever is SAME-DAY (velocity + halved tail), not the target magnitude

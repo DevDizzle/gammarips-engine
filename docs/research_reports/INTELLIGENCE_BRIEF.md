@@ -9,6 +9,17 @@
 >
 > **Pruning rule (adopted 2026-08-20).** Keep only the newest ~4 dated updates in full. Compress each older update to one row in the dated-update index below. Evidence stays in the ledger and claims live in the wiki, so compression loses nothing. Do not let this brief grow into a second ledger.
 
+
+## 2026-08-22 update — Liquid-universe funnel study (pre-registered): the unusual-activity signal adds NOTHING measurable inside the liquid universe (B-C +0.4pp, CI [-1.7, 2.1]), and the liquid universe alone fixes executability (UNFILLABLE 40.5% -> 6.1%)
+
+**Owner-directed, pre-registered 2026-08-20, frozen at Phase 0, run 2026-08-22.** Question: does a liquidity-first funnel (top-100 liquid names, then relative call-dollar-volume z >= 2.0 against each name's own 20-session baseline) produce a better pool than the live UOA-first funnel? Two axes, both pre-defined.
+
+**Executability: the liquid universe wins by a mile, and the signal has nothing to do with it.** Arm B (the funnel) fills 94% of legs and trades 63% by 10:00 ET. The production pool on the same tape and window fills 60% and trades 18%. The liquidity-matched random control (Arm C) matches B on both numbers, so the gain is the universe, not the z-score. B still misses its own pre-registered 80% tradeability mark.
+
+**Opportunity quality: pre-registered RULE 2, null.** Same-day median MFE B 14.0% vs C 13.6%, +0.4pp, 90% CI [-1.7, 2.1], 512 fillable B legs on 57 days (Rule 0 passed). Both half-windows null. The 3-day secondary leans the other way (-3.7pp, CI includes zero). The test detects ~5pp and cannot detect 1-2pp: "no large edge", never "no edge". This is the third independent test to find no selection edge on top of liquidity ([[ghost-rows-flatter-pool-composites]], [[contract-score-lead-dead]]).
+
+**Decision per the spec: the funnel question falls to executability and product grounds, owner call.** Options: ship the liquid universe as ONE architecture change with ONE cohort reset (real fills, honest labels, a sellable pool), with or without the z-score on top (it costs nothing and proves nothing), or keep the current funnel. Declared limits: earnings rail not applied (FMP plan covers 13% of names), single regime, no NBBO. Full tables: `FINDINGS_LEDGER.md` §2026-08-22. The sibling pool-vs-benchmark test (does the production pool beat matched controls at all) is in its outcome phase.
+
 ## 2026-08-19 update — Selection re-scored on the TRADEABLE subset (N=3,776 / 87 days): the ghosts were FLATTERING the pool. Honest composite is -9.6%, not -4.7%. Pre-committed contract_score re-test FAILS
 
 **Owner call: if ~63% of the pool is untradeable by 10:00 ET, re-score selection with the ghosts stripped out. The result inverts the hypothesis.** Stripping ghosts makes the measured composite WORSE, monotonically: 0 prints by 10:00 -2.23%, 3-5 -5.46%, 11-20 -9.81%, 21+ -9.17%. Whole pool -4.67%, **TRADEABLE (11+ prints) -9.59% [-13.4, -5.7]**.

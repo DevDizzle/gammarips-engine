@@ -41,6 +41,7 @@ Read this file by section, never whole. Status legend: **LIVE-DOCTRINE** (claim 
 | §2026-08-19 (pool construction) | ghost-free pool of 50 impossible; outcome: PRINT_FLOOR_MIN=25 deployed 2026-08-20 | LIVE-DOCTRINE | [[live-oi-floor]] |
 | §2026-08-19 (entry hour) | 10:00-11:00 carries the whole day's bleed; later entry is an open owner call | LIVE-DOCTRINE (owner call open) | [[first-hour-bleed]] |
 | §2026-08-20 (liquid-universe Phase 0) | Phase 0 audit: as-of universe exact, Arm A 58/60 days + tape 94.3%, Study 2 matching bar not reconstructible (owner amendment call) | reference (studies pending) | — |
+| §2026-08-22 (liquid-universe funnel) | RULE 2: relative UOA in the liquid universe = liquidity-matched random (+0.4pp, CI [-1.7, 2.1]); executability UNFILLABLE 40.5% -> 6.1% | LIVE-DOCTRINE (owner call on the funnel) | [[liquid-universe-uoa-null]] |
 
 ---
 
@@ -1503,3 +1504,84 @@ Audit facts only — no hypothesis was tested and no outcome was measured. Both 
 were unblocked the same day: the owner dropped the key rotation
 (`docs/DECISIONS/2026-08-20-polygon-key-rotation-dropped.md`) and selected amendment
 option 3 for Study 2 (see §E OUTCOME).
+
+---
+
+## 2026-08-22 (liquid-universe funnel) — RULE 2: relative UOA inside the liquid universe is indistinguishable from liquidity-matched random (B-C +0.4pp, CI [-1.7, 2.1]). Executability wins by 34 points (UNFILLABLE 40.5% -> 6.1%)
+
+Pre-registered 2026-08-20 (`docs/EXEC-PLANS/2026-08-20-liquid-universe-funnel-spec.md`,
+frozen at Phase 0). Scripts, all in `backtesting_and_research/` and read-only against
+BigQuery: `2026-08-20_liquid_universe_screen_phase.py` (grouped bars, as-of universe,
+pre-rank, chain rebuild), `_compute.py` (rank, signal, arms, sensitivity, budget),
+`_outcomes.py` (minute pull, metrics). Decision cell N=100, z >= 2.0, seed 42.
+
+### A. Screen
+
+- Pre-rank union 1,385 names (top-300 by share volume per session). 361 had no options
+  at all (penny names). Chain store: 1,645,963 contracts, 0 failed pulls, one truncation
+  (BKNG expiry 2026-04-10 > 1,000 contracts, outside the window).
+- Eligible per session after the 25-strike floor: median 217 (min 194, max 231). Top-100
+  taken. Signal admissions (z >= 2.0, call $ > put $): 575 on 60 sessions, median 7/day.
+- Rails: 3 VIX-rail days dropped (06-05, 06-10, 07-29). Earnings rail NOT applied (FMP
+  plan covers 13% of names, Polygon feed not entitled, no in-house table; identical for
+  B and C, same as the production pool). Splits excluded 2 legs.
+- Arm B: 545 legs on 57 days, median 8 names/day (1-30). Arm C: 200 draws, 4,888 unique
+  (session, contract) legs. Name overlap with the production pool: Jaccard 0.02-0.05.
+
+| N | z | depth mean | depth median | empty days | overlap w/ A | med und vol (M) | med chain $ (M) |
+|---|---|---|---|---|---|---|---|
+| 50 | 1.5 | 8.1 | 7 | 1 | 0.028 | 45.7 | 51.8 |
+| 50 | 2.0 | 5.5 | 4 | 2 | 0.021 | 47.4 | 54.2 |
+| 50 | 3.0 | 2.3 | 2 | 12 | 0.013 | 48.4 | 86.7 |
+| 100 | 1.5 | 14.3 | 12 | 0 | 0.045 | 27.5 | 33.8 |
+| **100** | **2.0** | **9.6** | **7** | **0** | **0.035** | **27.1** | **34.0** |
+| 100 | 3.0 | 3.6 | 3 | 7 | 0.018 | 27.7 | 41.7 |
+| 200 | 1.5 | 24.0 | 22 | 0 | 0.054 | 15.8 | 13.4 |
+| 200 | 2.0 | 15.2 | 12 | 0 | 0.041 | 16.6 | 16.4 |
+| 200 | 3.0 | 5.0 | 4 | 5 | 0.021 | 19.6 | 24.8 |
+
+Sensitivity cells are screen composition only, never outcomes (spec).
+
+### B. Executability (H-LU1)
+
+| arm | legs | UNFILLABLE (no print in [09:55, 10:15]) | tradeable (11+ prints by 10:00) |
+|---|---|---|---|
+| A production pool (in-house tape, same window) | 3,190 | 40.5% | 17.9% |
+| B liquid funnel | 545 | 6.1% | 63.1% |
+| C liquidity-matched random | 4,888 | 7.0% | 63.9% |
+
+B clears the production pool by 34 points on fills and 45 points on tradeability, and
+MISSES its own pre-registered 80% pass mark (63.1%). C matches B, so the executability
+gain is the liquid universe, not the signal. Rule 0 PASS: 512 fillable B legs on 57 days.
+
+### C. Opportunity quality (B vs C, paired-by-day block bootstrap, 5,000 x, 90% CI)
+
+| metric | B | C (200 draws, weighted) | B - C | 90% CI |
+|---|---|---|---|---|
+| **same-day median MFE (PRIMARY)** | **14.0%** | **13.6%** | **+0.4pp** | **[-1.7, 2.1]** |
+| same-day median MAE | -21.6% | -21.6% | 0.0pp | [-1.7, 2.0] |
+| 3-day median MFE (secondary, labeled) | 31.3% | 35.0% | -3.7pp | [-7.5, 1.1] |
+| 3-day median MAE (secondary) | -52.5% | -53.3% | +0.8pp | [-2.8, 3.9] |
+| stability, first half (B n=252) | 14.5% | 15.0% | -0.5pp | [-3.5, 1.9] |
+| stability, second half (B n=260) | 12.6% | 12.0% | +0.6pp | [-1.0, 3.9] |
+
+UNFILLABLE differential 0.9 points (< 10), so no exclusion-bias sensitivity was needed.
+Arm A reference (not a decision input): same-day median MFE 8.9%, MAE -18.3%, 3-day MFE
+25.6%, on the 59.5% of its legs that fill at all.
+
+### D. Decision (pre-registered rule 2)
+
+**B ~ C. The relative-UOA z-score inside the liquid universe is unproven at the
+detectable effect size (~5pp). It cannot detect 1-2pp edges, so this is "no large edge",
+never "no edge".** Per the spec, the funnel decision falls to executability and product
+grounds alone, and it is the owner's call: a liquid-first universe fills 94% of its
+legs and trades 63% by 10:00, against 60% and 18% today. The signal on top of it adds
+nothing measurable, in either direction, in either half of the window. Hindsight
+caveat stands: the window predates the spec, so even the executability number is
+"promising, forward-validate", never "proven".
+
+### Caveats
+
+Single regime (May-Aug 2026). No NBBO, so no arm pays a spread. Earnings rail not
+applied (data limit, declared). z_cross ran over the pre-rank-300 eligible subset, the
+spec's own scoping of the chain rebuild. No production change ships from this session.
