@@ -16,6 +16,32 @@ as "the same liquidity floor we ship in `POOL_LIQ_FLOOR`". That floor never ship
 study's own research-side bar. No hypothesis, metric, matching rule, or decision rule
 changed.
 
+**AMENDMENT 2 — 2026-08-20 (pre-data, owner call, option 3).** The Phase 0 audit
+(`FINDINGS_LEDGER.md` §2026-08-20 E) proved three inputs of this spec do not exist for
+control names on historical dates: per-contract open interest, greeks, and quotes.
+`pool_liquidity_snapshot` starts 2026-07-06 and holds pool contracts only. Polygon OI is
+a current-state snapshot, and the sibling spec bans snapshot proxies as lookahead.
+Sequencing is clean: before this amendment, the audit pulled counts and NULL rates only.
+No outcome and no matching result was seen. The owner selected option 3 on 2026-08-20:
+
+- **Contract selection, ALL arms (primary):** the reduced volume-based rule from the
+  sibling spec. Among calls with DTE in 7..45 and moneyness 0.90..1.25 versus the
+  session-T close: pick max session-T contract volume. Ties: strike nearest 10% OTM, then
+  nearest expiry, then lowest strike. Contract floor: session-T contract volume >= 500.
+  This REPLACES `_best_contract` reuse and the delta-band match. Arm A contracts are
+  re-derived under the same rule, so contract selection stays identical across arms.
+- **The `oi >= 1200` bar is REPLACED** by the same volume floor (>= 500 session-T
+  contract volume) in the study's research-side bar. `und_vol >= 3M` and
+  `strikes >= 25` stay.
+- **Secondary read (labeled, never primary):** Arm A on its as-delivered
+  `recommended_contract` legs, reported next to the primary for continuity with the
+  ledger history.
+- The key-rotation blocker in §7 and §9 is dropped by owner call
+  (`docs/DECISIONS/2026-08-20-polygon-key-rotation-dropped.md`).
+
+No hypothesis, outcome metric, or decision rule changed. H1-H3 and §5 read exactly as
+written, on the primary arms.
+
 ---
 
 ## 1. The question

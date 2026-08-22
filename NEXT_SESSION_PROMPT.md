@@ -11,13 +11,16 @@
 1. **Liquid-universe funnel**: Phase 0 DONE 08-20, verified 3-way. Evidence:
    `FINDINGS_LEDGER.md` §2026-08-20 + the dated audit script. Spec FROZEN
    (errata block, no design change). Universe as-of exact for all 60 scan
-   dates, Arm A 58/60 pool days, tape 94.3%, 3 VIX-rail skip days. All
-   remaining phases are Polygon pulls, blocked on the key rotation.
-2. **Pool-vs-benchmark** (spec 2026-08-19): BLOCKED on the key rotation AND a
-   pre-data amendment owner call — `oi >= 1200`, delta matching, and
-   `_best_contract` inputs do not exist historically (options + rec in the
-   same ledger §E). No outcome data pulled, so the amendment window is still
-   clean. Share pulls + window with study 1 where possible.
+   dates, Arm A 58/60 pool days, tape 94.3%, 3 VIX-rail skip days. Polygon
+   phases UNBLOCKED 08-20 (key rotation dropped, owner call:
+   `docs/DECISIONS/2026-08-20-polygon-key-rotation-dropped.md`). Screen
+   phase in progress; key comes from Secret Manager, `.strip()` it.
+2. **Pool-vs-benchmark** (spec 2026-08-19): UNBLOCKED 08-20. Owner selected
+   amendment option 3 (spec AMENDMENT 2: reduced volume-based contract rule
+   for all arms, delivered Arm A as labeled secondary, oi bar replaced by
+   the volume floor). Next: build the control sampler, dry-run 3 dates,
+   publish the balance table before the full pull (spec §9 step 3 gate).
+   Share pulls + window with study 1 where possible.
 Open owner call from the 08-19 research (flagged once, do not re-raise):
 later same-day entry ([[first-hour-bleed]]).
 
@@ -39,11 +42,6 @@ later same-day entry ([[first-hour-bleed]]).
   blog-generator deploy revision + dry-run; did the 08-03 Mon cron fire.
 
 ## Owner queue
-- 🔴 Rotate `POLYGON_API_KEY` (leaked 07-06, echoed 08-05, contained). Regenerate →
-  update secret → redeploy every mounting service (grep deploy.sh). Also gates
-  every remaining phase of the two studies.
-- Study 2 pre-data amendment call: ledger §2026-08-20 E, options 1-3, rec = 3.
-  One answer unblocks the control-sampler build.
 - Revoke + regenerate the 08-06 test MCP key (pasted in chat).
 - Restate the public life-surface headline before the next Fri 12:00 ET
   `x-poster-life-stats` post — 08-07 freshness-canary decision note §Consequences.

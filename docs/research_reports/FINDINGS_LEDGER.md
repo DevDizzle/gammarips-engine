@@ -1465,6 +1465,10 @@ Pre-data amendment options (the decision is the owner's):
 3. Option 2 as primary, plus a labeled secondary read on delivered Arm A contracts.
    RECOMMENDED.
 
+**OUTCOME (2026-08-20, same day): the owner selected option 3.** The amendment is
+recorded in the spec as AMENDMENT 2 (pre-data, sequencing clean). The sampler build is
+unblocked.
+
 Implementation traps recorded for whoever builds the sampler: `overnight_scanner.py:407`
 computes DTE against `date.today()` — patch it per scan date. The production-effective DTE
 window is 7..45 (`fetch_options_chain` uses `max_days=45`), not the 7..90 in
@@ -1474,5 +1478,7 @@ degrades. Control-name day volume needs the Polygon grouped-daily pull (shared w
 
 ### Caveats
 
-Audit facts only — no hypothesis was tested and no outcome was measured. All Polygon
-phases of the two studies stay blocked on the `POLYGON_API_KEY` rotation (owner queue).
+Audit facts only — no hypothesis was tested and no outcome was measured. Both studies
+were unblocked the same day: the owner dropped the key rotation
+(`docs/DECISIONS/2026-08-20-polygon-key-rotation-dropped.md`) and selected amendment
+option 3 for Study 2 (see §E OUTCOME).

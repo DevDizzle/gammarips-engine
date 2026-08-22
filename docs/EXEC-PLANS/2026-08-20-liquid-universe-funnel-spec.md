@@ -194,6 +194,8 @@ ledger section, a brief update, wiki notes, an owner decision package.
   reported to the owner after the screen phase and **before** the outcome
   pull.
 - All Polygon phases wait for the `POLYGON_API_KEY` rotation (owner queue).
+  **Status 2026-08-20: rotation DROPPED by owner call, phases unblocked**
+  (`docs/DECISIONS/2026-08-20-polygon-key-rotation-dropped.md`).
 
 ## Non-goals
 
