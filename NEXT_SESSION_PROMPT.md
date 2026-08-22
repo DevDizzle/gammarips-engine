@@ -39,7 +39,7 @@ Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM residue
 - OAuth AS + `/pro` LIVE since 08-19 (memory `oauth-as-built-2026-08-19`). Webapp copy
-  PR #28 `copy/oauth-live` still OPEN: `/ship` from `~/workspace`, then merge.
+  PR #28 `copy/oauth-live` is MERGED (seen 08-22 when `offer/founding-100` was cut).
 - Guides B3-B6 CUT 08-22. B2 (Claude Code) stays. Per-client OAuth sign-in
   verification still gates B4/B5. GitGuardian 36370105 false positive: mark it.
 - Connectors Directory needs a Team/Enterprise claude.ai org (owner Q1) and `title` +
