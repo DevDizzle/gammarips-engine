@@ -1476,6 +1476,27 @@ window is 7..45 (`fetch_options_chain` uses `max_days=45`), not the 7..90 in
 degrades. Control-name day volume needs the Polygon grouped-daily pull (shared with Study
 1) because `overnight_signals` holds >= 1% movers only.
 
+### F. Study 2 dry-run balance table (§9 step 3 gate: PASSED, 2026-08-20)
+
+3 dates (2026-04-23, 06-17, 08-06), primary arms under AMENDMENT 2, no outcome seen.
+Script: `backtesting_and_research/2026-08-20_pool_benchmark_control_sampler.py`.
+
+| metric | A pool | B matched | C random |
+|---|---|---|---|
+| legs | 84 | 54 | 12 |
+| underlying volume median (M) | 7.03 | 7.09 | 5.88 |
+| underlying decile median | 10 | 10 | 9.5 |
+| decile >= 8 share | 0.99 | 1.00 | 0.92 |
+| DTE median | 15 | 18.5 | 15 |
+| moneyness median (IQR) | 1.06 (1.02-1.12) | 1.07 (1.04-1.12) | 1.08 (1.06-1.11) |
+| contract volume median / p25 | 1,980 / 764 | 1,630 / 927 | 1,033 / 694 |
+| sector: Consumer Cyclical / Technology / Financial / Healthcare | .25 / .21 / .15 / .11 | .31 / .26 / .17 / .06 | .17 / .17 / .17 / .08 |
+
+The first table failed on sector (allocator bug, fixed before any pull, recorded in the
+spec). Declared facts: 60 of 144 pool legs (42%) have no call with >= 500 session-T
+volume in band (excluded from primary Arm A, reported). Arm B fills 54/60 slots, Arm C
+12/30. One sector source for every arm: Polygon SIC major group.
+
 ### Caveats
 
 Audit facts only — no hypothesis was tested and no outcome was measured. Both studies

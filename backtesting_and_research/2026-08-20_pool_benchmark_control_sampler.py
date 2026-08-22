@@ -57,6 +57,7 @@ S2_MANIFEST = os.path.join(CHAIN_DIR, "_manifest_s2.json")
 
 SEED = 42
 N_B, N_C = 20, 10
+N_BACKUP_B, N_BACKUP_C = 3, 5  # extra draws per slot, used in order
 UND_VOL_FLOOR = 3_000_000
 STRIKES_FLOOR = 25
 DTE_LO, DTE_HI = 7, 45
@@ -184,11 +185,11 @@ def cmd_draw(dates):
                                 labels=False) + 1
         cand = day[~day.ticker.isin(set(pool.ticker))].copy()
         # Arm C: uniform, no bar, no matching beyond the contract bands.
-        c_names = list(rng.choice(cand.ticker.to_numpy(), 2 * N_C,
-                                  replace=False))
+        c_names = list(rng.choice(cand.ticker.to_numpy(),
+                                  (1 + N_BACKUP_C) * N_C, replace=False))
         for i, n in enumerate(c_names):
             out.append({"scan_date": d, "arm": "C", "slot": i % N_C,
-                        "backup": i >= N_C, "ticker": n})
+                        "backup": i // N_C, "ticker": n})
         # Arm B: research bar + decile + sector matching.
         bar = cand[cand.volume >= UND_VOL_FLOOR].copy()
         bar["strikes"] = [strikes_asof(key, t, d, strikes) for t in bar.ticker]
@@ -199,18 +200,26 @@ def cmd_draw(dates):
         while target.sum() != N_B:  # largest-remainder fix-up
             target[target.idxmax()] += int(np.sign(N_B - target.sum()))
         sec_ok = set(pool.sector.value_counts()[lambda s: s >= 3].index)
-        pool_sec = pool[pool.sector.isin(sec_ok)]
         used, slot = set(), 0
         for dec, k in target.items():
             if k <= 0:
                 continue
             # Sector slots inside this decile, proportional to the pool.
-            secs = (pool_sec[pool_sec.decile == dec].sector.value_counts()
-                    if len(pool_sec) else pd.Series(dtype=int))
-            want = list(np.repeat(secs.index, secs.values))[:k]
-            want += [None] * (k - len(want))
+            # Proportional sector allocation inside the decile (largest
+            # remainder). Sectors below the >=3 pool-name rule pool into
+            # an unconstrained share.
+            pdec = pool[pool.decile == dec]
+            lab = pd.Series([x if x in sec_ok else "_any" for x in pdec.sector])
+            cnt = lab.value_counts()
+            alloc = cnt / cnt.sum() * k
+            base_alloc = alloc.apply(np.floor).astype(int)
+            for sname in (alloc - base_alloc).sort_values(
+                    ascending=False).index[:k - int(base_alloc.sum())]:
+                base_alloc[sname] += 1
+            want = [None if x == "_any" else x
+                    for x in np.repeat(base_alloc.index, base_alloc.values)]
             for sec in want:
-                for is_backup in (False, True):
+                for is_backup in range(1 + N_BACKUP_B):
                     p = bar[(bar.decile == dec) & ~bar.ticker.isin(used)]
                     if sec is not None and (p.sector == sec).any():
                         p = p[p.sector == sec]
@@ -256,8 +265,10 @@ def cmd_contracts(dates):
 
 # ------------------------------------------------------------------ select
 def reduced_rule(chain: pd.DataFrame, d: dt.date, und_close: float):
+    if chain.empty or "session" not in chain or not und_close:
+        return None
     c = chain[(chain.session == d) & (chain.type == "call")].copy()
-    if c.empty or not und_close:
+    if c.empty:
         return None
     c["dte"] = [(pd.Timestamp(e).date() - d).days for e in c.expiration]
     c["moneyness"] = c.strike / und_close
@@ -314,7 +325,7 @@ def cmd_select(dates):
                 got = None
                 for _, row in grp.sort_values("backup").iterrows():
                     L = leg(d, row.ticker, arm, {"slot": slot,
-                                                "backup": bool(row.backup)})
+                                                "backup": int(row.backup)})
                     if L["contract"] is not None:
                         got = L
                         break
@@ -330,8 +341,8 @@ def cmd_select(dates):
           f" the primary, reported) | B slots unfilled {fails['B']} | C"
           f" slots unfilled {fails['C']}")
     if "backup" in lg:
-        print(f"  backups used: B {int(lg[lg.arm == 'B'].backup.sum())}"
-              f" C {int(lg[lg.arm == 'C'].backup.sum())}")
+        print(f"  backups used: B {int((lg[lg.arm == 'B'].backup > 0).sum())}"
+              f" C {int((lg[lg.arm == 'C'].backup > 0).sum())}")
 
 
 # ------------------------------------------------------------------ balance

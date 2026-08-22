@@ -42,6 +42,18 @@ No outcome and no matching result was seen. The owner selected option 3 on 2026-
 No hypothesis, outcome metric, or decision rule changed. H1-H3 and §5 read exactly as
 written, on the primary arms.
 
+**Dry-run note, 2026-08-20 (§9 step 3 gate, before any outcome was seen).** The first
+3-date balance table matched on decile, DTE, moneyness, and contract volume but not on
+sector: the slot allocator over-filled the largest sector (a code bug). Fixed before any
+outcome pull: sector slots inside each decile are allocated proportionally (largest
+remainder), sectors under the >= 3 pool-name rule pool into an unconstrained share, and
+one sector source (Polygon SIC major group) labels every arm. Backup draws per slot: 3
+for Arm B, 5 for Arm C, used in order when a primary yields no qualifying contract. The
+corrected table PASSED the gate (`FINDINGS_LEDGER.md` §2026-08-20 F). Two declared
+facts: 60 of 144 pool legs (42%) had no call with >= 500 session-T volume in band and
+are excluded from the primary Arm A, and Arm C fills ~40% of its slots (random names
+rarely carry a 500-volume call), so Arm C is thinner than §6 assumed.
+
 ---
 
 ## 1. The question
