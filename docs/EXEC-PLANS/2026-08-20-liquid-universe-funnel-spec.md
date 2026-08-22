@@ -29,6 +29,17 @@ corrections follow. Neither changes the design.
    parity construction gives 19.2% in-window. Report the two constructions
    with labels. Arm B's 80% pass mark stays Arm B's own bar.
 
+**Data-availability note, 2026-08-20 (arms phase, before any outcome was seen).** The
+earnings rail cannot be applied to the history. FMP's calendar is plan-limited to recent
+dates (HTTP 402 for every window before 2026-07-23), FMP's per-symbol history covers 13%
+of the study's top-100 names (40 of 314, measured and cached in
+`cache/lu_earnings_symbols.json`), Polygon's earnings feed is not entitled, and no
+in-house table stores earnings dates. The rail is therefore NOT APPLIED, identically to
+Arms B and C, which is the treatment the production pool (Arm A) also had: the rail
+stands down the pick, never the pool. The VIX rail applies unchanged. No formula,
+metric, or decision rule changed. The report must carry this note next to the B-vs-C
+result.
+
 ## Question
 
 Does a liquidity-first funnel (universe → top-N liquid names → UOA measured

@@ -38,6 +38,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from importlib.machinery import SourceFileLoader
 
@@ -212,11 +213,20 @@ def vix_skip_days() -> set[dt.date]:
 
 def earnings_window(key: str, lo: dt.date, hi: dt.date, cache: dict) -> set:
     k = f"{lo}|{hi}"
-    if k not in cache:
-        r = requests.get("https://financialmodelingprep.com/stable/earnings-calendar",
-                         params={"from": lo.isoformat(), "to": hi.isoformat()},
-                         headers={"apikey": key}, timeout=30)
-        j = r.json() if r.status_code == 200 else None
+    if cache.get(k) is None:  # never trust a cached failure
+        j = None
+        for attempt in range(5):
+            r = requests.get(
+                "https://financialmodelingprep.com/stable/earnings-calendar",
+                params={"from": lo.isoformat(), "to": hi.isoformat()},
+                headers={"apikey": key}, timeout=30)
+            if r.status_code == 200:
+                j = r.json()
+                if isinstance(j, list):
+                    break
+            print(f"    FMP {k}: HTTP {r.status_code}, retry {attempt + 1}",
+                  flush=True)
+            time.sleep(3 * (attempt + 1))
         cache[k] = sorted({x.get("symbol") for x in j}) if isinstance(j, list) else None
     return cache[k]
 
@@ -232,7 +242,8 @@ def has_split(key: str, name: str, lo: dt.date, hi: dt.date, cache: dict) -> boo
 
 
 def cmd_arms():
-    pkey, fkey = SP.polygon_key(), fmp_key()
+    pkey = SP.polygon_key()
+    fkey = fmp_key() if os.environ.get("LU_EARNINGS", "off") != "off" else ""
     sg = pd.read_parquet(SIGNAL_PQ)
     sg["session"] = pd.to_datetime(sg.session).dt.date
     g = SAMP.grouped()
@@ -266,7 +277,11 @@ def cmd_arms():
             report.append((d, "VIX_RAIL_SKIP", 0, 0, 0))
             continue
         entry, exit_day = next_td(d), next_td(d, 3)
-        ex_set = earnings_window(fkey, d, exit_day, earn)
+        # LU_EARNINGS=off: the rail is NOT APPLIED, identically to B and C.
+        # FMP covers 13% of the study names on this plan (2026-08-20
+        # measurement, lu_earnings_symbols.json) and no other source exists.
+        ex_set = (set() if os.environ.get("LU_EARNINGS", "off") == "off"
+                  else earnings_window(fkey, d, exit_day, earn))
         if ex_set is None:
             report.append((d, "EARNINGS_CAL_UNAVAILABLE_FAIL_CLOSED", 0, 0, 0))
             continue
@@ -315,7 +330,8 @@ def cmd_arms():
           f" (min {ok.B_names.min()}, max {ok.B_names.max()}) |"
           f" B legs total {ok.B_legs.sum()} on {int((ok.B_legs > 0).sum())}"
           f" non-empty days")
-    print(f"  splits excluded: {int((lg.get('excluded') == 'SPLIT').sum())}")
+    n_split = int((lg["excluded"] == "SPLIT").sum()) if "excluded" in lg else 0
+    print(f"  splits excluded: {n_split}")
     print(f"  C legs total (200 draws) {ok.C_legs.sum()} | unique C contracts"
           f" {lg[lg.arm == 'C'].contract.nunique()}")
     r0 = (ok.B_legs.sum() >= 150) and ((ok.B_legs > 0).sum() >= 30)
