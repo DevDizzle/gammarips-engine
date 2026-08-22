@@ -254,13 +254,16 @@ def cmd_contracts(dates):
     todo = [n for n in names if n not in have]
     print(f"contracts: {len(names)} names needed, {len(todo)} to pull")
     man = load_json(S2_MANIFEST)
-    for i, n in enumerate(todo, 1):
-        r = SP.pull_name(key, n)
-        man[n] = r
-        json.dump(man, open(S2_MANIFEST, "w"))
-        print(f"  [{i}/{len(todo)}] {n:<6} contracts {r['contracts']:>5}"
-              f" failed {r['failed']:>3} bar_rows {r['bar_rows']:>6}",
-              flush=True)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futs = [ex.submit(SP.pull_name, key, n) for n in todo]
+        for i, f in enumerate(as_completed(futs), 1):
+            r = f.result()
+            man[r["name"]] = r
+            json.dump(man, open(S2_MANIFEST, "w"))
+            print(f"  [{i}/{len(todo)}] {r['name']:<6} contracts"
+                  f" {r['contracts']:>5} failed {r['failed']:>3}"
+                  f" bar_rows {r['bar_rows']:>6}", flush=True)
 
 
 # ------------------------------------------------------------------ select

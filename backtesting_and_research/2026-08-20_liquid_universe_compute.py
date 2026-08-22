@@ -252,17 +252,20 @@ def cmd_arms():
     rng = np.random.default_rng(SEED)
     chains = {}
 
-    def chain(n):
+    def chain(n, d):
+        # Per (name, session) call-only frames, built once per name.
         if n not in chains:
             c = pd.read_parquet(os.path.join(CHAIN_DIR, f"{n}.parquet"))
             c["session"] = pd.to_datetime(c.session).dt.date
-            chains[n] = c
-        return chains[n]
+            c = c[c.type == "call"]
+            chains[n] = {s: f for s, f in c.groupby("session")}
+        return chains[n].get(d, pd.DataFrame())
+
+    gidx = g.set_index(["session", "ticker"]).close.to_dict()
 
     def leg(d, n, arm, draw, z):
-        day = g[(g.session == d) & (g.ticker == n)]
-        und_close = float(day.close.iloc[0]) if len(day) else None
-        r = SAMP.reduced_rule(chain(n), d, und_close)
+        und_close = gidx.get((d, n))
+        r = SAMP.reduced_rule(chain(n, d), d, und_close)
         if r is None:
             return None
         return {"session": d, "arm": arm, "draw": draw, "ticker": n, "z": z,
