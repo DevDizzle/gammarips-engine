@@ -39,17 +39,28 @@ first. Paid ads wait for a measured baseline.
   Claude, ChatGPT, Grok, Cursor. This intent wave is forming at this
   time. Memory: `robinhood-agentic-trading-mcp-official`.
 
-## Sequence (amends 08-06 — the video and HN gates stay)
+## Sequence (amended 2026-08-22, owner: "go")
 
-1. Workstream A landing rewrite: DONE, shipped 2026-08-15.
-   Workstream B first guides: land these BEFORE Show HN, so HN
-   traffic hits the new funnel.
-2. The video. Spec unchanged: `docs/GTM-VIDEO-CLAUDE-OPTIONS-WORKFLOW.md`.
-3. Show HN per `docs/GTM-DISTRIBUTION-PLAYBOOK.md`. Gates unchanged:
-   video live AND one real GA4-attributed checkout.
-4. Workstream C backlink cadence: weekly, continues through all steps.
-5. Ads review ~09-01 on measured CVR. Ads only on a nonzero organic
-   baseline.
+Decision note: `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`.
+Owner steps: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`.
+
+1. Workstream A landing rewrite: DONE 08-15.
+2. The video gate is DROPPED. A real asciinema recording of the free tier
+   (README GIF) is the HN artifact. The owner records nothing. Creators
+   with free Pro and a promo code make the per-client videos (C5).
+3. Founding offer: $29/mo first 100, 30-day trial, $299/yr. Webapp branch
+   `offer/founding-100`.
+4. Claude Code plugin `gammarips` (harness branch `feat/claude-code-plugin`),
+   then the community plugin directory.
+5. Relaunch email to the 220 dormant accounts (`scripts/gtm/relaunch_email.py`).
+6. Show HN after the attribution test checkout and the plugin merge. Target
+   the week of 08-25.
+7. Outbound: 10 DMs a day from `~/workspace/GAMMARIPS-PROSPECTS.csv`.
+8. Backlinks, weekly, measured by referral sessions and human MCP
+   initializes, never by link count.
+9. Ads review ~09-01 on measured CVR. Ads only on a nonzero organic baseline.
+
+Cut: guides B3-B6. B2 stays. B7 later.
 
 ## Workstream A — landing page rewrite (repo: gammarips-webapp)
 
@@ -139,8 +150,10 @@ after E1 is live (gate unchanged).
 
 ## Workstream C — backlinks and authority
 
-Hard rule: NO directory sprints. The 07-07 sprint was a 30-day null
-result and the decision is recorded. Active placements only.
+The 07-07 directory sprint was a 30-day null result. On 08-22 the owner
+chose ONE more pass over the passive directories (run-sheet item 10),
+logged and then closed. Active placements are the lever. Measure every
+placement by referral sessions and human MCP initializes.
 
 - C1. Show HN, per the playbook. The repo is the artifact.
 - C2. GitHub: PRs to awesome-MCP lists, harness README cross-links.
@@ -169,8 +182,9 @@ result and the decision is recorded. Active placements only.
   owner call (public fail-closed vs private halve-and-continue).
   Never trust the archived sync script's `--apply` (memory
   `trader-harness-sync-apply-unsafe`).
-- D3. Plugin packaging: PARKED. The repo is the canonical wrapper.
-  Look at this again after the guides ship.
+- D3. Plugin packaging: IN PROGRESS 08-22. Plugin `gammarips`, marketplace
+  in the harness repo, branch `feat/claude-code-plugin`. Install is the
+  funnel.
 - D4. OAuth 2.1 on the MCP. **DONE — shipped 2026-08-19** (decided
   08-15, built and shipped 08-19: AS on gammarips.com, MCP `/pro`
   auth-required, `/mcp` anonymous, e2e 24/24). Decision note:
