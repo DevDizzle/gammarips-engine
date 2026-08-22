@@ -48,12 +48,15 @@ Owner steps, in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-
   ~2,700 `/mcp` POSTs, all monitors and crawlers, zero external humans.
 
 ## Research (parked behind GTM, state intact)
-1. Liquid-universe funnel: Phase 0 DONE 08-20. Chain rebuild was RUNNING in the
-   background (`cache/lu_chain_run.log`, manifest-resumable: rerun
-   `2026-08-20_liquid_universe_screen_phase.py chain`). Then
-   `2026-08-20_liquid_universe_compute.py all`. Stops at the outcome-pull budget.
-2. Pool-vs-benchmark: sampler built, 3-date dry run = the §9 balance gate
-   (`cache/s2_dryrun.log`), then the 87-date run + `control_minute_paths`.
+1. Liquid-universe funnel: screen + compute DONE (57 days, B = 545 legs, Rule 0
+   pre-check PASS, overlap with the production pool 2-5%, earnings rail NOT
+   applied: FMP plan, dated spec note). Outcome phase launched:
+   `2026-08-20_liquid_universe_outcomes.py pull|metrics`, log
+   `cache/lu_outcomes.log`. Read the DECISION line there, then write the ledger
+   section + brief + owner package (spec deliverables).
+2. Pool-vs-benchmark: §9 balance gate PASSED (ledger §F). Full 87-date draw:
+   `cache/s2_full2.log`. Then `2026-08-20_pool_benchmark_outcomes.py
+   pull|load|metrics` (control tape to `control_minute_paths`, H1-H3).
 Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM residue
