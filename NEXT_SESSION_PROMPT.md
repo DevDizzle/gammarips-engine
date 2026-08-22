@@ -32,12 +32,16 @@ Open owner call from the 08-19 research (flagged once, do not re-raise):
 later same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM (compressed; shipped state in memory `oauth-as-built-2026-08-19`)
-- OAuth AS + `/pro` LIVE since 08-19 (e2e 24/24 on prod). Secrets owner call is
-  recorded in `~/workspace/OAUTH-ROLLOUT.txt`. Next: webapp copy PR (`/developers`,
-  `public/mcp.json`, `llms.txt`, connect tabs) via copywriter + `/ship`; mark
-  GitGuardian 36370105 false positive.
+- OAuth AS + `/pro` LIVE since 08-19, re-verified 08-22 (e2e 24/24 on prod).
+  Secrets owner call is in `~/workspace/OAUTH-ROLLOUT.txt`. Copy PR is OPEN:
+  webapp #28 `copy/oauth-live` kills the "OAuth is on the roadmap" claim on 9
+  surfaces and documents `/pro` + machine clients. **Blocked on `/ship`
+  gammarips-webapp #28 from `~/workspace`, then merge (main auto-deploys).**
+  Still to do: mark GitGuardian 36370105 false positive.
 - **Single gate for guides B4/B5, videos E4/E5, and the CONNECT-MATRIX rewrite: one
   real per-client OAuth sign-in verified against live `/pro`** (start with ChatGPT).
+  PR #28 respects it: the connect tabs give the client-agnostic sign-in path only
+  and describe no vendor dialog. Per-client steps land in a second PR.
 - Plan of record: `docs/GTM-ORGANIC-GROWTH-PLAN.md` + `GTM-CLIENT-CONNECT-MATRIX.md`
   + `GTM-VIDEO-SERIES.md`. Next drafts: guides B1 + B2, publish script B9, E2 after
   the owner's Grok UI test. Owner: Grok test, record E1, YouTube channel. Gates
