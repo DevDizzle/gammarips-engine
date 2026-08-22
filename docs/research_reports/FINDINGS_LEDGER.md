@@ -41,6 +41,7 @@ Read this file by section, never whole. Status legend: **LIVE-DOCTRINE** (claim 
 | §2026-08-19 (pool construction) | ghost-free pool of 50 impossible; outcome: PRINT_FLOOR_MIN=25 deployed 2026-08-20 | LIVE-DOCTRINE | [[live-oi-floor]] |
 | §2026-08-19 (entry hour) | 10:00-11:00 carries the whole day's bleed; later entry is an open owner call | LIVE-DOCTRINE (owner call open) | [[first-hour-bleed]] |
 | §2026-08-20 (liquid-universe Phase 0) | Phase 0 audit: as-of universe exact, Arm A 58/60 days + tape 94.3%, Study 2 matching bar not reconstructible (owner amendment call) | reference (studies pending) | — |
+| §2026-08-22 (pool-vs-benchmark) | ALL THREE FAIL: pool = matched random (A-B -1.33pp [-3.78, 1.04]); the scan is not a selection edge; selection research CLOSED | LIVE-DOCTRINE | [[selection-research-closed]] |
 | §2026-08-22 (liquid-universe funnel) | RULE 2: relative UOA in the liquid universe = liquidity-matched random (+0.4pp, CI [-1.7, 2.1]); executability UNFILLABLE 40.5% -> 6.1% | LIVE-DOCTRINE (owner call on the funnel) | [[liquid-universe-uoa-null]] |
 
 ---
@@ -1498,6 +1499,12 @@ spec). Declared facts: 60 of 144 pool legs (42%) have no call with >= 500 sessio
 volume in band (excluded from primary Arm A, reported). Arm B fills 54/60 slots, Arm C
 12/30. One sector source for every arm: Polygon SIC major group.
 
+Full 87-date run (2026-08-22), balance holds: A 2,617 / B 1,506 / C 364 legs; decile
+median 10 / 10 / 10; underlying volume 7.4M / 6.0M / 6.7M; DTE 16 / 17 / 21; moneyness
+1.06 / 1.06 / 1.07; contract volume median 1,643 / 1,309 / 1,504; sectors within 1-3
+points (CC .27/.30, Tech .26/.25, Fin .14/.14, HC .11/.12). 2,127 of 4,744 pool legs
+(45%) have no qualifying call and sit outside the primary Arm A.
+
 ### Caveats
 
 Audit facts only — no hypothesis was tested and no outcome was measured. Both studies
@@ -1585,3 +1592,56 @@ caveat stands: the window predates the spec, so even the executability number is
 Single regime (May-Aug 2026). No NBBO, so no arm pays a spread. Earnings rail not
 applied (data limit, declared). z_cross ran over the pre-rank-300 eligible subset, the
 spec's own scoping of the chain rebuild. No production change ships from this session.
+
+---
+
+## 2026-08-22 (pool-vs-benchmark) — ALL THREE HYPOTHESES FAIL. The pool is not distinguishable from matched random optionable contracts: A-B -1.33pp [-3.78, 1.04], A-C -0.50pp [-4.75, 3.84]. The scan is not a selection edge
+
+Pre-registered 2026-08-19 (`docs/EXEC-PLANS/2026-08-19-pool-benchmark-test-spec.md`,
+AMENDMENT 2 option 3 on 2026-08-20, gate passed before any pull). Scripts:
+`backtesting_and_research/2026-08-20_pool_benchmark_control_sampler.py` and
+`2026-08-20_pool_benchmark_outcomes.py`. Control tape written to the NEW table
+`profit_scout.control_minute_paths` (806,488 rows, explicit schema, never
+`option_minute_paths`). 87 scan dates 2026-04-10..2026-08-17, seed 42.
+
+### A. Arms and fills (production replay: 10:00 fill x 1.02, +40/-30, STOP before TARGET, 15:45 exit pays 2%, real print within 15 min at both anchors)
+
+| arm | legs | filled | UNFILLABLE entry / exit | TARGET / STOP / TIMEOUT | mean return | median MFE |
+|---|---|---|---|---|---|---|
+| A pool (re-derived contracts, primary) | 2,617 | 1,581 (60%) | 700 / 325 | 306 / 605 / 670 | **-7.72%** | 13.0% |
+| B matched control | 1,506 | 854 (57%) | 464 / 183 | 167 / 284 / 403 | **-6.40%** | 14.5% |
+| C random control | 364 | 199 (55%) | 118 / 45 | 44 / 71 / 84 | **-7.23%** | 15.0% |
+| A as-delivered (secondary, in-house tape) | 4,293 | 1,384 | — | — | -9.67% | 10.2% |
+
+The secondary reproduces the 2026-08-19 tradeable-subset composite (-9.59%) on an
+independent replay. Every arm loses money under the fixed bracket, controls included.
+
+### B. Hypotheses (day-clustered bootstrap, paired by scan_date, 10,000 resamples, 90% CI)
+
+| ID | hypothesis | A - control | 90% CI | verdict |
+|---|---|---|---|---|
+| H1 | pool beats matched control on mean same-day return | -1.33pp | [-3.78, 1.04] | REJECTED |
+| H2 | pool beats matched control on median MFE | -1.57pp | [-4.25, 0.92] | REJECTED |
+| H3 | pool beats unmatched random control on mean return | -0.50pp | [-4.75, 3.84] | REJECTED |
+
+Every point estimate leans against the pool. None is significant.
+
+### C. Decision (pre-committed, §5 third branch)
+
+**All three fail. The pool is not distinguishable from matched random optionable
+contracts. The scan is not a selection edge.** The spec's pre-committed consequence:
+reposition the product on the opportunity-surface data itself, which the doctrine
+already sells, and stop spending on selection research. Power: the test detects ~5pp
+per trade and cannot detect 1-2pp, so this is "no large edge", never "no edge". No
+fourth branch, no re-slice by era, no sub-window (spec §5).
+
+Read with the sibling result (§2026-08-22 liquid-universe funnel): selection adds
+nothing measurable on either side of the liquidity line, and the liquid universe alone
+fixes executability. [[selection-research-closed]].
+
+### Caveats
+
+Single regime (Apr-Aug 2026). Contract selection is the reduced volume rule for all
+primary arms (AMENDMENT 2), not the production `_best_contract`, which cannot be
+replayed. No NBBO, so no arm pays a spread. Sector from Polygon SIC. Arm C is thin (364
+legs) because random names rarely carry a 500-volume call.

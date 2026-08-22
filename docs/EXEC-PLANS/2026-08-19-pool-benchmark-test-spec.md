@@ -1,6 +1,6 @@
 # Pool-versus-benchmark test — SPEC (pre-registered, not yet run)
 
-**Written 2026-08-19. Status: SPEC ONLY. Nothing has been pulled or measured.**
+**Written 2026-08-19. Status: RUN 2026-08-22. Result: all three hypotheses FAIL (`FINDINGS_LEDGER.md` §2026-08-22 pool-vs-benchmark).**
 
 **This document is a pre-registration.** Everything below is fixed BEFORE any data is
 pulled. Nobody may change the hypotheses, the matching, the metrics, or the decision rules

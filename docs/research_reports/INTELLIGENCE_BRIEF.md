@@ -10,6 +10,13 @@
 > **Pruning rule (adopted 2026-08-20).** Keep only the newest ~4 dated updates in full. Compress each older update to one row in the dated-update index below. Evidence stays in the ledger and claims live in the wiki, so compression loses nothing. Do not let this brief grow into a second ledger.
 
 
+
+## 2026-08-22 update — Pool-vs-benchmark test (pre-registered): ALL THREE HYPOTHESES FAIL. The pool is not distinguishable from matched random optionable contracts. The scan is not a selection edge. Selection research is CLOSED
+
+**The only experiment that ever asked whether the 50 beat 50 other contracts, and the answer is no.** 87 scan dates, production replay (10:00 fill, +40/-30 bracket, 15:45 flat, real print at both anchors), identical contract rule across arms (AMENDMENT 2), gate-checked matching. Pool mean return **-7.72%**, liquidity-and-sector-matched controls **-6.40%**, unmatched random controls **-7.23%**. H1 (mean return A-B) -1.33pp [-3.78, 1.04], H2 (median MFE A-B) -1.57pp [-4.25, 0.92], H3 (A-C) -0.50pp [-4.75, 3.84]. Every point estimate leans against the pool. As-delivered pool contracts on the in-house tape read -9.67%, reproducing the 2026-08-19 tradeable composite on an independent replay.
+
+**Pre-committed decision, third branch of the spec: reposition the product on the opportunity-surface data itself, which the doctrine already sells, and stop spending on selection research.** No fourth branch, no re-slice. The test detects ~5pp per trade and cannot detect 1-2pp: "no large edge", never "no edge". With the sibling liquid-universe result (next entry), selection adds nothing measurable on either side of the liquidity line, and only the liquid universe moves executability. Full tables: `FINDINGS_LEDGER.md` §2026-08-22 (pool-vs-benchmark). Control tape: `profit_scout.control_minute_paths`.
+
 ## 2026-08-22 update — Liquid-universe funnel study (pre-registered): the unusual-activity signal adds NOTHING measurable inside the liquid universe (B-C +0.4pp, CI [-1.7, 2.1]), and the liquid universe alone fixes executability (UNFILLABLE 40.5% -> 6.1%)
 
 **Owner-directed, pre-registered 2026-08-20, frozen at Phase 0, run 2026-08-22.** Question: does a liquidity-first funnel (top-100 liquid names, then relative call-dollar-volume z >= 2.0 against each name's own 20-session baseline) produce a better pool than the live UOA-first funnel? Two axes, both pre-defined.

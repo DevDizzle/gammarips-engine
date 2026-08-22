@@ -52,9 +52,11 @@ Owner steps, in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-
    [-1.7, 2.1]); executability UNFILLABLE 40.5% -> 6.1%. Ledger §2026-08-22,
    brief top entry, wiki [[liquid-universe-uoa-null]]. OWNER CALL (flag once):
    ship the liquid universe on executability grounds, or not. No prod change.
-2. Pool-vs-benchmark: §9 balance gate PASSED (ledger §F). Full 87-date draw:
-   `cache/s2_full2.log`. Then `2026-08-20_pool_benchmark_outcomes.py
-   pull|load|metrics` (control tape to `control_minute_paths`, H1-H3).
+2. Pool-vs-benchmark: DONE 08-22, ALL THREE FAIL (A-B -1.33pp [-3.78, 1.04]).
+   Pre-committed consequence: the scan is not a selection edge, selection
+   research is CLOSED, product = surface data. Ledger §2026-08-22, brief top
+   entry, wiki [[selection-research-closed]]. Control tape in
+   `control_minute_paths`. No prod change. Never re-open selection research.
 Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
 
 ## OAuth + GTM residue
