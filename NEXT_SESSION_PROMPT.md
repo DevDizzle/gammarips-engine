@@ -14,13 +14,20 @@
    dates, Arm A 58/60 pool days, tape 94.3%, 3 VIX-rail skip days. Polygon
    phases UNBLOCKED 08-20 (key rotation dropped, owner call:
    `docs/DECISIONS/2026-08-20-polygon-key-rotation-dropped.md`). Screen
-   phase in progress; key comes from Secret Manager, `.strip()` it.
+   phase: grouped stock bars (90/90 sessions) + top-300 pre-rank DONE, union
+   1,385 names. Chain rebuild RUNNING in the background since 08-20 ~21:30
+   UTC (`cache/lu_chain_run.log`, manifest-resumable: rerun
+   `2026-08-20_liquid_universe_screen_phase.py chain`). When it finishes run
+   `2026-08-20_liquid_universe_compute.py all` (rank, signal, arms,
+   sensitivity, budget). It STOPS at the outcome-pull budget (spec rule).
+   Key comes from Secret Manager, `.strip()` it.
 2. **Pool-vs-benchmark** (spec 2026-08-19): UNBLOCKED 08-20. Owner selected
    amendment option 3 (spec AMENDMENT 2: reduced volume-based contract rule
    for all arms, delivered Arm A as labeled secondary, oi bar replaced by
-   the volume floor). Next: build the control sampler, dry-run 3 dates,
-   publish the balance table before the full pull (spec §9 step 3 gate).
-   Share pulls + window with study 1 where possible.
+   the volume floor). Sampler built: `2026-08-20_pool_benchmark_control_sampler.py`
+   (profile/draw/contracts/select/balance, shares the chain store). 3-date
+   dry run = the §9 step-3 balance gate; log `cache/s2_dryrun.log`. Then the
+   full 87-date run and the control minute tape (`control_minute_paths`).
 Open owner call from the 08-19 research (flagged once, do not re-raise):
 later same-day entry ([[first-hour-bleed]]).
 
