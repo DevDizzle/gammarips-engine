@@ -28,6 +28,30 @@ MIN_DOLLAR_VOLUME = float(
 )
 MIN_SCORE = int(__import__("os").environ.get("MIN_SCORE", "6"))
 MAX_WORKERS = 16
+
+# --- Liquid universe (2026-08-24, owner-approved architecture change) ---
+# The funnel was UOA-first: pass 1 kept |price move| >= MIN_PRICE_CHANGE_PCT
+# (~100-300 movers), pass 2 pulled their chains. The 2026-08-22 studies showed
+# that funnel selects contracts that are HARDER to trade than random liquid
+# ones (40.5% of pool legs unfillable at 10:00 ET vs 7%), and that no selection
+# signal survives on top of liquidity. So the universe comes first now:
+# pass 1 keeps the most liquid names, pass 2 prices their chains, and the
+# combined liquidity rank cuts to the top LIQUID_TOP_N.
+# Evidence: FINDINGS_LEDGER.md 2026-08-22 (liquid-universe funnel).
+# Rollback: LIQUID_UNIVERSE=false restores the mover funnel unchanged.
+_TRUTHY = ("1", "true", "yes")
+LIQUID_UNIVERSE = (
+    __import__("os").environ.get("LIQUID_UNIVERSE", "true").strip().lower() in _TRUTHY
+)
+# Cheap pre-rank by share volume decides whose chain we pay to pull. 300 keeps
+# pass 2 at roughly today's cost.
+LIQUID_PRERANK_N = int(__import__("os").environ.get("LIQUID_PRERANK_N", "300"))
+# The studied decision cell is N=100. Raise it if pool depth is short.
+LIQUID_TOP_N = int(__import__("os").environ.get("LIQUID_TOP_N", "100"))
+LIQUID_MIN_SHARE_VOLUME = int(
+    __import__("os").environ.get("LIQUID_MIN_SHARE_VOLUME", "3000000")
+)
+LIQUID_MIN_STRIKES = int(__import__("os").environ.get("LIQUID_MIN_STRIKES", "25"))
 # Cluster boost config
 CLUSTER_MIN_SIZE = 4         # Minimum qualifying tickers in same industry+direction
 CLUSTER_MIN_SCORE = 3        # Only count tickers scoring >= this toward cluster
@@ -317,8 +341,40 @@ def _load_universe() -> set[str]:
 # PASS 1: STOCK SNAPSHOTS (one API call)
 # =====================================================================
 
+def _snapshot_session_date(item: dict) -> str | None:
+    """
+    ET calendar date of the day bar this snapshot item carries.
+
+    Polygon NEVER returns a zero-volume day bar: for a name that did not trade
+    this session it serves the PRIOR session's bar instead. So day.v alone can
+    never tell you the bar is current, and a volume-ranked universe built on
+    day.v would silently rank some names on yesterday's volume. Read the
+    timestamp. Returns None when no timestamp is readable.
+    """
+    ts = item.get("updated") or (item.get("day") or {}).get("lastUpdated")
+    if not ts:
+        return None
+    try:
+        # Polygon serves nanoseconds here; tolerate ms/us/s feeds too.
+        ts = float(ts)
+        for divisor in (1e9, 1e6, 1e3, 1.0):
+            seconds = ts / divisor
+            if 1_000_000_000 < seconds < 4_000_000_000:  # ~2001..2096
+                return datetime.fromtimestamp(
+                    seconds, ZoneInfo("America/New_York")
+                ).date().isoformat()
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 def _pass1_stock_snapshots(poly: PolygonClient, universe: set[str]) -> list[dict]:
-    """Fetch all-tickers snapshot, filter to universe movers."""
+    """
+    Fetch the all-tickers snapshot (one call) and choose the pass-2 candidates.
+
+    LIQUID_UNIVERSE=true (default): keep the most liquid universe names by
+    session share volume. LIQUID_UNIVERSE=false: the legacy mover funnel.
+    """
     logger.info("Pass 1: Fetching all-tickers snapshot...")
     snapshot = poly.fetch_all_tickers_snapshot()
 
@@ -326,7 +382,8 @@ def _pass1_stock_snapshots(poly: PolygonClient, universe: set[str]) -> list[dict
         logger.error("Pass 1: No snapshot data returned.")
         return []
 
-    movers = []
+    rows = []
+    session_dates = {}
     for item in snapshot:
         ticker = item.get("ticker")
         if ticker not in universe:
@@ -345,18 +402,81 @@ def _pass1_stock_snapshots(poly: PolygonClient, universe: set[str]) -> list[dict
 
         # Use prevDay close when day close is missing (pre-market)
         effective_price = close_price or prev_close
+        if not effective_price:
+            continue
 
-        if abs(change_pct) >= MIN_PRICE_CHANGE_PCT and effective_price:
-            movers.append({
-                "ticker": ticker,
-                "todaysChangePerc": round(change_pct, 2),
-                "day_volume": int(day_vol) if day_vol else 0,
-                "underlying_price": float(effective_price),
-                "prev_close": float(prev_close) if prev_close else None,
-            })
+        session_date = _snapshot_session_date(item)
+        if session_date:
+            session_dates[session_date] = session_dates.get(session_date, 0) + 1
 
-    logger.info("Pass 1: %d movers from %d universe tickers.", len(movers), len(universe))
-    return movers
+        rows.append({
+            "ticker": ticker,
+            "todaysChangePerc": round(change_pct, 2),
+            "day_volume": int(day_vol) if day_vol else 0,
+            "underlying_price": float(effective_price),
+            "prev_close": float(prev_close) if prev_close else None,
+            "_session_date": session_date,
+        })
+
+    if not LIQUID_UNIVERSE:
+        movers = [
+            r for r in rows
+            if abs(r["todaysChangePerc"]) >= MIN_PRICE_CHANGE_PCT
+        ]
+        logger.info(
+            "Pass 1 (LEGACY mover funnel): %d movers from %d universe tickers.",
+            len(movers), len(universe),
+        )
+        return movers
+
+    # The observed session is the date most names agree on. Deriving it from
+    # the data (instead of assuming "today") keeps the check correct on a
+    # holiday run and when the timestamp field changes shape. A name whose bar
+    # disagrees with the crowd is stale, and it drops out of the ranking.
+    observed_session = None
+    if session_dates:
+        observed_session = max(session_dates.items(), key=lambda kv: kv[1])[0]
+    today_str = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    if observed_session and observed_session != today_str:
+        logger.warning(
+            "Pass 1: snapshot session is %s, scanner date is %s "
+            "(holiday, early run, or a stale feed).",
+            observed_session, today_str,
+        )
+
+    fresh, stale, undated = [], 0, 0
+    for r in rows:
+        if r["_session_date"] is None:
+            undated += 1
+            continue
+        if observed_session and r["_session_date"] != observed_session:
+            stale += 1
+            continue
+        fresh.append(r)
+
+    # Never let a timestamp misread empty the funnel. If almost nothing looks
+    # fresh, the reader is wrong, not the market: fall back to every row and
+    # say so loudly.
+    if len(fresh) < 0.5 * len(rows):
+        logger.error(
+            "Pass 1: only %d of %d snapshot rows look current "
+            "(stale=%d, undated=%d). Timestamp read is suspect. "
+            "Ranking on ALL rows.",
+            len(fresh), len(rows), stale, undated,
+        )
+        fresh = rows
+
+    liquid = [r for r in fresh if r["day_volume"] >= LIQUID_MIN_SHARE_VOLUME]
+    liquid.sort(key=lambda r: (-r["day_volume"], r["ticker"]))
+    candidates = liquid[:LIQUID_PRERANK_N]
+
+    logger.info(
+        "Pass 1 (liquid universe): %d universe tickers -> %d current -> "
+        "%d over %s shares -> pre-rank top %d (stale=%d, undated=%d).",
+        len(rows), len(fresh), len(liquid), f"{LIQUID_MIN_SHARE_VOLUME:,}",
+        len(candidates), stale, undated,
+    )
+    return candidates
 
 
 # =====================================================================
@@ -544,6 +664,9 @@ def _compute_flow_metrics(chain: list[dict], underlying_price: float) -> dict:
     return {
         "call_dollar_vol": call_dv,
         "put_dollar_vol": put_dv,
+        # Listed (not active) strike count — the liquid-universe chain-depth
+        # floor. Distinct strikes across the whole chain, both sides.
+        "listed_strikes": len({c.get("strike") for c in chain if c.get("strike") is not None}),
         "call_vol_oi": call_vol / max(call_oi, 1),
         "put_vol_oi": put_vol / max(put_oi, 1),
         "call_active_strikes": _count_active_strikes(calls),
@@ -580,8 +703,8 @@ def _process_ticker(poly: PolygonClient, ticker_info: dict) -> dict | None:
 
 
 def _pass2_options(poly: PolygonClient, movers: list[dict]) -> list[dict]:
-    """Fetch options chains in parallel for all movers."""
-    logger.info("Pass 2: Fetching options for %d movers...", len(movers))
+    """Fetch options chains in parallel for all pass-1 candidates."""
+    logger.info("Pass 2: Fetching options for %d candidates...", len(movers))
     results = []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -600,6 +723,81 @@ def _pass2_options(poly: PolygonClient, movers: list[dict]) -> list[dict]:
 
     logger.info("Pass 2 complete: %d tickers with options data.", len(results))
     return results
+
+
+# =====================================================================
+# LIQUID UNIVERSE RANK (after pass 2, when chain dollar volume exists)
+# =====================================================================
+
+def _z_cross(values: list[float]) -> list[float]:
+    """Cross-sectional z-score. A flat series contributes nothing."""
+    n = len(values)
+    if n == 0:
+        return []
+    mean = sum(values) / n
+    var = sum((v - mean) ** 2 for v in values) / n
+    sd = math.sqrt(var)
+    if sd <= 0:
+        return [0.0] * n
+    return [(v - mean) / sd for v in values]
+
+
+def _rank_liquid_universe(enriched: list[dict]) -> list[dict]:
+    """
+    Cut the pre-ranked candidates to the top LIQUID_TOP_N liquid names.
+
+    Rank = z_cross(log1p(chain dollar volume)) + z_cross(log1p(share volume)),
+    both on session T, exactly the definition the 2026-08-22 study measured.
+    Chain depth floor: LIQUID_MIN_STRIKES listed strikes. Ties go to the
+    higher share volume, then to the alphabetically first ticker.
+
+    Open interest is NOT a rank input. Polygon aggregates carry no OI history
+    and the only OI read is a current-state snapshot, so ranking on it would
+    be lookahead. Volume is the honest input.
+    """
+    if not enriched:
+        return []
+
+    eligible = []
+    thin = 0
+    for d in enriched:
+        if (d.get("listed_strikes") or 0) < LIQUID_MIN_STRIKES:
+            thin += 1
+            continue
+        eligible.append(d)
+
+    if not eligible:
+        logger.error(
+            "Liquid rank: every candidate failed the %d-strike floor. "
+            "No universe today.", LIQUID_MIN_STRIKES,
+        )
+        return []
+
+    chain_dv = [
+        math.log1p(max((d.get("call_dollar_vol") or 0) + (d.get("put_dollar_vol") or 0), 0))
+        for d in eligible
+    ]
+    share_vol = [math.log1p(max(d.get("day_volume") or 0, 0)) for d in eligible]
+    z_chain = _z_cross(chain_dv)
+    z_share = _z_cross(share_vol)
+
+    for d, zc, zs in zip(eligible, z_chain, z_share):
+        d["liquidity_score"] = zc + zs
+
+    eligible.sort(
+        key=lambda d: (-d["liquidity_score"], -(d.get("day_volume") or 0), d["ticker"])
+    )
+    top = eligible[:LIQUID_TOP_N]
+    for i, d in enumerate(top, start=1):
+        d["liquidity_rank"] = i
+
+    logger.info(
+        "Liquid rank: %d chains priced -> %d passed the %d-strike floor "
+        "(%d thin) -> top %d kept. Median share volume %s.",
+        len(enriched), len(eligible), LIQUID_MIN_STRIKES, thin, len(top),
+        f"{sorted(d.get('day_volume') or 0 for d in top)[len(top) // 2]:,}" if top else "n/a",
+    )
+    return top
 
 
 # =====================================================================
@@ -769,6 +967,13 @@ def _ensure_table(bq: bigquery.Client):
         bigquery.SchemaField("cluster_size", "INTEGER"),
         bigquery.SchemaField("cluster_boost", "INTEGER"),
         bigquery.SchemaField("original_score", "INTEGER"),
+        # Liquid universe (2026-08-24). NULL on every row written by the
+        # legacy mover funnel, which is how enrichment-trigger tells the two
+        # eras apart.
+        bigquery.SchemaField("liquidity_rank", "INTEGER"),
+        bigquery.SchemaField("liquidity_score", "FLOAT"),
+        bigquery.SchemaField("listed_strikes", "INTEGER"),
+        bigquery.SchemaField("universe_mode", "STRING"),
     ]
     table = bigquery.Table(table_id, schema=schema)
     table.time_partitioning = bigquery.TimePartitioning(
@@ -777,10 +982,31 @@ def _ensure_table(bq: bigquery.Client):
     table.clustering_fields = ["overnight_score", "ticker"]
     try:
         bq.create_table(table, exists_ok=True)
-        logger.info("Table %s ready.", table_id)
     except Exception as e:
         logger.error("Failed to create table %s: %s", table_id, e)
         raise
+
+    # create_table(exists_ok=True) is a no-op on an existing table, so it never
+    # adds a new column. insert_rows_json rejects a row carrying a field the
+    # table does not have, so sync the additions explicitly. Additive only:
+    # this appends missing NULLABLE fields and never drops or retypes one.
+    # NEVER autodetect here (that broke the pick pipeline 2026-07-02).
+    try:
+        live = bq.get_table(table_id)
+        have = {f.name for f in live.schema}
+        missing = [f for f in schema if f.name not in have]
+        if missing:
+            live.schema = list(live.schema) + missing
+            bq.update_table(live, ["schema"])
+            logger.info(
+                "Table %s: added columns %s.",
+                table_id, [f.name for f in missing],
+            )
+    except Exception as e:
+        logger.error("Failed to sync schema on %s: %s", table_id, e)
+        raise
+
+    logger.info("Table %s ready.", table_id)
 
 
 def _write_results(bq: bigquery.Client, scored: list[dict]):
@@ -841,6 +1067,10 @@ def _write_results(bq: bigquery.Client, scored: list[dict]):
             "cluster_size": s.get("cluster_size"),
             "cluster_boost": s.get("cluster_boost"),
             "original_score": s.get("original_score"),
+            "liquidity_rank": s.get("liquidity_rank"),
+            "liquidity_score": s.get("liquidity_score"),
+            "listed_strikes": s.get("listed_strikes"),
+            "universe_mode": "LIQUID_TOP_N" if LIQUID_UNIVERSE else "MOVERS",
         })
 
     errors = bq.insert_rows_json(config.OVERNIGHT_SIGNALS_TABLE, rows)
@@ -886,17 +1116,25 @@ def run_pipeline():
         logger.error("Empty universe. Aborting.")
         return
 
-    # Step 2: Pass 1 - stock snapshots, filter movers
-    movers = _pass1_stock_snapshots(poly, universe)
-    if not movers:
-        logger.info("No movers found. Nothing to scan.")
+    # Step 2: Pass 1 - stock snapshots, choose the pass-2 candidates
+    candidates = _pass1_stock_snapshots(poly, universe)
+    if not candidates:
+        logger.info("No pass-1 candidates. Nothing to scan.")
         return
 
-    # Step 3: Pass 2 - options chains for movers
-    enriched = _pass2_options(poly, movers)
+    # Step 3: Pass 2 - options chains for the candidates
+    enriched = _pass2_options(poly, candidates)
     if not enriched:
         logger.info("No options data collected. Exiting.")
         return
+
+    # Step 3b: cut to the liquid universe. Chain dollar volume only exists
+    # after pass 2, so the rank has to run here, not in pass 1.
+    if LIQUID_UNIVERSE:
+        enriched = _rank_liquid_universe(enriched)
+        if not enriched:
+            logger.error("Liquid universe is empty. Writing nothing.")
+            return
 
     # Step 4: Load sector/industry metadata for the movers we'll score.
     # Per-ticker detail fetch: Polygon's list endpoint stopped returning

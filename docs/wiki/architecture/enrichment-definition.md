@@ -2,15 +2,21 @@ Status: active
 Type: architecture
 Tag: architecture-fact
 Exit-context: n/a
-Source: docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md; docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md; CLAUDE.md "Current policy"
-Date: 2026-07-17
+Source: docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md; docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md; docs/DECISIONS/2026-08-24-liquid-universe-funnel.md
+Date: 2026-08-24
 
-# "Enriched" = overnight_score ≥ 1 + directional UOA > $500K (all directions)
+# "Enriched" = overnight_score ≥ 1 + inside the liquid universe (all directions)
 
 `enrichment-trigger` defines the "enriched" pool with exactly two admission criteria:
 - **`overnight_score >= 1`** — the accepted floor (owner call 2026-08-20). The floor is
-  cosmetic: the UOA bar, the BULLISH gate, and the top-50 cap do the filtering.
-- **directional UOA > $500K**.
+  cosmetic: the universe, the BULLISH gate, and the top-50 cap do the filtering.
+- **`liquidity_rank <= LIQUID_TOP_N` (100)** — inside the liquid universe
+  ([[liquid-universe-funnel]]).
+
+**The $500K directional UOA floor was DROPPED on 2026-08-24** (owner call). It belonged
+to the UOA-first funnel; inside a liquid universe every name already carries heavy flow,
+so it stopped selecting and only thinned the pool (44 BULLISH names to 30 on a
+2026-08-24 midday screen). The legacy mover path keeps it. `ENRICH_UOA_FLOOR` restores a floor.
 
 **History (the ≥4 floor never ran).** A raise to `>= 4` was decided on 2026-06-05 but
 never reached production: the `deploy.sh` env pin has set `MIN_ENRICHMENT_SCORE=1` since
@@ -23,7 +29,7 @@ tradeability), and
 The no-ceiling fact stands: the score floor is a FLOOR, not a ceiling. EV inverts at
 `>= 7`, so a higher threshold is worse, not better.
 
-At this cheap scan/UOA stage the pool is **all directions**; the BULLISH-only narrowing and
+At this cheap scan/universe stage the pool is **all directions**; the BULLISH-only narrowing and
 the top-N cap happen downstream at the grounded-LLM stage
 ([[bullish-only-hard-gate]], [[enrichment-cost-fix-topn-thinking-cap]]).
 

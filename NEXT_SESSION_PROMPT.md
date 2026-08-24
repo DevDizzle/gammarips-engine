@@ -50,8 +50,9 @@ Owner steps, in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-
 ## Research (parked behind GTM, state intact)
 1. Liquid-universe funnel: DONE 08-22, RULE 2 (null on signal, +0.4pp CI
    [-1.7, 2.1]); executability UNFILLABLE 40.5% -> 6.1%. Ledger §2026-08-22,
-   brief top entry, wiki [[liquid-universe-uoa-null]]. OWNER CALL (flag once):
-   ship the liquid universe on executability grounds, or not. No prod change.
+   brief top entry, wiki [[liquid-universe-uoa-null]]. OWNER CALL RESOLVED
+   08-24: SHIPPED on executability grounds, with the $500K UOA floor dropped.
+   DECIDED, do not re-raise. See Live posture.
 2. Pool-vs-benchmark: DONE 08-22, ALL THREE FAIL (A-B -1.33pp [-3.78, 1.04]).
    Pre-committed consequence: the scan is not a selection edge, selection
    research is CLOSED, product = surface data. Ledger §2026-08-22, brief top
@@ -75,7 +76,7 @@ Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
 - Record the 08-17 zero-trials gate disposition (run-sheet Q3, memory
   `mcp-monetization-killswitch`). The 10-05 gate stands.
 - win-tracker redeploy (`d44a272`) + x-poster / blog-generator redeploy for the
-  2026-08-21 cohort pin.
+  2026-08-25 cohort pin.
 - Compliance substring misfires (`'for you'` hit the relaunch email on "for your
   agent"; `libs/gammarips_content/.../compliance.py`).
 - Organic Social halved (67→35 sessions/28d); x-poster lane needs its own look.
@@ -83,9 +84,12 @@ Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
   `published`; lx6bb stray docs call; Cursor listing v4; X pins/bio; Stripe MCP.
 
 ## Watch / dated checkpoints
+- 🔴 FIRST LIQUID SCAN 2026-08-24 23:00 ET. Next morning: `overnight_signals`
+  scan_date 08-24 = ~100 rows, all `universe_mode='LIQUID_TOP_N'`,
+  `liquidity_rank` 1..100 (was ~2,000 mover rows). Then the 08-25 05:30 ET
+  enrichment log says "liquid universe top-100" + "UOA floor NONE"; pool ~40-50.
+  Rollback: `LIQUID_UNIVERSE=false` + `ENRICH_LIQUID_ONLY=false`.
 - 🔴 Attribution test checkout (run-sheet item 1) gates Show HN.
-- First picks under `PRINT_FLOOR_MIN=25`: thinner slate expected, a
-  `no_liquid_candidates` no-pick day is correct.
 - Owner's 08-13 trial conversion: `invoice.paid` + `proUntil` refresh, unconfirmed.
 - ~08-27 threshold re-fit: confirm the 08-19 `pool_liquidity_snapshot` closes it.
 - Mid-Aug ITM check (needs ≥200 expired post-06-12-era rows).
@@ -109,6 +113,12 @@ Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
   old-MCP-host refs + 3 tsc errors; blog non-blocking pair; `gammarips-eval` config.
 
 ## Live posture
+- LIQUID-UNIVERSE FUNNEL LIVE 2026-08-24 (`docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`):
+  the scan takes the 100 most liquid names, not price movers, and the $500K UOA
+  floor is gone. Ships on FILLS (UNFILLABLE 40.5% -> 6.1%), NEVER on edge.
+  Cohort 2026-08-25, `policy_version` unchanged. Revs scanner-00016-rs5 /
+  enrichment-00050-q54 / notifier-00064-prb. Follow-up: public copy still says
+  market-wide UOA scan (webapp repo, `gammarips-copywriter` + `/ship`).
 - V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` + wiki `REGISTRY.md` + `CHEAT-SHEET.md`.
   Cohort start: `LIVE_COHORT_START_DATE` in `signal-notifier/main.py` (never hardcode).
 - Owner trades LIVE (Robinhood since 07-09). Daily crons run; MCP paywall ENFORCE.

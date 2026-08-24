@@ -10,13 +10,14 @@ V7.1 = V6 bracket-tournament SELECTION + V7 same-day intraday EXIT + the ".1"
 60-day-momentum enrichment tilt (`docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md`).
 
 **Cohort:** the live value is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py`
-(2026-08-21 as of the 2026-08-20 reset). Do not cache the date in docs. Reset
+(2026-08-25 as of the 2026-08-24 reset). Do not cache the date in docs. Reset
 history in one line: 06-25 (live-OI floor), 07-28 (tournament-liquidity upgrade,
 entry 07-29), 08-07 (stale-day-bar fix, entry 08-10), 08-12 (fail-soft restore
-lockdown, entry 08-13), 08-20 (print floor 25, entry 08-21). The 06-04 V6 launch
-and the 06-22 V7.1 relabel truncated the ledger. The five later resets kept all
-rows and moved the date filter only.
-See `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`.
+lockdown, entry 08-13), 08-20 (print floor 25, entry 08-21), 08-24 (liquid-universe
+funnel + UOA floor dropped, entry 08-25). The 06-04 V6 launch and the 06-22 V7.1
+relabel truncated the ledger. The six later resets kept all rows and moved the
+date filter only.
+See `docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`.
 
 ## Objective
 Generate at most one high-conviction options alert per trading day, execute it
@@ -63,7 +64,25 @@ Display path only, no selection input changes.
 Order: scan → enrichment → notifier rails → BULLISH gate + cap → liquidity
 floors → tournament. Each item cites its decision note.
 
+**Scan (`overnight-scanner`) defines the universe — liquidity first (2026-08-24):**
+- Pass 1 keeps the most liquid universe names by session share volume, NOT
+  price movers. Floor `LIQUID_MIN_SHARE_VOLUME` (3M shares), pre-rank top
+  `LIQUID_PRERANK_N` (300). The `|price change| >= 1%` mover gate is retired.
+- Pass 2 prices those chains, then the rank cuts to `LIQUID_TOP_N` (100):
+  `z_cross(log1p(chain dollar volume)) + z_cross(log1p(share volume))`, session
+  T, with a 25-listed-strike chain-depth floor. OI is NOT an input (no history
+  exists, so a snapshot read would be lookahead).
+- Ships on executability alone: the old funnel left 40.5% of pool legs
+  unfillable at 10:00 ET against 6.1% for the liquid universe. It is NOT an
+  edge claim — the selection signal on top of liquidity is null.
+- Stamps `liquidity_rank`, `liquidity_score`, `listed_strikes`, `universe_mode`.
+  Kill switch `LIQUID_UNIVERSE`
+  (2026-08-24, `docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`).
+
 **Enrichment (`enrichment-trigger`) defines "enriched":**
+- Liquid-universe gate: `liquidity_rank <= LIQUID_TOP_N` (100). Falls back to
+  the legacy funnel, with a logged warning, when the column is missing or the
+  scan_date predates the switch. Kill switch `ENRICH_LIQUID_ONLY` (2026-08-24).
 - `overnight_score >= 1` floor. The 2026-06-05 `>= 4` decision never ran: the
   deploy.sh env pin (`MIN_ENRICHMENT_SCORE=1`, set 2026-04-20) overrides the
   code default, so production has enriched at `>= 1` throughout. Accepted as
@@ -71,12 +90,19 @@ floors → tournament. Each item cites its decision note.
   `>= 4` changes the top-50 pool on 1 of 20 days (FINDINGS_LEDGER §Pool
   tradeability). See
   `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`.
-- Directional UOA > $500K (`call_uoa_depth` if bullish, `put_uoa_depth` if bearish).
+- Directional UOA floor: **DROPPED under the liquid universe** (owner call
+  2026-08-24). The $500K floor belonged to the UOA-first funnel; inside a
+  liquid universe every name carries heavy flow, so it stopped selecting and
+  only thinned the pool (44 names to 30 on a measured red-day screen). The
+  legacy mover path keeps it. `ENRICH_UOA_FLOOR` restores a floor under either
+  funnel (2026-08-24, `docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`).
 - Spread gate RETIRED: this Polygon plan serves no options NBBO, so
   `recommended_spread_pct` is permanently NULL
   (2026-06-05, `docs/DECISIONS/2026-06-05-engine-quote-outage-and-gate.md`).
 - Edge-rank to the top `ENRICH_TOP_N` (50) BULLISH names before the grounded-LLM
-  news step, with `thinking_budget=0`
+  news step, with `thinking_budget=0`. Under the liquid universe this cap rarely
+  binds: pool depth floats with the market (44 BULLISH names on a 2026-08-24
+  midday screen) and a red day gives a smaller pool by design
   (2026-06-12, `docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md`).
 - `mom_60` soft tilt: names with 60-day momentum ≥ 0.35 get a +1.25 rank bump,
   and `mom_60` descending is the tie-break. Soft, never drops a candidate.

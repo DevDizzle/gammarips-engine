@@ -77,6 +77,27 @@ MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
 #   scan(~5000) -> edge-rank top ENRICH_TOP_N BULLISH -> ground those -> tournament.
 # See docs/DECISIONS/2026-06-12-enrich-topN-thinking-cap.md.
 ENRICH_TOP_N = int(os.getenv("ENRICH_TOP_N", "50"))
+
+# --- Liquid universe gate (2026-08-24, owner-approved) ---
+# The scanner now writes only the top-LIQUID_TOP_N liquid names and stamps
+# liquidity_rank on each row. This gate keeps the enrichment pool inside that
+# universe. Rows from the legacy mover funnel carry liquidity_rank IS NULL, so
+# the gate also marks the era boundary. Keep this value equal to the scanner's
+# LIQUID_TOP_N. Rollback: ENRICH_LIQUID_ONLY=false.
+# Evidence: docs/DECISIONS/2026-08-24-liquid-universe-funnel.md.
+ENRICH_LIQUID_ONLY = os.getenv("ENRICH_LIQUID_ONLY", "true").strip().lower() in ("1", "true", "yes")
+LIQUID_TOP_N = int(os.getenv("LIQUID_TOP_N", "100"))
+
+# UOA depth floor, in dollars. The $500K floor belonged to the UOA-first funnel,
+# where it was the only thing that separated an unusual print from ordinary
+# volume. Inside the liquid universe every name already carries heavy flow, so
+# the floor stopped selecting and only thinned the pool: on a measured red-day
+# screen (2026-08-24, full 214-name run) it cut 43 BULLISH ranked names to 28.
+# Owner call 2026-08-24: drop it under the liquid universe. The legacy mover
+# funnel keeps it, because there it still does work.
+# Set ENRICH_UOA_FLOOR to a dollar value to restore a floor under either funnel.
+ENRICH_UOA_FLOOR = float(os.getenv("ENRICH_UOA_FLOOR", "0"))
+LEGACY_UOA_FLOOR = 500_000.0
 # 0 fully disables model "thinking" (confirmed working on gemini-3.5-flash WITH
 # grounding: thoughts_token_count -> 0, news still returned). Raise via env if
 # catalyst quality degrades.
@@ -491,6 +512,35 @@ They are internal context only and differ from the published pool size.
 # STEP 1: Get today's high-score tickers from overnight_signals
 # =====================================================================
 
+def _table_has_column(bq_client: bigquery.Client, table_id: str, column: str) -> bool:
+    """One metadata read. Fail-open: an unreadable schema must not stop a scan."""
+    try:
+        return any(f.name == column for f in bq_client.get_table(table_id).schema)
+    except Exception as e:
+        logger.error("Schema read failed on %s: %s", table_id, e)
+        return False
+
+
+def _scan_date_is_liquid_era(bq_client: bigquery.Client, scan_date: str) -> bool:
+    """True when the scanner stamped a liquidity_rank on this scan_date."""
+    q = f"""
+        SELECT COUNTIF(liquidity_rank IS NOT NULL) AS ranked
+        FROM `{SIGNALS_TABLE}`
+        WHERE scan_date = @scan_date
+    """
+    try:
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
+            ]
+        )
+        rows = list(bq_client.query(q, job_config=job_config).result())
+        return bool(rows and (rows[0]["ranked"] or 0) > 0)
+    except Exception as e:
+        logger.error("Liquid-era probe failed for %s: %s", scan_date, e)
+        return False
+
+
 def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> list[dict]:
     """Fetch tickers with score >= MIN_SCORE from today's overnight scan."""
     # Defense-in-depth (2026-07-01, BLOCKER-1): scan_date reaches here from the
@@ -513,6 +563,41 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
         result = list(bq_client.query(q).result())
         scan_date = str(result[0]["latest"]) if result else str(date.today())
 
+    # The gate is skipped, with a logged reason, when it cannot apply: the
+    # column is missing (enrichment-trigger deployed before the scanner) or the
+    # scan_date predates the liquid-universe switch. Silence here would look
+    # like an empty market instead of a version mismatch.
+    liquid_clause = ""
+    if ENRICH_LIQUID_ONLY:
+        if not _table_has_column(bq_client, SIGNALS_TABLE, "liquidity_rank"):
+            logger.warning(
+                "ENRICH_LIQUID_ONLY is on but %s has no liquidity_rank column. "
+                "Deploy overnight-scanner first. Running the legacy funnel.",
+                SIGNALS_TABLE,
+            )
+        elif not _scan_date_is_liquid_era(bq_client, scan_date):
+            logger.warning(
+                "ENRICH_LIQUID_ONLY is on but scan_date %s has no ranked rows "
+                "(pre-switch date). Running the legacy funnel for this date.",
+                scan_date,
+            )
+        else:
+            liquid_clause = (
+                f"AND liquidity_rank IS NOT NULL AND liquidity_rank <= {LIQUID_TOP_N}"
+            )
+
+    # The floor follows the funnel: dropped under the liquid universe, kept on
+    # the legacy path, overridable by env under either.
+    uoa_floor = ENRICH_UOA_FLOOR if liquid_clause else LEGACY_UOA_FLOOR
+    uoa_clause = ""
+    if uoa_floor > 0:
+        uoa_clause = (
+            "AND (\n"
+            f"        (direction = 'BULLISH' AND call_uoa_depth > {uoa_floor:.0f})\n"
+            f"        OR (direction = 'BEARISH' AND put_uoa_depth > {uoa_floor:.0f})\n"
+            "      )"
+        )
+
     query = f"""
     SELECT ticker, direction, overnight_score, price_change_pct, underlying_price,
            day_volume,
@@ -532,10 +617,8 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
       -- a genuinely-wide spread IF a real quote ever appears. Spread is no longer a
       -- selection gate. See docs/DECISIONS/2026-06-05-*.
       AND (recommended_spread_pct IS NULL OR recommended_spread_pct <= 0.30)
-      AND (
-        (direction = 'BULLISH' AND call_uoa_depth > 500000)
-        OR (direction = 'BEARISH' AND put_uoa_depth > 500000)
-      )
+      {uoa_clause}
+      {liquid_clause}
     ORDER BY overnight_score DESC
     """
     # spread_pct tightened 0.10 -> 0.08 on 2026-05-06 per H11 (lit-audit).
@@ -554,7 +637,13 @@ def get_signal_tickers(bq_client: bigquery.Client, scan_date: str = None) -> lis
         query_parameters=[bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
     )
     rows = list(bq_client.query(query, job_config=job_config).result())
-    logger.info(f"Found {len(rows)} signals (score>={MIN_SCORE}, UOA>$500K, all directions; spread gate retired) for {scan_date}")
+    logger.info(
+        f"Found {len(rows)} signals (score>={MIN_SCORE}, all directions; "
+        f"spread gate retired; "
+        f"UOA floor {('$' + format(uoa_floor, ',.0f')) if uoa_floor > 0 else 'NONE'}; "
+        f"{'liquid universe top-' + str(LIQUID_TOP_N) if liquid_clause else 'NO liquid gate'}) "
+        f"for {scan_date}"
+    )
     return [dict(r) for r in rows], scan_date
 
 
