@@ -14,17 +14,24 @@ webapp PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not re
 work the NO-OWNER QUEUE below and leave the run-sheet as is.
 
 NO-OWNER QUEUE (in this order, each shippable alone):
-1. Fix the report-vs-regime VIX as-of mismatch (Open engineering, first red item).
+1. WEBAPP COPY REWRITE. The funnel changed 08-24, so the site is factually
+   wrong: it sells a market-wide unusual-activity scan that finds the best
+   candidates, and neither half is true now. Spec is
+   `docs/GTM-COPY-REWRITE-BRIEF.md` (positioning, allowed claims with their
+   conditions, banned phrasings, page list, process). Read
+   `../gammarips-webapp/CLAUDE.md` first, branch, run `gammarips-copywriter`,
+   `/ship` from `~/workspace`. Also covers x-poster + blog-generator prompts.
+2. Fix the report-vs-regime VIX as-of mismatch (Open engineering, first red item).
    It is visible in the HN demo GIF.
-2. MCP repo: add `title` + `readOnlyHint` to all 9 tools (Connectors Directory
+3. MCP repo: add `title` + `readOnlyHint` to all 9 tools (Connectors Directory
    gate). Own review gate, own commit, redeploy per that repo.
-3. Draft the creator pitch + Stripe promo-code design (free Pro + rev share) into
+4. Draft the creator pitch + Stripe promo-code design (free Pro + rev share) into
    `docs/GTM-CREATOR-PROGRAM.md`, short.
-4. Draft the Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) and the dev.to
+5. Draft the Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) and the dev.to
    syndication post into `~/workspace/GAMMARIPS-POSTS.txt`. Owner posts.
-5. Guide B2 ("How to trade options with Claude Code") as markdown + the publish
+6. Guide B2 ("How to trade options with Claude Code") as markdown + the publish
    script `scripts/blog/publish_guide.py` (plan §B9). Not published without `/ship`.
-6. Fix the `'for you'` compliance substring misfire.
+7. Fix the `'for you'` compliance substring misfire.
 
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision: `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`.
@@ -118,7 +125,7 @@ Open owner call (flagged once): later same-day entry ([[first-hour-bleed]]).
   floor is gone. Ships on FILLS (UNFILLABLE 40.5% -> 6.1%), NEVER on edge.
   Cohort 2026-08-25, `policy_version` unchanged. Revs scanner-00016-rs5 /
   enrichment-00050-q54 / notifier-00064-prb. Follow-up: public copy still says
-  market-wide UOA scan (webapp repo, `gammarips-copywriter` + `/ship`).
+  market-wide UOA scan: rewrite spec is `docs/GTM-COPY-REWRITE-BRIEF.md`.
 - V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` + wiki `REGISTRY.md` + `CHEAT-SHEET.md`.
   Cohort start: `LIVE_COHORT_START_DATE` in `signal-notifier/main.py` (never hardcode).
 - Owner trades LIVE (Robinhood since 07-09). Daily crons run; MCP paywall ENFORCE.
