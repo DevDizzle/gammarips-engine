@@ -18,8 +18,11 @@ NO-OWNER QUEUE (in order, each shippable alone):
    site factually wrong: it sells a market-wide unusual-activity scan that finds the
    best candidates, and neither half is true now. Spec: `docs/GTM-COPY-REWRITE-BRIEF.md`.
    Read `../gammarips-webapp/CLAUDE.md` FIRST, branch, run `gammarips-copywriter`,
-   `/ship` from `~/workspace`. Also covers the MCP tool text + `get_playbook` and the
-   x-poster / blog-generator prompts.
+   `/ship` from `~/workspace`. FOUR repos: webapp, harness, MCP tool text +
+   `get_playbook`, x-poster / blog-generator prompts. DO THE HARNESS FIRST —
+   `gammarips-harness/docs/HN-SUBMISSION.txt` line 60 still says "~5,200 US tickers
+   for unusual options activity, curate it hard", every clause now false, and Show HN
+   ships this week.
 2. Fix the report-vs-regime VIX as-of mismatch (Open engineering, first red item).
    Visible in the HN demo GIF.
 3. MCP repo: `title` + `readOnlyHint` on all 9 tools (Connectors Directory gate).

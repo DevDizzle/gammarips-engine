@@ -115,13 +115,33 @@ the MCP has no pick-returning endpoint.
 Add for this rewrite: **do not describe the scan as unusual-activity-driven.**
 Flow still orders the pool but no longer decides membership.
 
-## Pages to audit
+## Surfaces to audit — four repos, not one
 
 Anything describing the scan, the funnel, "unusual activity", or how the pool is
-built: homepage, /methodology, /about, /pool, /reports templates, the MCP tool
-descriptions and `get_playbook` text, blog copy that explains the funnel, and
-the X and blog generator prompt templates in `x-poster/` and `blog-generator/`
-(both vendor `libs/gammarips_content`).
+built.
+
+**1. Webapp (`gammarips-webapp`).** Homepage, /methodology, /about, /pool,
+/reports templates, blog copy that explains the funnel.
+
+**2. Harness (`gammarips-harness`) — HIGHEST URGENCY.**
+`docs/HN-SUBMISSION.txt` line 60 opens with "I run an overnight scan of ~5,200
+US tickers for unusual options activity, curate it hard down to a small pool".
+Every clause of that is now wrong: the universe is 3,532 names, the scan does
+not select on unusual activity, and "curate it hard" is the selection-edge story
+two studies just killed. **Show HN is scheduled for the week of 08-25, so this
+text ships before most of the rewrite.** Fix it first, in the same pass as the
+webapp homepage. Also check `README.md` and the plugin description in PR #3
+(the plugin name is immutable, the description is not).
+
+**3. MCP (`gammarips-mcp`).** Tool descriptions and the `get_playbook` text.
+Read that repo's `CLAUDE.md` + `SECURITY.md` before touching it.
+
+**4. Poster prompts.** `x-poster/` and `blog-generator/` prompt templates in this
+repo, both vendoring `libs/gammarips_content`.
+
+The honest replacement for the HN opener follows the same shape as the site:
+name the universe, name the liquidity rule, say plainly that there is no edge
+claim and that the value is contracts the agent can actually fill.
 
 ## Process
 
