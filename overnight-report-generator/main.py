@@ -638,7 +638,7 @@ OUTPUT — produce a single JSON object with these keys:
        clustered. NO bullish-share or z-score commentary — the pool's
        direction mix is fixed by the pipeline, not by the market.
     ## Macro & Regime Backdrop
-       From `macro_regime` (authoritative, deterministic, point-in-time): the VIX
+       From `macro_regime` (authoritative, deterministic): the VIX
        level + 1d/5d trend (vix, vix_level_state, vix_trend), term structure
        (term_state), rates (ust10y, rate_state, rate_trend), and the composite
        risk_state with its risk_state_reasons. State plainly whether this is a
@@ -646,6 +646,15 @@ OUTPUT — produce a single JSON object with these keys:
        advise buying premium or any trade on any horizon. If a field is UNKNOWN,
        say "macro data unavailable for this scan" for that field — do NOT
        fabricate or infer it. Cite the numbers; no vibes.
+       AS-OF, MANDATORY: these values are NOT as-of the scan date. FRED publishes
+       each daily close after the session, so each series carries its own
+       observation date in `vix_as_of`, `vix3m_as_of`, `ust10y_as_of`. When you
+       quote the VIX, name `vix_as_of`, not the scan date — write "VIX 14.89
+       (2026-08-20 close)". Never write "VIX 14.89 as of <scan date>" unless
+       `vix_as_of` equals the scan date. If `macro_stale_days` is 2 or more, add
+       one clause saying the macro read lags the scan by that many days. This is
+       not optional polish: stamping the scan date on an older close is what made
+       this report disagree with the MCP's regime tool on 2026-08-22.
     ## Sector Tape
        From `sector_panel` (authoritative; may be null): rank the sectors by ret_ytd
        with ret_5d and drawdown_5d_sigma beside each, and call out any sector tagged

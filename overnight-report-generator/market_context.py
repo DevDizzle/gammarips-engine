@@ -73,7 +73,16 @@ def _level_and_trend(series: list[tuple[date, float]], n_long: int = 5) -> dict 
     latest = series[-1][1]
     chg_1d = latest - series[-2][1] if len(series) > 1 else None
     chg_long = latest - series[-1 - n_long][1] if len(series) > n_long else None
-    return {"value": latest, "chg_1d": chg_1d, "chg_long": chg_long}
+    # Carry the OBSERVATION date. FRED publishes a daily close after the session,
+    # so the newest row on/before scan_date is routinely scan_date - 1 or older.
+    # Dropping this date is what let the report stamp as_of=scan_date on a value
+    # from a different day and disagree with get_regime_context (2026-08-22).
+    return {
+        "value": latest,
+        "chg_1d": chg_1d,
+        "chg_long": chg_long,
+        "as_of": series[-1][0].isoformat(),
+    }
 
 
 def macro_regime(scan_date: str) -> dict:
@@ -84,12 +93,16 @@ def macro_regime(scan_date: str) -> dict:
     ust10 = _level_and_trend(_fred_series("DGS10", scan_date))
     ust30 = _level_and_trend(_fred_series("DGS30", scan_date))
 
-    m: dict = {"as_of": scan_date}
+    # `as_of` is the date the block was REQUESTED for, not the date any value was
+    # observed on. Each series carries its own observation date below. Read
+    # `*_as_of` before you attribute a number to a day.
+    m: dict = {"requested_for": scan_date, "as_of": scan_date}
 
     # --- VIX level + trend ---
     if vix:
         v = vix["value"]
         m["vix"] = round(v, 2)
+        m["vix_as_of"] = vix["as_of"]
         m["vix_level_state"] = (
             "CALM" if v < 15 else "NORMAL" if v < 20 else "ELEVATED" if v < 28 else "STRESS"
         )
@@ -114,6 +127,7 @@ def macro_regime(scan_date: str) -> dict:
     if vix and vix3m_series:
         vix3m = vix3m_series[-1][1]
         m["vix3m"] = round(vix3m, 2)
+        m["vix3m_as_of"] = vix3m_series[-1][0].isoformat()
         slack = (vix3m - vix["value"]) / vix3m if vix3m else None
         if slack is not None:
             m["term_slack_pct"] = round(slack, 3)
@@ -132,6 +146,7 @@ def macro_regime(scan_date: str) -> dict:
     if ust10:
         r = ust10["value"]
         m["ust10y"] = round(r, 2)
+        m["ust10y_as_of"] = ust10["as_of"]
         m["ust30y"] = round(ust30["value"], 2) if ust30 else None
         m["rate_state"] = (
             "BENIGN" if r < 4.0 else "ELEVATED" if r <= 4.5 else "RESTRICTIVE"
@@ -148,6 +163,31 @@ def macro_regime(scan_date: str) -> dict:
     else:
         m["rate_state"] = "UNKNOWN"
         m["rate_trend"] = "UNKNOWN"
+
+    # --- Staleness: how far the newest observation lags the requested date ---
+    # This is the field that makes the report reconcilable with
+    # get_regime_context, which reads vix_at_scan stamped at scan time. When the
+    # two disagree on "the VIX for date D", this is almost always why.
+    try:
+        _target = datetime.strptime(scan_date, "%Y-%m-%d").date()
+        _obs = [
+            m[k] for k in ("vix_as_of", "vix3m_as_of", "ust10y_as_of") if m.get(k)
+        ]
+        if _obs:
+            _oldest = min(datetime.strptime(d, "%Y-%m-%d").date() for d in _obs)
+            m["macro_stale_days"] = (_target - _oldest).days
+        else:
+            m["macro_stale_days"] = None
+    except Exception:
+        m["macro_stale_days"] = None
+
+    m["as_of_note"] = (
+        "FRED publishes each daily close after the session, so these values are "
+        "the newest observation ON OR BEFORE the requested date and are routinely "
+        "1-3 calendar days older than it. Cite the per-series *_as_of date, never "
+        "the requested date. A disagreement with get_regime_context on 'the VIX "
+        "for this date' is an as-of difference, not a data error."
+    )
 
     # --- Composite risk-on/off (deterministic function of the above) ---
     m["risk_state"], m["risk_state_reasons"] = _risk_state(m)
