@@ -29,19 +29,23 @@ NO-OWNER QUEUE (in order, each shippable alone):
 5. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`
    (plan §B9). Not published without `/ship`.
 
-DONE 2026-08-25, ALL UNPUSHED AND UNDEPLOYED — review then ship:
-- `gammarips-mcp` `fix/moneyness-claim-and-exit-horizons` 3c2b732 — moneyness claim
-  retired (it contradicted the repo's own education.py), causal frames removed,
+SHIPPED 2026-08-25 — all merged to main, pushed, and deployed:
+- `gammarips-mcp` 3c2b732, DEPLOYED `gammarips-mcp-00046-lhh`. Moneyness claim
+  retired (it contradicted the repo's own `education.py`), causal frames removed,
   cohort bounds, exit-lab horizons, new `selection-research-closed` playbook,
-  funnel sentence in README + SKILL + start-here.
-- `gammarips-mcp-serverjson` `fix/funnel-copy-sync` 2cba0a6 — same sentence, per the
-  MCP's sync rule.
-- `gammarips-harness` `fix/hn-opener-liquid-funnel` 992e980 — the Show HN opener.
-  Branched off main so PR #3 keeps its scope.
-- Engine master: scanner NULL-column fix DEPLOYED (`overnight-scanner-00017-n7z`),
-  VIX as-of fix `6a799fd` (NOT deployed), compliance whole-phrase matcher `a7fe472`
-  (NOT deployed, needs x-poster + blog-generator redeploy), moneyness ruling ADR
-  `6a797b5`.
+  funnel sentence in README + SKILL + start-here. Verified live via `get_playbook`.
+- `gammarips-mcp-serverjson` 2cba0a6 — same sentence, per the MCP's sync rule.
+- `gammarips-harness` 992e980 on main — the Show HN opener. Branched off main so
+  PR #3 kept its scope. The run-sheet trap is gone.
+- `gammarips-webapp` 2c3ec706 on main — 7 files. The site said "a name needs over
+  $500K bet in one direction to survive at all" and "the ~50 strongest setups",
+  both false. New FAQ entry answers "is the pool better than random?" with no.
+  **The `gammarips-copywriter` agent and `/ship` did NOT run** (not invocable from
+  an engine session). Rollback: revert 80d1d75a on main.
+- Engine master, DEPLOYED: scanner NULL-column fix (`overnight-scanner-00017-n7z`),
+  VIX as-of fix (`overnight-report-generator-00021-r64`), compliance whole-phrase
+  matcher (`x-poster-00044-mcf` + `blog-generator-00034-r4s`). Moneyness ruling ADR
+  `6a797b5`. No code commit today was compile-checked: this session cannot run python.
 
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`. Owner
