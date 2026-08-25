@@ -127,8 +127,17 @@ est = pytz.timezone("America/New_York")
 
 # V5.3 filter thresholds — canonical in CHEAT-SHEET.md
 VOL_OI_MIN = 2.0
+# DEAD SINCE 2026-06-04. MONEYNESS_MIN and MONEYNESS_MAX are defined here and
+# referenced NOWHERE. The bracket tournament removed the strict selection gates
+# on 2026-06-04 and the strict path has set moneyness_where = "" ever since, so
+# neither constant gates anything. They are kept only so the history below stays
+# readable. The one live moneyness band is FALLBACK_MONEYNESS_MIN/MAX further
+# down, which is pinned separately and is a tail-risk bound on an unvetted
+# fallback pick, NOT a selection lever.
+# Scope settled in DECISIONS/2026-08-25-moneyness-ruling-scope.md. Do not add a
+# moneyness gate to any selection path, and do not read 0.13 as live.
 MONEYNESS_MIN = 0.05
-# MONEYNESS_MAX history:
+# MONEYNESS_MAX history (superseded 2026-06-04, see above):
 #   0.15 -> 0.10 on 2026-05-06 (H12 lit-audit; Aretz 2023 / Augustin 2022 deep-OTM cliff).
 #   0.10 -> 0.13 on 2026-06-02 (owner-directed; see DECISIONS/2026-06-02-moneyness-cap-widen-to-13).
 # Mechanism correction: the Aretz/Augustin deep-OTM EV cliff is a HOLD-TO-EXPIRY
