@@ -14,26 +14,34 @@ PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not ready, wo
 NO-OWNER QUEUE and leave the run-sheet as is.
 
 NO-OWNER QUEUE (in order, each shippable alone):
-1. WEBAPP COPY REWRITE — the big one, do it first. The 08-24 funnel change makes the
-   site factually wrong: it sells a market-wide unusual-activity scan that finds the
-   best candidates, and neither half is true now. Spec: `docs/GTM-COPY-REWRITE-BRIEF.md`.
-   Read `../gammarips-webapp/CLAUDE.md` FIRST, branch, run `gammarips-copywriter`,
-   `/ship` from `~/workspace`. FOUR repos: webapp, harness, MCP tool text +
-   `get_playbook`, x-poster / blog-generator prompts. DO THE HARNESS FIRST —
-   `gammarips-harness/docs/HN-SUBMISSION.txt` line 60 still says "~5,200 US tickers
-   for unusual options activity, curate it hard", every clause now false, and Show HN
-   ships this week.
-2. Fix the report-vs-regime VIX as-of mismatch (Open engineering, first red item).
-   Visible in the HN demo GIF.
-3. MCP repo: `title` + `readOnlyHint` on all 9 tools (Connectors Directory gate).
-   Own review gate, own commit, redeploy per that repo.
-4. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
+1. WEBAPP COPY REWRITE — the last copy surface, and the only one left. The other
+   three repos are DONE (2026-08-25, branches below). Spec:
+   `docs/GTM-COPY-REWRITE-BRIEF.md`. Read `../gammarips-webapp/CLAUDE.md` FIRST,
+   branch, run `gammarips-copywriter`, `/ship` from `~/workspace`. Merging to main
+   auto-deploys production, so treat the merge as the ship.
+2. MCP repo `src/`: `title` + `readOnlyHint` on all 9 tools (Connectors Directory
+   gate), `open_past_due` false stall, row-cap audit. Own commit, redeploy per that
+   repo. NOT done 2026-08-25: the granted paths covered content/README/skills only.
+3. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
    `docs/GTM-CREATOR-PROGRAM.md`, short.
-5. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + the dev.to syndication post
+4. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + the dev.to syndication post
    -> `~/workspace/GAMMARIPS-POSTS.txt`. Owner posts.
-6. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`
+5. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`
    (plan §B9). Not published without `/ship`.
-7. Fix the `'for you'` compliance substring misfire.
+
+DONE 2026-08-25, ALL UNPUSHED AND UNDEPLOYED — review then ship:
+- `gammarips-mcp` `fix/moneyness-claim-and-exit-horizons` 3c2b732 — moneyness claim
+  retired (it contradicted the repo's own education.py), causal frames removed,
+  cohort bounds, exit-lab horizons, new `selection-research-closed` playbook,
+  funnel sentence in README + SKILL + start-here.
+- `gammarips-mcp-serverjson` `fix/funnel-copy-sync` 2cba0a6 — same sentence, per the
+  MCP's sync rule.
+- `gammarips-harness` `fix/hn-opener-liquid-funnel` 992e980 — the Show HN opener.
+  Branched off main so PR #3 keeps its scope.
+- Engine master: scanner NULL-column fix DEPLOYED (`overnight-scanner-00017-n7z`),
+  VIX as-of fix `6a799fd` (NOT deployed), compliance whole-phrase matcher `a7fe472`
+  (NOT deployed, needs x-poster + blog-generator redeploy), moneyness ruling ADR
+  `6a797b5`.
 
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`. Owner
@@ -90,9 +98,13 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
 - Mid-Aug ITM check (needs ≥200 expired post-06-12-era rows).
 
 ## Open engineering
-- 🔴 Daily report narrative vs `get_regime_context` disagree on VIX for the same date
-  (14.89 "risk-on" vs 16.01, SPY BEARISH), seen live in the 08-22 demo. The report
-  generator reads a different as-of. Find and fix the as-of.
+- ✅ VIX as-of mismatch FIXED `6a799fd`, not deployed. `_level_and_trend` dropped the
+  observation date and `macro_regime` stamped `as_of: scan_date` on every field. FRED
+  publishes each close after the session, so the value was routinely 1-3 days older
+  than its label. Neither number was wrong, the label was. Now carries `vix_as_of`,
+  `vix3m_as_of`, `ust10y_as_of`, `macro_stale_days`, and the prompt requires the
+  narrative to cite the observation date. **Residual:** `get_regime_context`'s own
+  `lag_note` still does not mention the FRED difference (gammarips-mcp `src/`).
 - 🔴 Deploy the LLM cost-accounting fix `a2fb621` (signal-judge real change, then
   enrichment-trigger + overnight-report-generator redeploy). Verify per
   `docs/DECISIONS/2026-08-17-llm-cost-accounting-fix.md`.
