@@ -73,10 +73,17 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
   lx6bb stray docs call; Cursor listing v4; X pins/bio; Stripe MCP.
 
 ## Watch / dated checkpoints
-- 🔴 FIRST LIQUID SCAN 2026-08-24 23:00 ET. Next morning: `overnight_signals` for
-  scan_date 08-24 = ~100 rows, all `universe_mode='LIQUID_TOP_N'` (was ~2,000 mover
-  rows); the 08-25 05:30 enrichment log must say "liquid universe top-100" + "UOA
-  floor NONE"; pool ~40-50. Rollback = `LIQUID_UNIVERSE`/`ENRICH_LIQUID_ONLY`=false.
+- ✅ FIRST LIQUID SCAN VERIFIED 2026-08-25. `overnight_signals` scan_date 08-24 =
+  100 rows, all `universe_mode='LIQUID_TOP_N'`, 43 BULLISH (08-21 was 1,973 mover
+  rows). Funnel shape correct. Trader harness traded 37 names that morning.
+  **But `liquidity_rank`/`liquidity_score`/`listed_strikes` were NULL on 100/100
+  rows** — `_score_ticker` rebuilt the dict and dropped them. So the enrichment
+  `liquidity_rank <= LIQUID_TOP_N` gate matched nothing and `_scan_is_ranked()`
+  fell back to NO liquid gate. Pool was still right (the scanner restricts the
+  universe upstream), gate was inoperative, columns dead. Fixed `312e970`,
+  NOT deployed and NOT compile-checked. **Next: deploy the scanner, then confirm
+  the three columns are non-NULL on the next scan and the log says "liquid
+  universe top-100".** Rollback = `LIQUID_UNIVERSE`/`ENRICH_LIQUID_ONLY`=false.
 - 🔴 Attribution test checkout (run-sheet item 1) gates Show HN.
 - Owner's 08-13 trial conversion: `invoice.paid` + `proUntil` refresh, unconfirmed.
 - ~08-27 threshold re-fit: confirm the 08-19 `pool_liquidity_snapshot` closes it.
