@@ -1155,10 +1155,10 @@ def run_pipeline():
     # universe upstream, but the gate was inoperative and the columns were dead.
     # zip is 1:1 and in order here: `scored` is a comprehension over `enriched`
     # and nothing has sorted either list yet.
-    for src, dst in zip(enriched, scored):
-        dst["liquidity_rank"] = src.get("liquidity_rank")
-        dst["liquidity_score"] = src.get("liquidity_score")
-        dst["listed_strikes"] = src.get("listed_strikes")
+    for ranked_row, scored_row in zip(enriched, scored):
+        scored_row["liquidity_rank"] = ranked_row.get("liquidity_rank")
+        scored_row["liquidity_score"] = ranked_row.get("liquidity_score")
+        scored_row["listed_strikes"] = ranked_row.get("listed_strikes")
 
     # Step 6: Apply industry cluster boost
     scored = _apply_cluster_boost(scored, metadata)
