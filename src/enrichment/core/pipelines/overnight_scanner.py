@@ -1146,6 +1146,20 @@ def run_pipeline():
     # Step 5: Score individually
     scored = [_score_ticker(d) for d in enriched]
 
+    # _score_ticker builds a fresh dict and does not carry the liquid-universe
+    # fields, so re-attach them here. Without this every row writes
+    # liquidity_rank / liquidity_score / listed_strikes as NULL, the
+    # enrichment-side `liquidity_rank <= LIQUID_TOP_N` gate matches nothing,
+    # and _scan_is_ranked() silently falls back to NO liquid gate. The pool was
+    # still correct on 2026-08-24 because the scanner already restricts the
+    # universe upstream, but the gate was inoperative and the columns were dead.
+    # zip is 1:1 and in order here: `scored` is a comprehension over `enriched`
+    # and nothing has sorted either list yet.
+    for src, dst in zip(enriched, scored):
+        dst["liquidity_rank"] = src.get("liquidity_rank")
+        dst["liquidity_score"] = src.get("liquidity_score")
+        dst["listed_strikes"] = src.get("listed_strikes")
+
     # Step 6: Apply industry cluster boost
     scored = _apply_cluster_boost(scored, metadata)
     scored.sort(key=lambda x: x["overnight_score"], reverse=True)
