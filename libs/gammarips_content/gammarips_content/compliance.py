@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Literal
 
 from .voice_rules import (
@@ -68,6 +69,23 @@ ALLOWED_URL_PATTERN = re.compile(
 CASHTAG_PATTERN = re.compile(r"\$[A-Z]{1,5}\b")
 
 
+@lru_cache(maxsize=64)
+def _banned_phrase_re(phrase: str) -> re.Pattern[str]:
+    """Whole-phrase, case-insensitive matcher for a banned recommendation phrase.
+
+    Word-bounded on both ends so a banned phrase only fires as a complete phrase.
+    A bare substring test made "for you" match "for your agent" and blocked the
+    2026-08-22 relaunch email. "for your agent" is the product positioning and is
+    the opposite of individualized advice, which is what the rule exists to catch.
+
+    Interior whitespace is flexible so a line wrap between the words still fires.
+    """
+    return re.compile(
+        r"\b" + r"\s+".join(re.escape(w) for w in phrase.split()) + r"\b",
+        re.IGNORECASE,
+    )
+
+
 @dataclass
 class RubricResult:
     """Structured rubric output. `passed=True` only if every check passed."""
@@ -121,9 +139,13 @@ def score_against_rubric(
             failures.append(f"disclaimer_missing: {missing}")
     # Blog posts have their own longer disclaimer block — checked separately
 
-    # 4. Publisher framing (case-insensitive)
+    # 4. Publisher framing (case-insensitive, WHOLE-PHRASE)
+    # Word-bounded, not a bare substring. A substring test made "for you" fire on
+    # "for your agent", which is our core positioning and not a recommendation at
+    # all. It blocked the 2026-08-22 relaunch email. \b after the final word is
+    # what stops "you" matching inside "your".
     for phrase in BANNED_RECOMMENDATION_PHRASES:
-        if phrase.lower() in text_lower:
+        if _banned_phrase_re(phrase).search(text):
             failures.append(f"banned_phrase: '{phrase}'")
 
     # 5. Cashtag position (≤ char 80)

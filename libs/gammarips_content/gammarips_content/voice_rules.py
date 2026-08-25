@@ -39,7 +39,15 @@ BANNED_RECOMMENDATION_PHRASES: tuple[str, ...] = (
     "buy this",
     "sell this",
     "act now",
+    # Matched WHOLE-PHRASE and word-bounded (compliance._banned_phrase_re), so
+    # "for you" no longer fires on "for your agent" — our own positioning, and
+    # the opposite of individualized advice. The genuinely individualized "for
+    # your ..." forms are listed explicitly below so word-bounding does not open
+    # a hole. Add a new one here rather than loosening the matcher.
     "for you",
+    "for your account",
+    "for your portfolio",
+    "for your risk tolerance",
     "your next trade",
     "entry for you",
     "guaranteed",
