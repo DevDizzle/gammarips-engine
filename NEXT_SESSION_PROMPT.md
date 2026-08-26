@@ -13,20 +13,27 @@ Owner has ~90 min of clicks pending in `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`
 PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not ready, work the
 NO-OWNER QUEUE and leave the run-sheet as is.
 
+WEBAPP CORE-PAGES COPY: DONE 2026-08-26 on webapp branch
+`copy/core-pages-engine-alignment` (5a34d752, NOT merged; merge = deploy). Five core
+pages + /methodology + /about + the public/ discovery files + root metadata now state
+the liquid funnel. Webapp `CLAUDE.md` Key facts + copywriter agent corrected too.
+`/ship` has NOT run. Owner: review, `/ship` from `~/workspace`, merge. PR #29 touches
+pricing copy, so he picks the merge order. Residuals flagged, NOT done:
+`signals/[ticker]` + `signals/archive` metadata still say "unusual options flow"
+(~800 SEO pages, owner said signals pages are fine for now); harness `README.md:4`
+carries the same dead sentence (Show HN week).
+
 NO-OWNER QUEUE (in order, each shippable alone):
-1. WEBAPP COPY REWRITE — the last copy surface, and the only one left. The other
-   three repos are DONE (2026-08-25, branches below). Spec:
-   `docs/GTM-COPY-REWRITE-BRIEF.md`. Read `../gammarips-webapp/CLAUDE.md` FIRST,
-   branch, run `gammarips-copywriter`, `/ship` from `~/workspace`. Merging to main
-   auto-deploys production, so treat the merge as the ship.
-2. MCP repo `src/`: `title` + `readOnlyHint` on all 9 tools (Connectors Directory
-   gate), `open_past_due` false stall, row-cap audit. Own commit, redeploy per that
-   repo. NOT done 2026-08-25: the granted paths covered content/README/skills only.
-3. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
+1. MCP repo `src/`: `title` + `readOnlyHint` on all 9 tools (Connectors Directory
+   gate), `open_past_due` false stall, row-cap audit, and the stale `get_pool`
+   docstring (`src/tools/v4.py:92-102` still states the retired $500K UOA gate;
+   every connected agent reads it). Own commit, redeploy per that repo. NOT done
+   2026-08-25: the granted paths covered content/README/skills only.
+2. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
    `docs/GTM-CREATOR-PROGRAM.md`, short.
-4. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + the dev.to syndication post
+3. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + the dev.to syndication post
    -> `~/workspace/GAMMARIPS-POSTS.txt`. Owner posts.
-5. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`
+4. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`
    (plan §B9). Not published without `/ship`.
 
 SHIPPED 2026-08-25 — all merged to main, pushed, and deployed:
@@ -72,6 +79,7 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
   Creator program (free Pro + promo code, rev share): design after the offer ships.
 
 ## Owner queue
+- Review + `/ship` + merge webapp branch `copy/core-pages-engine-alignment`.
 - Run-sheet items 1-10 and questions Q1-Q3 (`~/workspace/GAMMARIPS-GO-RUNSHEET.txt`).
 - Revoke + regenerate the 08-06 test MCP key (pasted in chat).
 - Record the 08-17 zero-trials gate disposition (run-sheet Q3, memory
