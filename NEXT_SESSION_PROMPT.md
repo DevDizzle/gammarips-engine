@@ -13,15 +13,17 @@ Owner has ~90 min of clicks pending in `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`
 PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not ready, work the
 NO-OWNER QUEUE and leave the run-sheet as is.
 
-WEBAPP CORE-PAGES COPY: DONE 2026-08-26 on webapp branch
-`copy/core-pages-engine-alignment` (5a34d752, NOT merged; merge = deploy). Five core
-pages + /methodology + /about + the public/ discovery files + root metadata now state
-the liquid funnel. Webapp `CLAUDE.md` Key facts + copywriter agent corrected too.
-`/ship` has NOT run. Owner: review, `/ship` from `~/workspace`, merge. PR #29 touches
-pricing copy, so he picks the merge order. Residuals flagged, NOT done:
-`signals/[ticker]` + `signals/archive` metadata still say "unusual options flow"
-(~800 SEO pages, owner said signals pages are fine for now); harness `README.md:4`
-carries the same dead sentence (Show HN week).
+COPY ALIGNMENT: DEPLOYED 2026-08-26 on the owner's "get everything deployed" order.
+Webapp merge `a772cb14` on main (auto-deployed): five core pages + /methodology +
+/about + era-aware `signals/[ticker]` + archive + pricing line + public/ discovery
+files + root metadata. Harness README fix `689089b` pushed. MCP `get_pool` docstring
++ education dictionary era-bounded, DEPLOYED `gammarips-mcp-00047-4kk` (verified over
+JSON-RPC). serverjson `c3ab0f8` pushed (5,230 + "hard-curated" removed, SKILL synced).
+Engine `68f6793`: overnight-report-generator per-ticker SEO metadata no longer claims
+unusual-activity selection (deployed; verify a fresh signal doc title after the next
+05:30 ET run). `/ship` did NOT run (not invocable from an engine session); owner may
+run it retroactively against main. Old Firestore signal docs keep era-correct old
+titles; backfill optional, not queued. Record: `~/workspace/GAMMARIPS-WEBAPP-COPY-SHIP.txt`.
 
 NO-OWNER QUEUE (in order, each shippable alone):
 1. MCP repo `src/`: `title` + `readOnlyHint` on all 9 tools (Connectors Directory
@@ -79,7 +81,8 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
   Creator program (free Pro + promo code, rev share): design after the offer ships.
 
 ## Owner queue
-- Review + `/ship` + merge webapp branch `copy/core-pages-engine-alignment`.
+- Rebase webapp PR #29 onto main (the copy merge `a772cb14` landed first). Optional:
+  retroactive `/ship` from `~/workspace` against main.
 - Run-sheet items 1-10 and questions Q1-Q3 (`~/workspace/GAMMARIPS-GO-RUNSHEET.txt`).
 - Revoke + regenerate the 08-06 test MCP key (pasted in chat).
 - Record the 08-17 zero-trials gate disposition (run-sheet Q3, memory
