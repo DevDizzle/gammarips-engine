@@ -13,17 +13,23 @@ Owner has ~90 min of clicks pending in `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`
 PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not ready, work the
 NO-OWNER QUEUE and leave the run-sheet as is.
 
-COPY ALIGNMENT: DEPLOYED 2026-08-26 on the owner's "get everything deployed" order.
-Webapp merge `a772cb14` on main (auto-deployed): five core pages + /methodology +
-/about + era-aware `signals/[ticker]` + archive + pricing line + public/ discovery
-files + root metadata. Harness README fix `689089b` pushed. MCP `get_pool` docstring
-+ education dictionary era-bounded, DEPLOYED `gammarips-mcp-00047-4kk` (verified over
-JSON-RPC). serverjson `c3ab0f8` pushed (5,230 + "hard-curated" removed, SKILL synced).
-Engine `68f6793`: overnight-report-generator per-ticker SEO metadata no longer claims
-unusual-activity selection (deployed; verify a fresh signal doc title after the next
-05:30 ET run). `/ship` did NOT run (not invocable from an engine session); owner may
-run it retroactively against main. Old Firestore signal docs keep era-correct old
-titles; backfill optional, not queued. Record: `~/workspace/GAMMARIPS-WEBAPP-COPY-SHIP.txt`.
+COPY ALIGNMENT: DEPLOYED 2026-08-26, two rounds, all four repos. Round 1: webapp
+merge `a772cb14`; harness `689089b`; MCP docstrings `gammarips-mcp-00047-4kk`;
+serverjson `c3ab0f8`; report-generator SEO fix `overnight-report-generator-00022-rfh`.
+Round 2, the /ship-equivalent adversarial gate (content-reviewer + claim-skeptic
+mandates, run as subagents): content-reviewer FAILED the ship and skeptic found 4
+landmines; ALL fixed and deployed in webapp `7d339914` + MCP playbook redeploy. The
+two that mattered: (1) four surfaces claimed the published pool is earnings-screened
+(rails gate only the cohort entry; FINDINGS_LEDGER confirms); (2) "cap of 50 does
+not bind / no hidden ranking" was FALSE live (79 eligible -> edge rank keeps 50) —
+memory `enrich-top50-cap-binds-edge-rank-decides`, brief carries a dated correction.
+Era convention pinned: scan dates from 2026-08-24 = liquidity rank; cohort entries
+from 2026-08-25. PR #29 rebased twice (498c835a), typecheck clean, merge-day sync
+checklist pinned as a PR comment; owner needs only the two Stripe price IDs + merge.
+NEXT SESSION, FIRST: (a) verify a fresh /signals/{ticker} title reads "{TICKER}
+Bullish Options Flow Data" (post-05:30 ET doc); (b) confirm webapp deploy `7d339914`
+serves the earnings-rail correction on /how-it-works. Record:
+`~/workspace/GAMMARIPS-WEBAPP-COPY-SHIP.txt`.
 
 NO-OWNER QUEUE (in order, each shippable alone):
 1. MCP repo `src/`: `title` + `readOnlyHint` on all 9 tools (Connectors Directory

@@ -77,11 +77,19 @@ listed strikes -> top 100 by `z(chain dollar volume) + z(share volume)` ->
 bullish names only -> one out-of-the-money call each, chosen on contract
 liquidity.
 
-Two honesty points that are strengths, not caveats. The cap of 50 currently does
-not bind, so the pool is simply every bullish name in the top-100 liquid
-universe: there is no hidden ranking deciding membership. And we surface the most
-liquid NAMES, then choose a contract inside each. Not the most liquid contracts
-in the market, which would be SPY and QQQ every day.
+Two honesty points that are strengths, not caveats.
+
+**CORRECTED 2026-08-26 (claim-skeptic audit against the live pool).** The
+paragraph below originally said the cap of 50 does not bind. That came from the
+2026-08-24 partial-session dry run, and it is FALSE on full-session scans: on
+scan_date 2026-08-25, 79 bullish names cleared the floor and `_edge_select_top_n`
+(delta band, mom_60, liquidity demotion; `ENRICH_TOP_N=50`) cut them to 50. The
+cap binds most days. Never ship "the cap does not bind" or "no hidden ranking".
+The honest line: every bullish name in the top-100 is eligible, most days more
+than 50 qualify, and a published deterministic point-in-time rank keeps 50,
+using no outcome data. The second point stands: we surface the most liquid
+NAMES, then choose a contract inside each. Not the most liquid contracts in the
+market, which would be SPY and QQQ every day.
 
 **3. The work, and the honest history.**
 Every night we price full option chains across the liquid universe and reduce it
