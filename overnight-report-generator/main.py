@@ -334,7 +334,7 @@ class ReportResponse(BaseModel):
 
 class PerSignalSeo(BaseModel):
     ticker: str = Field(description='Ticker symbol, UPPERCASE, must match one of the input candidates.')
-    seoTitle: str = Field(description='Evergreen SEO page title for gammarips.com/signals/{ticker}, <=60 chars. Front-load "{TICKER} Unusual Options Flow" then the direction (Bullish/Bearish) and/or catalyst. NO date — these pages rank over time.')
+    seoTitle: str = Field(description='Evergreen SEO page title for gammarips.com/signals/{ticker}, <=60 chars. Front-load "{TICKER} Options Flow" then the direction (Bullish/Bearish) and/or catalyst. Never claim the name was flagged for unusual activity. NO date — these pages rank over time.')
     seoDescription: str = Field(description='Meta description, 140-160 chars. Lead with the ticker + direction + the load-bearing datum (flow, catalyst, or key headline). Plain and specific, no hype.')
     keywords: List[str] = Field(description='5-8 keywords mixing evergreen ("unusual options activity", "options flow") with "{TICKER}" + its catalyst/theme.')
 
@@ -357,9 +357,7 @@ def _fallback_signal_seo(sig: dict, report_date: str) -> dict:
     dir_word = "Bullish" if direction == "BULLISH" else "Bearish" if direction == "BEARISH" else ""
     catalyst = (sig.get("catalyst_type") or "").strip()
 
-    title = f"{ticker} Unusual Options Flow"
-    if dir_word:
-        title = f"{title} — {dir_word} Signal"
+    title = f"{ticker} {dir_word} Options Flow Data" if dir_word else f"{ticker} Options Flow Data"
     title = _truncate(title, 60)
 
     thesis = (sig.get("thesis") or "").strip()
@@ -368,7 +366,7 @@ def _fallback_signal_seo(sig: dict, report_date: str) -> dict:
     else:
         strike = sig.get("recommended_strike")
         exp = sig.get("recommended_expiration")
-        lead = f"{ticker} flagged for unusual options activity with {dir_word.lower() or 'directional'} institutional flow."
+        lead = f"{ticker} {dir_word.lower() or 'directional'} options flow in the GammaRips overnight scan."
         tail = f" Flow concentrated at strike {strike}, exp {exp}." if strike else ""
         desc = lead + tail
     desc = _truncate(desc, 160)
@@ -416,17 +414,21 @@ def generate_per_signal_seo(candidates: list[dict], report_date: str) -> dict:
     } for s in candidates if s.get("ticker")]
 
     prompt = f"""You write SEO metadata for GammaRips per-ticker pages at
-gammarips.com/signals/{{ticker}}. Each page shows ONE stock's overnight unusual
-options activity. Generate metadata that wins organic clicks from traders
-searching a ticker alongside "unusual options flow" / "options activity".
+gammarips.com/signals/{{ticker}}. Each page shows ONE stock's overnight
+options-flow record from the GammaRips scan. Generate metadata that wins organic
+clicks from traders searching a ticker alongside "unusual options flow" /
+"options activity".
 
 RULES (do not violate):
 - These pages are EVERGREEN — NO date in the title; they accrue rank over time.
 - GammaRips is paper-trading / educational. NO performance promises, NO "buy",
   "profit", "guaranteed", or advice language. NO clickbait. Factual flow-structure
   framing only.
-- seoTitle: <=60 chars. Front-load "{{TICKER}} Unusual Options Flow", then the
-  direction (Bullish/Bearish) and/or the catalyst.
+- seoTitle: <=60 chars. Front-load "{{TICKER}} Options Flow", then the
+  direction (Bullish/Bearish) and/or the catalyst. Never say the name was
+  flagged or selected for unusual activity: since 2026-08-24 pool membership
+  is a liquidity rank. Flow is what the page reports, not why the name is in
+  the pool.
 - seoDescription: 140-160 chars. Lead with ticker + direction + the load-bearing
   datum (flow, catalyst, or key headline). Plain and specific.
 - keywords: 5-8, mixing evergreen ("unusual options activity", "options flow")
