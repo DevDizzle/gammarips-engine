@@ -289,7 +289,6 @@ def _render_newsletter_html(
     latest_blog: dict | None,
     recent_reports: list[dict] | None = None,
     recent_closes: list[dict] | None = None,
-    featured_trade: dict | None = None,
 ) -> tuple[str, str, str, str]:
     """Single-shot Gemini render of the weekly newsletter.
 
@@ -337,20 +336,13 @@ def _render_newsletter_html(
     else:
         reports_block = "(no daily reports available for the past week)"
 
-    # Featured trade — the single highest-return positive close of the week.
-    # Drives FOMO copy ("Did you catch this trade?"). Skipped entirely if
-    # no winners closed this week (losses don't drive sub conversion).
-    if featured_trade:
-        ft_block = (
-            f"ticker: ${featured_trade.get('ticker','')}\n"
-            f"direction: {featured_trade.get('direction','')}\n"
-            f"entry_date: {featured_trade.get('entry_date','')}\n"
-            f"exit_date: {featured_trade.get('exit_date','')}\n"
-            f"return: {featured_trade.get('pct_signed','')}\n"
-            f"exit_reason: {featured_trade.get('exit_reason','')}"
-        )
-    else:
-        ft_block = "(no winning trade closed this week — SKIP the Featured trade section entirely)"
+    # NO featured trade. Retired 2026-08-31. The section selected the single
+    # highest-return positive close of the week and wrapped it in FOMO copy.
+    # That is forbidden claim 4 (selected-positive result) by construction, and
+    # the copy line it asked for sold a "curated daily pick", which is forbidden
+    # claim 2 and a product that does not exist. Do not reintroduce it. Weekly
+    # aggregate performance is also out until 30 closed trades (claim 6), so the
+    # newsletter is descriptive: what the pool looked like, what we published.
 
     theme_hint = (theme or "weekly").strip() or "weekly"
 
@@ -377,10 +369,6 @@ no external CSS). Width 600px. Dark text on white background.
 # This week's daily reports (REAL data — summarize these, do NOT invent)
 {reports_block}
 
-# Featured trade this week (REAL — the top positive close. Render this
-# as a prominent callout with FOMO framing. SKIP if 'no winning trade'.)
-{ft_block}
-
 # Latest blog post (for "What we wrote" section)
 {blog_block}
 
@@ -395,27 +383,28 @@ no external CSS). Width 600px. Dark text on white background.
 
 # Required structure
 1. Subject line (≤50 chars). Output as: <!--SUBJECT: ...-->
-   If a featured trade exists, lead with it: e.g.
-   "$<ticker> closed +<pct>% — did you catch it?"
+   Describe what is IN the letter. Name the week's theme or the blog
+   topic. NEVER put a return percentage, a ticker outcome, or a
+   "did you catch it" tease in the subject. Good: "This week's pool
+   leaned into semis". Bad: "$PLTR closed +8%".
 2. Preheader (≤90 chars). Output as: <!--PREHEADER: ...-->
 3. <h1> headline.
 4. ## This week — 2-3 sentences synthesizing the daily-report theme(s)
    above. Reference 1-2 specific reports by their headline.
-5. ## Featured trade this week — IF a featured trade is provided above,
-   render a prominent callout block:
-   - Big stat line: "$<ticker> <direction> closed <pct_signed>"
-   - The return-percentage value (the "+80%" portion) MUST be wrapped in
-     `<span style="color: #16a34a; font-weight: 700;">...</span>` — green
-     for ALL winning trades regardless of direction (BULLISH or BEARISH
-     wins both render green; we celebrate the outcome, not the side).
-   - Entry → Exit dates and the exit_reason ("target hit" / "3-day exit"
-     / "stop hit") — translate exit_reason verbatim from the data block.
-   - **FOMO copy line, exact intent**: "Did you catch this trade? Paid
-     subscribers get our curated daily GammaRips pick at 07:30 AM ET — straight
-     to inbox, no chart-watching required."
-   - Then immediately the paper-trade disclosure as a small italic line:
-     "Paper-trade. Past performance is not a guarantee of future results."
-   IF no featured trade, OMIT this entire section.
+5. ## Working the data — 3-4 sentences. Take ONE theme from the daily
+   reports above and state a concrete question a reader's agent could ask
+   the data this week (for example: which names in Monday's pool had the
+   tightest liquidity grade, or how the week's pool compared with the
+   week before). Describe the QUESTION and the DATA, never an answer and
+   never an outcome.
+   - NO trade outcomes. NO return percentages. NO win counts. NO
+     "featured trade". We do not market a result.
+   - Close the section with the free connect line, verbatim:
+     "Point your agent at it: <code>claude mcp add --transport http
+     gammarips https://mcp.gammarips.com/mcp</code> — free tools, no
+     account, no card."
+   - State plainly that GammaRips returns data and never a pick, and that
+     the reader's agent reaches its own conclusion.
 6. ## What we wrote — only if a latest_blog exists; ~120 word excerpt + a
    link to https://gammarips.com/blog/<slug>. Skip if no post.
 7. ## Disclaimer — EXACT verbatim substring at the bottom:
@@ -441,10 +430,24 @@ no external CSS). Width 600px. Dark text on white background.
 - Retired aliases: Ripper, Rippers, Daily Playbook, Overnight Edge (as
   product name), "@mention", "score >= 6", "8:30 AM", "9:00 AM", "$49/$149",
   "premium signal", "interactive dashboard".
-- Retired strategy concepts: "V5.3", "V5.4", "Agent Arena", "Scorer", "Picker",
-  "gate stack", "5-13% OTM moneyness" — all retired. The current strategy is V6,
-  a randomized bracket tournament with no selection gates. Use "GammaRips
-  Signals", "the V6 tournament", or just "Signals".
+- Retired strategy concepts: "V5.3", "V5.4", "V6", "Agent Arena", "Scorer",
+  "Picker", "gate stack", "5-13% OTM moneyness" — all retired. NEVER print a
+  V-number in the body. The live policy is V7.1 Tilted GIGO and the reader does
+  not need its name.
+- Word choice for pool rows: say "names", "candidates", or "the pool". The
+  data blocks above label them "signals" because that is the internal column
+  name. Do not carry that word into the email body.
+- Retired product names: "GammaRips Signals", "Signals" as the product,
+  "GammaRips pick", "curated daily pick", "daily signals". GammaRips is a
+  DATA product. Say "the pool", "the daily pool", "the data", or "Agent
+  Access" for the paid tier. There is no pick endpoint and no signal to
+  follow. Copy must say so, not imply otherwise.
+- NEVER claim or imply an expected return, a win rate, or a profit promise.
+  NEVER publish a selected-positive result: no single winning trade, no
+  best-of-the-week callout, no blended ROI. The whole-pool composite under a
+  fixed exit is NEGATIVE and we say so honestly when the subject comes up.
+- NEVER write FOMO copy: "did you catch it", "no chart-watching required",
+  "straight to inbox", "signals to follow".
 - Pricing / coupon language anywhere in the body: do NOT mention dollar
   amounts ($29, $39), coupon codes (FOUNDER29), or "/pricing" URLs. The
   green CTA above is the ONLY commercial surface in the newsletter.
@@ -529,16 +532,9 @@ def draft_email(req: DraftEmailRequest) -> DraftEmailResponse:
         recent_reports = tools.get_recent_daily_reports(days=7)
         recent_closes = tools.get_recent_v53_closes(days=7)
 
-        # 4b. Featured trade — top single positive close. Drives FOMO
-        # ("Did you catch this trade?"). Only winners qualify; if no
-        # winning trade closed this week, the section is skipped.
-        winners = [
-            c for c in recent_closes
-            if (c.get("return_pct") is not None) and c["return_pct"] > 0
-        ]
-        featured_trade = (
-            max(winners, key=lambda c: c["return_pct"]) if winners else None
-        )
+        # 4b. NO featured-trade selection. Retired 2026-08-31 — picking the
+        # week's best close is a selected-positive result (forbidden claim 4)
+        # and the copy it fed sold a "curated daily pick" (claim 2).
 
         # 5. Single-shot Gemini render.
         try:
@@ -549,7 +545,6 @@ def draft_email(req: DraftEmailRequest) -> DraftEmailResponse:
                 latest_blog=latest_blog,
                 recent_reports=recent_reports,
                 recent_closes=recent_closes,
-                featured_trade=featured_trade,
             )
         except Exception as exc:  # noqa: BLE001
             _py_logger.exception("newsletter Gemini render failed")
@@ -567,8 +562,13 @@ def draft_email(req: DraftEmailRequest) -> DraftEmailResponse:
         # The retired-alias + banned-recommendation scans still run and
         # are the load-bearing checks here. We score the plain-text form
         # so HTML tags don't accidentally trip alias/cashtag patterns.
+        #
+        # Subject and preheader are scored WITH the body (2026-08-31). They
+        # were unchecked before, and the subject is the line most likely to
+        # carry a result tease — the 08-30 draft shipped "$PLTR closed +8% -
+        # did you catch it?" past a rubric that never looked at it.
         rubric = compliance.score_against_rubric(
-            text=text,
+            text="\n".join([subject, preheader, text]),
             post_type="newsletter",
             is_blog=True,
         )

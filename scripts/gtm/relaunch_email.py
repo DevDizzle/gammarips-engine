@@ -102,7 +102,16 @@ def send(to: list[str], subject: str, body: str) -> tuple[int, int]:
                 "subject": subject,
                 "text": body,
                 "o:tag": TAG,
-                "o:tracking": "yes",
+                # Click tracking OFF (2026-08-31). Mailgun rewrites every URL in
+                # the body, which broke the one thing the email exists for: the
+                # `claude mcp add ... https://mcp.gammarips.com/mcp` line became
+                # an http:// email.mg.gammarips.com/c/<token> redirect that no
+                # MCP client can use. Open tracking needs an HTML part to hold
+                # the pixel and this message is text/plain, so it never worked
+                # either. Delivery and bounce stats still come from o:tag.
+                # Attribution is the utm_source on the site links instead.
+                "o:tracking": "no",
+                "o:tracking-clicks": "no",
                 "h:Reply-To": "evan@gammarips.com",
                 "h:List-Unsubscribe": "<mailto:evan@gammarips.com?subject=unsubscribe>",
                 "recipient-variables": "{" + ",".join(f'"{e}":{{}}' for e in chunk) + "}",

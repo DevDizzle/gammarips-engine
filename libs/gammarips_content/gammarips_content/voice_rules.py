@@ -30,6 +30,15 @@ RETIRED_ALIASES: tuple[str, ...] = (
     "email subscribers only",
     "curated daily pick",
     "WhatsApp",
+    # Retired 2026-08-31 (weekly-newsletter audit). The 08-30 draft passed the
+    # rubric while it called the product "GammaRips Signals", named the dead V6
+    # policy, and offered "our curated daily GammaRips pick". "curated daily
+    # pick" above missed that last one by one inserted word. Match the product
+    # nouns themselves, not one phrasing of them.
+    "GammaRips Signals",
+    "GammaRips pick",
+    "V6 tournament",
+    "daily signals",
 )
 
 
@@ -53,6 +62,17 @@ BANNED_RECOMMENDATION_PHRASES: tuple[str, ...] = (
     "guaranteed",
     "risk-free",
     "can't lose",
+    # Added 2026-08-31. The weekly newsletter prompt asked Gemini for FOMO copy
+    # on a cherry-picked winning close. That is forbidden claim 2 (picks /
+    # signals to follow) and forbidden claim 4 (selected-positive result). The
+    # generator no longer asks for it; these keep it from coming back by hand.
+    "did you catch",
+    "no chart-watching",
+    "chart watching required",
+    "signals to follow",
+    "trades to follow",
+    "our daily pick",
+    "straight to inbox",
 )
 
 

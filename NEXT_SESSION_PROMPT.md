@@ -8,28 +8,62 @@
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
 ## START HERE (next session)
-Owner has ~90 min of clicks pending in `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`
-(items 1-5 in order: test checkout, merge harness PR #3, Stripe prices + merge webapp
-PR #29, send the relaunch email, Show HN). Do not re-ask. If he is not ready, work the
-NO-OWNER QUEUE and leave the run-sheet as is.
+2026-08-31. GA4 PURCHASE ATTRIBUTION IS FIXED AND VERIFIED. The 08-29 diagnosis
+was right that MP was broken and wrong about why: the property had never attested
+the **User Data Collection Acknowledgement**, so GA4 refuses to create a
+Measurement Protocol secret at all and the stream held ZERO. The value stored on
+2026-02-02 could never have been valid. Owner authorized the attestation, secret
+minted (id 15534172427), `GA_API_SECRET` at v2, `apphosting.yaml` moved it out of
+the dead `secretEnv:` into `env:`. **Proven by GA4 Realtime ingesting a test
+purchase** (baseline 0 -> 1). Live rev `gammarips-webapp-build-2026-08-31-003`.
+Tools: `scripts/gtm/ga4_mp_secret.py` (list/attest/mint, never prints the value),
+`scripts/gtm/ga4_mp_verify.py` (send + Realtime poll). Memory
+[[ga4-mp-204-is-not-ingestion-proof]]. Historical events are NOT recoverable;
+conversion data starts 08-31.
 
-COPY ALIGNMENT: DEPLOYED 2026-08-26, two rounds, all four repos. Round 1: webapp
-merge `a772cb14`; harness `689089b`; MCP docstrings `gammarips-mcp-00047-4kk`;
-serverjson `c3ab0f8`; report-generator SEO fix `overnight-report-generator-00022-rfh`.
-Round 2, the /ship-equivalent adversarial gate (content-reviewer + claim-skeptic
-mandates, run as subagents): content-reviewer FAILED the ship and skeptic found 4
-landmines; ALL fixed and deployed in webapp `7d339914` + MCP playbook redeploy. The
-two that mattered: (1) four surfaces claimed the published pool is earnings-screened
-(rails gate only the cohort entry; FINDINGS_LEDGER confirms); (2) "cap of 50 does
-not bind / no hidden ranking" was FALSE live (79 eligible -> edge rank keeps 50) —
-memory `enrich-top50-cap-binds-edge-rank-decides`, brief carries a dated correction.
-Era convention pinned: scan dates from 2026-08-24 = liquidity rank; cohort entries
-from 2026-08-25. PR #29 rebased twice (498c835a), typecheck clean, merge-day sync
-checklist pinned as a PR comment; owner needs only the two Stripe price IDs + merge.
-NEXT SESSION, FIRST: (a) verify a fresh /signals/{ticker} title reads "{TICKER}
-Bullish Options Flow Data" (post-05:30 ET doc); (b) confirm webapp deploy `7d339914`
-serves the earnings-rail correction on /how-it-works. Record:
-`~/workspace/GAMMARIPS-WEBAPP-COPY-SHIP.txt`.
+FIRST TASK: finish the secret migration. Webapp PR #32 is MERGED (yaml declares
+9 secrets as Secret Manager refs) but the Firebase Console still holds the plain
+values and the CONSOLE WINS, so nothing has changed yet. Safe resting state, not
+a broken one. Owner runs the two commands in
+`~/workspace/GAMMARIPS-SECRET-MIGRATION.txt` (delete 9 console rows, then a
+rollout). The classifier blocked the agent from doing it, including the
+single-variable form for STRIPE_SECRET_KEY. All 9 were hash-verified identical to
+Secret Manager first.
+
+OPEN OWNER QUESTION (blocks the last 3): `GEMINI_API_KEY`, `GOOGLE_API_KEY`
+(same key as each other) and `FMP_API_KEY` have DIFFERENT values in the console
+than in Secret Manager. enrichment-trigger, gammarips-mcp,
+overnight-report-generator and signal-notifier all read them at `latest`, so
+syncing changes what four production services get. Ask which value is
+authoritative, then migrate.
+
+ALSO 2026-08-31, all in this session:
+- **Relaunch email SENT to 206** (owner ran it). Mailgun click tracking had
+  rewritten the `claude mcp add` line into a tracking redirect and broken the
+  only CTA; tracking is now OFF and attribution comes from `utm_source=relaunch`
+  ([[mailgun-click-tracking-breaks-commands]]). Runner:
+  `scripts/gtm/send_relaunch.sh`.
+- **GA4 is majority bot traffic and the numbers were wrong twice.** An Alibaba
+  Cloud Singapore scraper (388 IPs in 600 requests, headless Chrome, no bot UA,
+  targets `/signals/*`). Bot share is **50.1%**, not the 82%/97% previously
+  written: the `country` dimension is event-scoped and its rows do not divide
+  into the deduplicated total. `scripts/seo/ga4_query.py` now filters by default
+  and prints raw vs kept; `scripts/seo/bot_filter.py` holds the evidence.
+  [[ga4-singapore-scraper-and-the-country-row-trap]]
+- **Weekly newsletter: prompt fixed, NOT DEPLOYED.** It asked Gemini for a
+  cherry-picked winner with FOMO copy selling "our curated daily GammaRips pick"
+  and named dead V6, and the rubric passed it. Featured-trade section removed,
+  prohibitions rewritten, subject+preheader now scored, 10 new rubric entries.
+  Verified: old draft now FAILS 4 ways, fresh render PASSES.
+  **`libs/gammarips_content` is vendored at deploy time into BOTH x-poster and
+  blog-generator, so both need a redeploy.** Also
+  `content-blast-mon-0530` has been PAUSED since the last real blast on
+  2026-07-05 — 8 Sundays of drafts, zero sends. Do not unpause before the
+  redeploy. [[weekly-newsletter-blast-paused]],
+  [[newsletter-prompt-was-a-generation-behind]]
+- Show HN: owner says later this week. Text is in harness `docs/HN-SUBMISSION.txt`.
+- Least-privilege SA migration planned, not started:
+  [[least-privilege-service-accounts-plan]].
 
 NO-OWNER QUEUE (in order, each shippable alone):
 1. MCP repo `src/`: `title` + `readOnlyHint` on all 9 tools (Connectors Directory
@@ -44,23 +78,6 @@ NO-OWNER QUEUE (in order, each shippable alone):
 4. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`
    (plan §B9). Not published without `/ship`.
 
-SHIPPED 2026-08-25 — all merged to main, pushed, and deployed:
-- `gammarips-mcp` 3c2b732, DEPLOYED `gammarips-mcp-00046-lhh`. Moneyness claim
-  retired (it contradicted the repo's own `education.py`), causal frames removed,
-  cohort bounds, exit-lab horizons, new `selection-research-closed` playbook,
-  funnel sentence in README + SKILL + start-here. Verified live via `get_playbook`.
-- `gammarips-mcp-serverjson` 2cba0a6 — same sentence, per the MCP's sync rule.
-- `gammarips-harness` 992e980 on main — the Show HN opener. Branched off main so
-  PR #3 kept its scope. The run-sheet trap is gone.
-- `gammarips-webapp` 2c3ec706 on main — 7 files. The site said "a name needs over
-  $500K bet in one direction to survive at all" and "the ~50 strongest setups",
-  both false. New FAQ entry answers "is the pool better than random?" with no.
-  **The `gammarips-copywriter` agent and `/ship` did NOT run** (not invocable from
-  an engine session). Rollback: revert 80d1d75a on main.
-- Engine master, DEPLOYED: scanner NULL-column fix (`overnight-scanner-00017-n7z`),
-  VIX as-of fix (`overnight-report-generator-00021-r64`), compliance whole-phrase
-  matcher (`x-poster-00044-mcf` + `blog-generator-00034-r4s`). Moneyness ruling ADR
-  `6a797b5`. No code commit today was compile-checked: this session cannot run python.
 
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`. Owner
@@ -87,38 +104,46 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
   Creator program (free Pro + promo code, rev share): design after the offer ships.
 
 ## Owner queue
-- Rebase webapp PR #29 onto main (the copy merge `a772cb14` landed first). Optional:
-  retroactive `/ship` from `~/workspace` against main.
-- Run-sheet items 1-10 and questions Q1-Q3 (`~/workspace/GAMMARIPS-GO-RUNSHEET.txt`).
+- **Finish the secret migration**: 2 commands in
+  `~/workspace/GAMMARIPS-SECRET-MIGRATION.txt` (delete 9 console rows, then a
+  rollout). PR #32 is merged but the console still wins until they are deleted.
+- **Answer: which value is authoritative** for `GEMINI_API_KEY`/`GOOGLE_API_KEY`
+  and `FMP_API_KEY`, console or Secret Manager? Blocks the last 3 migrations.
+- Show HN, "later this week" (owner, 08-31). Harness `docs/HN-SUBMISSION.txt`.
+- ✅ Relaunch email SENT to 206 on 08-31. ✅ GA4 MP secret minted and verified.
+- Cancel the 08-28 test sub before Sep 4 18:26 UTC (real card, converts to $39).
+- Run-sheet items 5-10 and questions Q1/Q3 (`~/workspace/GAMMARIPS-GO-RUNSHEET.txt`).
 - Revoke + regenerate the 08-06 test MCP key (pasted in chat).
 - Record the 08-17 zero-trials gate disposition (run-sheet Q3, memory
   `mcp-monetization-killswitch`). The 10-05 gate stands.
 - win-tracker redeploy (`d44a272`) + x-poster / blog-generator redeploy for the
-  2026-08-25 cohort pin.
-- Compliance substring misfires (`'for you'` hit the relaunch email on "for your
-  agent"; `libs/gammarips_content/.../compliance.py`).
+  2026-08-25 cohort pin. **The 08-31 newsletter + rubric fix rides on the same
+  redeploy** (`libs/gammarips_content` is vendored into both at deploy time).
 - Organic Social halved (67→35 sessions/28d); x-poster lane needs its own look.
 - Small: restore `blog_posts/building-options-flow-pipeline-ai-agents` to `published`;
   lx6bb stray docs call; Cursor listing v4; X pins/bio; Stripe MCP.
 
 ## Watch / dated checkpoints
-- ✅ FIRST LIQUID SCAN VERIFIED 2026-08-25. `overnight_signals` scan_date 08-24 =
-  100 rows, all `universe_mode='LIQUID_TOP_N'`, 43 BULLISH (08-21 was 1,973 mover
-  rows). Funnel shape correct. Trader harness traded 37 names that morning.
-  **But `liquidity_rank`/`liquidity_score`/`listed_strikes` were NULL on 100/100
-  rows** — `_score_ticker` rebuilt the dict and dropped them. So the enrichment
-  `liquidity_rank <= LIQUID_TOP_N` gate matched nothing and `_scan_is_ranked()`
-  fell back to NO liquid gate. Pool was still right (the scanner restricts the
-  universe upstream), gate was inoperative, columns dead. Fixed `312e970`,
-  NOT deployed and NOT compile-checked. **Next: deploy the scanner, then confirm
-  the three columns are non-NULL on the next scan and the log says "liquid
-  universe top-100".** Rollback = `LIQUID_UNIVERSE`/`ENRICH_LIQUID_ONLY`=false.
-- 🔴 Attribution test checkout (run-sheet item 1) gates Show HN.
+- Liquid scan verified 08-25, but `liquidity_rank`/`liquidity_score`/
+  `listed_strikes` were NULL on 100/100 rows (`_score_ticker` rebuilt the dict),
+  so the enrichment liquid gate was inoperative. Pool was still correct. Fix
+  `312e970`. **Confirm the three columns are non-NULL on a recent scan and the log
+  says "liquid universe top-100"** — check the deployed scanner rev first, the
+  repo notes disagree on whether it shipped. Rollback = `LIQUID_UNIVERSE`/
+  `ENRICH_LIQUID_ONLY`=false.
+- ✅ Attribution unblocked 08-31 (see START HERE). Show HN no longer gated on it.
 - Owner's 08-13 trial conversion: `invoice.paid` + `proUntil` refresh, unconfirmed.
 - ~08-27 threshold re-fit: confirm the 08-19 `pool_liquidity_snapshot` closes it.
 - Mid-Aug ITM check (needs ≥200 expired post-06-12-era rows).
 
 ## Open engineering
+- Least-privilege service accounts: 12/16 Cloud Run services run as the default
+  compute SA with `roles/editor`. Owner-approved to plan, not urgent, build logs
+  are NOT public. Plan + order in [[least-privilege-service-accounts-plan]].
+- `content-blast-mon-0530` PAUSED since the last real blast 2026-07-05. Do not
+  unpause until x-poster + blog-generator are redeployed with the fixed prompt.
+- 3 console/Secret-Manager key mismatches (see Owner queue) keep GEMINI/GOOGLE/FMP
+  values printing in Cloud Build logs.
 - ✅ VIX as-of mismatch FIXED `6a799fd`, not deployed. `_level_and_trend` dropped the
   observation date and `macro_regime` stamped `as_of: scan_date` on every field. FRED
   publishes each close after the session, so the value was routinely 1-3 days older
