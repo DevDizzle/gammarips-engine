@@ -159,7 +159,10 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
 - MCP repo: tool `title`/annotations; `open_past_due` false stall; row-cap audit
   (`labels`, `positions`, `signal_performance`); QUALIFY dedup; `freshness_note` copy;
   surface EXECUTION-RISK-GUIDELINES through `get_playbook`.
-- P1 live 10:00 anchor pass — ACCEPTED, not built, owner $ (Polygon cost).
+- P1 live 10:00 anchor pass — ACCEPTED, not built, owner $ (Polygon cost). Sizing
+  measured 08-31: on the current tape a real 10:00 print exists for only 13.7% of
+  name-days at the exact minute, 31.7% at 10:00-10:04, 49.1% at 10:00-10:14. Half the
+  pool has no honest anchor, so every opportunity sample is liquidity-selected.
 - Audit snapshot `day.*` readers and `next_url` pagination; x-poster IAM audit.
 - Smaller: `iv_rank_entry` view exclusion; earnings-rail stamp (GAP-014); UNDATABLE
   split; substrate rows (41 delta-0 ITM, 7 NO_BARS); service-auth hardening; webapp
@@ -173,6 +176,10 @@ steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08
   scanner-00016-rs5 / enrichment-00050-q54 / notifier-00064-prb.
 - Selection research CLOSED (both 08-22 studies: pool = matched random, no signal on
   top of liquidity). Wiki [[selection-research-closed]] + [[liquid-universe-uoa-null]].
+  The one owner-approved exception (trader report-feature ask, 08-28) RAN 08-31 and
+  returned null: `catalyst_type` permutation p=0.923, 0/12 specs, and F1 is
+  `overnight_score` rank which already loses in `paper_shadow_topscore`. Exception
+  spent, no typed field ships. `FINDINGS_LEDGER.md` §2026-08-31.
   NEVER re-open. Open owner call, flagged once: later entry ([[first-hour-bleed]]).
 - V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` + wiki `REGISTRY.md` + `CHEAT-SHEET.md`.
   Cohort start: `LIVE_COHORT_START_DATE` in `signal-notifier/main.py` (never hardcode).

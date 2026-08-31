@@ -11,6 +11,18 @@
 
 
 
+## 2026-08-31 update — Trader report-feature ask (F1/F3) is NULL. The "report features" are enriched-substrate columns, `catalyst_type` carries no 3-day information (permutation p=0.923, 0/12 specs), and F1 is `overnight_score` rank which already loses in the live shadow
+
+**Owner approved the ask 2026-08-28 as a narrow exception to [[selection-research-closed]]. It returned null and the exception is spent.**
+
+**The framing was wrong in a way that helped.** None of the handoff's six features are report features. `top_bullish` is `sorted(signals, key=overnight_score)[:5]` at `overnight-report-generator/main.py:846-848`, and `catalyst_type`, `themes`, `divergences` and sector are all deterministic functions of `overnight_signals_enriched`. The report renders them. Testing on the substrate gives 96 days against about 5 usable days on the report archive after the handoff's own 08-25 split.
+
+**F1 is already under live paired test.** `paper_shadow_topscore`, 56 days since 2026-06-08: TOP_SCORE mean -11.0% / median -13.0% / 14 wins against TOURNAMENT -8.0% / -7.0% / 16 wins. Top score is worse on every column. The two arms agree on 7.1% of days against roughly 2% under uniform random, so the 08-28 three-way NVDA $230 convergence is what correlated selectors do, not signal.
+
+**F3 is CLOSED-NULL.** Honest label built from `option_minute_paths`: first real print in 10:00-10:04 ET on day 1 as anchor, `MAX(high)` over days 1-3 on real-print bars, touch >= +20%. N=1,347 rows / 83 days, base rate 60.1%, which independently reproduces the trader's 62%. All 8 classes have bootstrap CIs spanning zero and none survives BH. The global within-day permutation test gives observed spread 0.0814 against null mean 0.1337, **p=0.923** — the spread is *smaller* than chance. Twelve robustness specifications (5 thresholds, 3 anchor tolerances, 2 coverage rules, 2 cohort sides) produce one marginal at p=0.057, driven by the smallest class, with ranks that flip across thresholds. BH over the sweep needs 0.0042. No rejection anywhere. This replicates the 2026-08-05 `catalyst_score` refutation on the categorical version.
+
+**The reusable output is the anchor, not the finding.** Only 13.7% of name-days have a real print in the exact 10:00 minute, 31.7% inside 10:00-10:04, and 49.1% inside 10:00-10:14. An honest 10:00 anchor does not exist for half the pool, every surviving sample is liquidity-selected, and this now gates every future opportunity study. Full tables: `FINDINGS_LEDGER.md` §2026-08-31.
+
 ## 2026-08-22 update — Pool-vs-benchmark test (pre-registered): ALL THREE HYPOTHESES FAIL. The pool is not distinguishable from matched random optionable contracts. The scan is not a selection edge. Selection research is CLOSED
 
 **The only experiment that ever asked whether the 50 beat 50 other contracts, and the answer is no.** 87 scan dates, production replay (10:00 fill, +40/-30 bracket, 15:45 flat, real print at both anchors), identical contract rule across arms (AMENDMENT 2), gate-checked matching. Pool mean return **-7.72%**, liquidity-and-sector-matched controls **-6.40%**, unmatched random controls **-7.23%**. H1 (mean return A-B) -1.33pp [-3.78, 1.04], H2 (median MFE A-B) -1.57pp [-4.25, 0.92], H3 (A-C) -0.50pp [-4.75, 3.84]. Every point estimate leans against the pool. As-delivered pool contracts on the in-house tape read -9.67%, reproducing the 2026-08-19 tradeable composite on an independent replay.

@@ -43,6 +43,7 @@ Read this file by section, never whole. Status legend: **LIVE-DOCTRINE** (claim 
 | §2026-08-20 (liquid-universe Phase 0) | Phase 0 audit: as-of universe exact, Arm A 58/60 days + tape 94.3%, Study 2 matching bar not reconstructible (owner amendment call) | reference (studies pending) | — |
 | §2026-08-22 (pool-vs-benchmark) | ALL THREE FAIL: pool = matched random (A-B -1.33pp [-3.78, 1.04]); the scan is not a selection edge; selection research CLOSED | LIVE-DOCTRINE | [[selection-research-closed]] |
 | §2026-08-22 (liquid-universe funnel) | RULE 2: relative UOA in the liquid universe = liquidity-matched random (+0.4pp, CI [-1.7, 2.1]); executability UNFILLABLE 40.5% -> 6.1% | LIVE-DOCTRINE (owner call on the funnel) | [[liquid-universe-uoa-null]] |
+| §2026-08-31 (trader report-feature ask) | catalyst_type NULL on 3-day opportunity (global within-day permutation p=0.923, 0/12 specs); report fields are enriched-substrate columns, F1 = `overnight_score` rank | CLOSED-NULL | [[selection-research-closed]] |
 
 ---
 
@@ -1645,3 +1646,133 @@ Single regime (Apr-Aug 2026). Contract selection is the reduced volume rule for 
 primary arms (AMENDMENT 2), not the production `_best_contract`, which cannot be
 replayed. No NBBO, so no arm pays a spread. Sector from Polygon SIC. Arm C is thin (364
 legs) because random names rarely carry a 500-volume call.
+
+---
+
+## §2026-08-31 — Trader report-feature ask (F1/F3): catalyst_type is NULL on 3-day opportunity, and "report prominence" is `overnight_score` rank
+
+**Origin.** The gammarips-trader handoff of 2026-08-28 asked whether daily-report
+fields separate 3-day pool winners. Owner approved the ask on 2026-08-28 and
+directed the run on 2026-08-31. Narrow exception to [[selection-research-closed]].
+
+### A. Framing correction (found before any test ran)
+
+The report fields are not report features. They are deterministic functions of
+`overnight_signals_enriched`, computed in Python before the model runs.
+
+| Handoff feature | Actual source | Consequence |
+|---|---|---|
+| F1 report prominence | `sorted(signals, key=overnight_score)[:5]` at `overnight-report-generator/main.py:846-848` | F1 IS `overnight_score` rank. Not a model judgment. |
+| F2 freshness | set diff of the F1 list, `main.py:884-889` | inherits F1 |
+| F3 catalyst class | `catalyst_type` column, 98.8% populated, 25 classes, 96 days | testable on substrate |
+| F4 sector | LEFT JOIN to `overnight_signals`, 27.7% missing on enriched rows | testable, the in-code "NULL since 2026-04-01" comment is stale |
+| F5 day-level | `compute_themes` counts `catalyst_type` | deterministic |
+| F6 divergences | pure function of `premium_bull_flow` / `premium_hedge` / `move_overdone` / `mean_reversion_risk` | deterministic |
+
+Testing on the substrate gives 96 days. Testing on the report archive gives about
+5 usable days after the handoff's own 08-25 cohort split. The handoff's M5 leakage
+check is moot on the substrate, because enrichment features are pre-entry by
+construction.
+
+### B. F1 is already under live paired test
+
+`paper_shadow_topscore`, 56 days, 2026-06-08 to 2026-08-28, V7.1 same-day mechanics.
+
+| arm | N | mean | median | wins | illiquid |
+|---|---|---|---|---|---|
+| TOP_SCORE | 56 | -11.0% | -13.0% | 14 | 14 |
+| TOURNAMENT | 56 | -8.0% | -7.0% | 16 | 10 |
+
+Top score is worse on every column. The two arms pick the same name on 7.1% of
+days against roughly 2% under uniform random over a ~50-name pool, so the two
+selectors are about 3.5x correlated. The 2026-08-28 three-way NVDA $230
+convergence that motivated the ask is the expected behavior of correlated
+selectors, not evidence of signal.
+
+### C. F3 method (honest 3-day label, built for this test)
+
+Anchor and label come from `option_minute_paths`, not from the ledger mark, because
+the ledger entry mark is a delayed day close ([[entry-mark-is-a-delayed-day-close]]).
+
+- Anchor: first bar with `transactions >= 1` in 10:00-10:04 ET on `day_index=1`, price `COALESCE(vwap, close)`.
+- MFE: `MAX(high)` over `day_index` 1-3, real-print bars only, `ts >= anchor_ts`.
+- Label: MFE >= +20%. BULLISH only, contract matched to `recommended_contract`.
+- Ghost rows are excluded by construction, because a real print is required at the anchor.
+
+**Anchor coverage is the binding constraint.** Of 4,678 name-days on `day_index=1`,
+only 641 (13.7%) have a real print in the exact 10:00 minute, 1,483 (31.7%) inside
+10:00-10:04, and 2,295 (49.1%) inside 10:00-10:14. An honest 10:00 anchor does not
+exist for half the pool. The surviving sample is liquidity-selected by construction.
+
+Primary sample N=1,347 rows, 83 days, base rate **60.1%**. This independently
+reproduces the trader's stated 62% 3-day base rate (their F-011).
+
+### D. F3 result: NULL
+
+Per-class contrast against the rest of the pool, day-clustered bootstrap, 3,000
+resamples, Benjamini-Hochberg at FDR 0.05 over 8 classes.
+
+| catalyst_type | N | days | touch rate | contrast | 95% CI | p | BH |
+|---|---|---|---|---|---|---|---|
+| No Clear Catalyst | 107 | 43 | 0.654 | +5.74pp | [-5.20, 17.01] | 0.280 | fail |
+| Product Launch | 70 | 36 | 0.629 | +2.87pp | [-7.14, 12.27] | 0.571 | fail |
+| Macro | 76 | 35 | 0.618 | +1.81pp | [-10.58, 13.02] | 0.777 | fail |
+| Earnings Beat | 177 | 54 | 0.616 | +1.67pp | [-5.94, 9.39] | 0.655 | fail |
+| Analyst Upgrade | 162 | 56 | 0.593 | -0.99pp | [-9.53, 8.10] | 0.826 | fail |
+| Technical Breakout | 313 | 60 | 0.582 | -2.59pp | [-9.65, 4.08] | 0.475 | fail |
+| Sector Rotation | 153 | 50 | 0.575 | -2.95pp | [-10.81, 4.73] | 0.480 | fail |
+| Partnership | 103 | 49 | 0.573 | -3.09pp | [-11.68, 6.05] | 0.515 | fail |
+
+Every CI spans zero. Nothing survives BH. The best class is "No Clear Catalyst",
+which inverts the hypothesis that catalyst quality carries information.
+
+**Global within-day permutation test** (max-min class rate spread, 3,000 permutations
+of `catalyst_type` inside each day): observed spread **0.0814**, null mean 0.1337,
+null 95th percentile 0.2052, **p = 0.923**. The observed spread is smaller than
+chance. `catalyst_type` carries no day-relative information about 3-day opportunity.
+
+### E. Robustness sweep (12 specifications)
+
+| axis | specification | N | base | p |
+|---|---|---|---|---|
+| threshold | +10% | 1,161 | 0.747 | 0.270 |
+| threshold | **+20% (primary)** | 1,161 | 0.599 | **0.920** |
+| threshold | +30% | 1,161 | 0.492 | 0.424 |
+| threshold | +50% | 1,161 | 0.353 | 0.057 |
+| threshold | +100% | 1,161 | 0.166 | 0.109 |
+| anchor | 10:00-10:04 | 1,161 | 0.599 | 0.922 |
+| anchor | 10:00-10:14 | 1,981 | 0.595 | 0.817 |
+| anchor | exact 10:00 minute | 327 | 0.599 | 0.498 |
+| coverage | any day coverage | 1,325 | 0.574 | 0.607 |
+| coverage | full 3-day | 1,161 | 0.599 | 0.921 |
+| cohort | pre 2026-08-24 | 1,907 | 0.597 | 0.885 |
+| cohort | post 2026-08-24 | 78 (2 days) | — | unrunnable |
+
+The single marginal (+50%, p=0.057) is noise. It is driven by Product Launch, the
+smallest class tested at N=70, and class ranks are unstable across thresholds:
+Technical Breakout ranks 8th at +50% and 2nd at +100%. BH over the 12 sweep tests
+needs the smallest p <= 0.0042 to reject. It is 0.057. **No rejection anywhere.**
+
+**Liquidity stratification (M6).** Base rate by `recommended_volume` tercile is flat:
+low 0.602, mid 0.584, high 0.610. Within terciles, "No Clear Catalyst" runs 0.674 /
+0.725 / 0.476. The rank inversion across terciles is a noise signature.
+
+### F. Decision
+
+**F3 is CLOSED-NULL.** No typed field ships. This replicates the 2026-08-05 refutation
+of `catalyst_score` on the categorical `catalyst_type`, on an independent substrate
+with an honest 3-day anchor. F1 is answered by `paper_shadow_topscore` and leans
+negative. F2, F5 and F6 are deterministic re-encodings of the same substrate and
+inherit the same prior. The handoff's own M3 cohort split leaves 2 days post-08-24
+and is unrunnable as specified.
+
+Power: the test detects roughly 10pp per class at the median class size and cannot
+detect 3-4pp. This is "no large catalyst effect", never "no effect".
+
+### Caveats
+
+Single regime (Apr-Aug 2026). The sample is liquidity-selected, because a real 10:00
+print is required and only 31.7% of name-days have one. No NBBO, so the anchor pays
+no spread. `day_index` 1-3 is the harvest window, not the live V7.1 same-day exit, so
+a positive result here would not have transferred to the live policy without a
+separate same-day test ([[same-day-vs-3day-window-mismatch]]).
