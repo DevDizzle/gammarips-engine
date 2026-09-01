@@ -39,7 +39,8 @@ NO-OWNER QUEUE (in order, each shippable alone):
 
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`. Owner
-steps `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory [[go-plan-2026-08-22]].
+steps `~/workspace/GAMMARIPS-HN-LAUNCH.txt` (the old GO-RUNSHEET is archived; its
+remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 - DONE: plugin PR #3 (08-28), founding offer PR #29 live (08-28), GA4 attribution fixed
   and Realtime-verified (08-31), relaunch email sent (08-31, produced zero, list closed),
   placements 6a/6b opened 09-01 (awesome-mcp-servers #13396, awesome-claude-skills #1800).
@@ -56,7 +57,8 @@ steps `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory [[go-plan-2026-08-22]].
 - Secret migration (2 commands) + the 3-key authoritative-value answer. See START HERE.
 - **Cancel the 08-28 test sub before Sep 4 18:26 UTC** — real card, converts to $39.
 - Show HN + the 6c issue form: `~/workspace/GAMMARIPS-HN-LAUNCH.txt`.
-- Run-sheet items 7-10 and questions Q1 (Team/Enterprise claude.ai org) / Q3.
+- Run-sheet items 7-10 and Q1 (Team/Enterprise claude.ai org) / Q3 — all now in
+  `~/workspace/GAMMARIPS-HN-LAUNCH.txt`.
 - Revoke + regenerate the 08-06 test MCP key (was pasted in chat).
 - Record the 08-17 zero-trials gate disposition (Q3, [[mcp-monetization-killswitch]]).
   The 10-05 gate stands.
