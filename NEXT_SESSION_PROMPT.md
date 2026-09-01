@@ -27,10 +27,13 @@ composite is negative. Agreed reframe: "a hard live domain for your agent, with 
 ground truth". Confirm, then update [[audience-is-claude-code-options-traders]].
 
 NO-OWNER QUEUE (in order, each shippable alone):
-1. MCP repo `src/`: DONE 2026-09-01 — all 9 tools carry `title` + `readOnlyHint`
-   (verified live, rev `gammarips-mcp-00052-qbl`, v4.4.0), stale UOA docstring fixed,
-   `mcp<2` pinned ([[mcp-sdk-2x-renamed-fastmcp]]). REMAINING here: `open_past_due`
-   false stall and the row-cap audit.
+1. MCP repo `src/`: CLOSED 2026-09-01. All 9 tools carry `title` + `readOnlyHint`;
+   stale UOA docstring fixed; `mcp<2` pinned ([[mcp-sdk-2x-renamed-fastmcp]]);
+   `open_past_due` fill allowance (no more daily false stall);
+   `get_signal_performance` now reports `matched_rows` + `truncated`. Row-cap audit
+   done: `query_outcomes` already reported it, `historical.py` caps at 500 over a
+   48-row ledger so it cannot bind. Live rev `gammarips-mcp-00053-92n`, v4.5.0,
+   registry published at 4.5.0.
 2. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
    `docs/GTM-CREATOR-PROGRAM.md`, short.
 3. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + dev.to syndication ->
