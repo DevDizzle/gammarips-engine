@@ -20,25 +20,18 @@ Manager. enrichment-trigger, gammarips-mcp, overnight-report-generator and
 signal-notifier all read them at `latest`, so syncing changes what four production
 services get. Ask which is authoritative, then migrate.
 
-**SECOND OWNER QUESTION — positioning.** Owner is moving content at AI engineers, not
-traders (floated 09-01, backed by [[dormant-list-is-dead]]). The audience call is sound.
-The "side income" framing is NOT shippable: implied-return claim, and the whole-pool
-composite is negative. Agreed reframe: "a hard live domain for your agent, with next-day
-ground truth". Confirm, then update [[audience-is-claude-code-options-traders]].
+**POSITIONING — DECIDED 2026-09-01, do not re-open.** AI-engineer content goes on the
+owner's PERSONAL X + LinkedIn, NOT on @gammarips, and he scoped personal branding as
+outside this project. Do not retool x-poster for it ([[x-poster-is-not-acquisition]]).
+The "side income" framing was rejected as an implied-return claim; the agreed line is
+"a hard live domain for your agent, with next-day ground truth".
 
 NO-OWNER QUEUE (in order, each shippable alone):
-1. MCP repo `src/`: CLOSED 2026-09-01. All 9 tools carry `title` + `readOnlyHint`;
-   stale UOA docstring fixed; `mcp<2` pinned ([[mcp-sdk-2x-renamed-fastmcp]]);
-   `open_past_due` fill allowance (no more daily false stall);
-   `get_signal_performance` now reports `matched_rows` + `truncated`. Row-cap audit
-   done: `query_outcomes` already reported it, `historical.py` caps at 500 over a
-   48-row ledger so it cannot bind. Live rev `gammarips-mcp-00053-92n`, v4.5.0,
-   registry published at 4.5.0.
-2. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
+1. Creator pitch + Stripe promo-code design (free Pro + rev share) ->
    `docs/GTM-CREATOR-PROGRAM.md`, short.
-3. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + dev.to syndication ->
+2. Reddit follow-ups (r/ClaudeAI, r/mcp, r/algotrading) + dev.to syndication ->
    `~/workspace/GAMMARIPS-POSTS.txt`. Owner posts.
-4. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`.
+3. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`.
    Not published without `/ship`.
 
 ## Active workstream — the 08-22 go plan (subs before 10-05)
@@ -59,6 +52,7 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 
 ## Owner queue
 - Secret migration (2 commands) + the 3-key authoritative-value answer. See START HERE.
+- **Merge webapp PR #34** — one-line `ai-catalog.json` 4.4.0 -> 4.5.0 sync. Merging deploys.
 - **Cancel the 08-28 test sub before Sep 4 18:26 UTC** — real card, converts to $39.
 - Show HN + the 6c issue form: `~/workspace/GAMMARIPS-HN-LAUNCH.txt`.
 - Run-sheet items 7-10 and Q1 (Team/Enterprise claude.ai org) / Q3 — all now in
