@@ -61,7 +61,28 @@ ALSO 2026-08-31, all in this session:
   2026-07-05 — 8 Sundays of drafts, zero sends. Do not unpause before the
   redeploy. [[weekly-newsletter-blast-paused]],
   [[newsletter-prompt-was-a-generation-behind]]
-- Show HN: owner says later this week. Text is in harness `docs/HN-SUBMISSION.txt`.
+- **Placements 6a/6b OPENED 2026-09-01**: awesome-mcp-servers PR #13396,
+  awesome-claude-skills PR #1800. Both had been staged and idle 10 days. Before
+  opening 6a I fixed the entry: it still claimed an "unusual-options-activity
+  pool", retired 2026-08-24 when membership became a liquidity rank. 6c
+  (awesome-claude-code) is an issue form and must be filed by a human.
+- **Show HN is unblocked and the text is corrected** (harness `docs/HN-SUBMISSION.txt`,
+  commits 6686b77 + f73c402). It had quoted the dead $39/7-day price, listed
+  cleared blockers as reasons to wait, and omitted the ENRICH_TOP_N=50 cap that
+  binds most sessions. Owner steps: `~/workspace/GAMMARIPS-HN-LAUNCH.txt`.
+  Window is Wed 09-02 or Thu 09-03, 8-10am ET.
+- **Relaunch email produced zero.** 178 delivered / 30 failed, 0 signups, 0
+  trials, 0 sessions attributed to `utm_source=relaunch`, 0 new MCP clients.
+  Owner called the list dead 09-01. 14 of the 30 failures were addresses Mailgun
+  had already suppressed; `relaunch_email.py` does not consult the suppression
+  list. No third-party site refers a single human: AI assistants (chatgpt.com,
+  copilot) are already the #2 real referrer at 24 sessions/90d and growing.
+- **Owner is repositioning content at AI engineers, not traders** (floated
+  09-01). Audience call is backed by the data. The "side income" framing is NOT
+  shippable: it is an implied-return claim and the whole-pool composite is
+  negative. Agreed reframe is "a hard live domain for your agent, with next-day
+  ground truth". Not yet confirmed, and `audience-is-claude-code-options-traders`
+  needs updating when it is.
 - Least-privilege SA migration planned, not started:
   [[least-privilege-service-accounts-plan]].
 
@@ -82,21 +103,14 @@ NO-OWNER QUEUE (in order, each shippable alone):
 ## Active workstream — the 08-22 go plan (subs before 10-05)
 Decision `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`. Owner
 steps in order: `~/workspace/GAMMARIPS-GO-RUNSHEET.txt`. Memory `go-plan-2026-08-22`.
-- Harness PR #3 (plugin `gammarips` + free-tier GIF): OPEN, owner merges, then the
-  community plugin form. Bundled server = `/mcp` + Bearer (free tools need no key,
-  verified). Plugin name is immutable.
-- Webapp PR #29 `offer/founding-100` ($29 first 100, 30-day trial, $299/yr): OPEN,
-  DO NOT MERGE. Needs the owner's two Stripe price ids, then merge = deploy.
-- Relaunch email drafted (`~/workspace/GAMMARIPS-RELAUNCH-EMAIL.txt`, rubric PASS) +
-  `scripts/gtm/relaunch_email.py`. The sandbox blocks sending; the owner runs it, only
-  after the offer is live. Prospects `~/workspace/GAMMARIPS-PROSPECTS.csv`.
-- Placements staged (branch names in the run-sheet): awesome-mcp-servers,
-  awesome-claude-skills, awesome-claude-code = issue form only. Prior PR #1956 was
-  CLOSED, say so.
-- Show HN after the attribution checkout + plugin merge, week of 08-25. Text: harness
-  `docs/HN-SUBMISSION.txt`. Mechanics `docs/GTM-DISTRIBUTION-PLAYBOOK.md`.
+- DONE: plugin PR #3 merged 08-28, founding offer PR #29 merged 08-28 (live),
+  relaunch email sent 08-31 (produced zero, list called dead 09-01), placements
+  6a/6b opened 09-01. REMAINING: 6c issue form (human), Show HN, plugin directory
+  form, Connectors Directory.
 - Measure by referral sessions + human MCP initializes (claude-code / cursor / codex
   UAs, non-cloud IPs), NEVER link count. Baseline 08-22: ~2,700 `/mcp` POSTs, all bots.
+  Still true 09-01: every agent-client IP traces to owner infra (gr-trader-vm
+  8.234.242.149) or a Claude Code session. Zero external clients ever.
 - OAuth AS + `/pro` LIVE since 08-19 (memory `oauth-as-built-2026-08-19`); webapp copy
   PR #28 MERGED. Guides B3-B6 CUT 08-22, B2 stays (per-client OAuth sign-in
   verification gates B4/B5). GitGuardian 36370105 false positive: mark it.
