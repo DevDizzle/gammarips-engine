@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude plugin validate *)",
+      "Bash(claude plugin list *)",
+      "Bash(claude plugin details *)",
+      "Bash(gcloud storage ls *)",
+      "Bash(gcloud storage cat *)",
+      "Bash(gcloud builds list *)",
+      "Bash(gh search repos *)",
+      "Bash(bash /home/user/workspace/projects/gammarips-mcp/scripts/deploy.sh)",
+      "Bash(bash /home/user/workspace/projects/gammarips-mcp/scripts/deploy.sh *)",
+      "mcp__gammarips-mcp__get_signal",
+      "mcp__gammarips-mcp__get_pool",
+      "mcp__gammarips-mcp__get_daily_report",
+      "mcp__gammarips-mcp__get_regime_context",
+      "mcp__gammarips-mcp__get_liquidity",
+      "mcp__gammarips-mcp__get_market_calendar_status",
+      "mcp__gmail__search_emails",
+      "mcp__claude_ai_Gmail__search_threads",
+      "mcp__google-analytics__run_report",
+      "Edit(//home/user/workspace/projects/gammarips-mcp/content/playbooks/**)",
+      "Write(//home/user/workspace/projects/gammarips-mcp/content/playbooks/**)",
+      "Edit(//home/user/workspace/projects/gammarips-mcp/README.md)",
+      "Write(//home/user/workspace/projects/gammarips-mcp/README.md)",
+      "Edit(//home/user/workspace/projects/gammarips-mcp/skills/**)",
+      "Write(//home/user/workspace/projects/gammarips-mcp/skills/**)",
+      "Edit(//home/user/workspace/projects/gammarips-mcp-serverjson/README.md)",
+      "Write(//home/user/workspace/projects/gammarips-mcp-serverjson/README.md)",
+      "Edit(//home/user/workspace/projects/gammarips-mcp-serverjson/skills/**)",
+      "Write(//home/user/workspace/projects/gammarips-mcp-serverjson/skills/**)",
+      "Edit(//home/user/workspace/projects/gammarips-harness/docs/**)",
+      "Write(//home/user/workspace/projects/gammarips-harness/docs/**)"
+    ],
+    "additionalDirectories": [
+      "/home/user/workspace/projects/gammarips-mcp",
+      "/home/user/workspace/projects/gammarips-mcp-serverjson",
+      "/home/user/workspace/projects/gammarips-harness",
+      "/home/user/workspace/projects/gammarips-webapp"
+    ]
+  }
+}
