@@ -50,7 +50,15 @@ sources:
           - name: scan_date
             tests: [not_null]
           - name: ticker
-            tests: [not_null]
+            # Skip rows (is_skipped=true) carry no ticker by design. The
+            # trader's market-holiday stand-down writes one MARKET_HOLIDAY row
+            # with ticker NULL, and the next trading day replaces it. That
+            # transient row failed this test on 2026-09-08 (Labor Day). The
+            # invariant is "every TRADE row has a ticker".
+            tests:
+              - not_null:
+                  config:
+                    where: "not coalesce(is_skipped, false)"
 
       - name: forward_paper_ledger_intraday
         description: >

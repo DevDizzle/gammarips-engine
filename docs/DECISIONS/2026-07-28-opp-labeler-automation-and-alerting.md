@@ -67,3 +67,24 @@ nothing in this change touches selection/execution policy).
   deploy went live.
 - Alert chain: policy enabled + channel verified; first real trip will confirm
   end-to-end delivery.
+
+## Amendment 2026-09-08 - market-holiday noise on two chains
+
+The first NYSE holiday after this policy went live (Labor Day 2026-09-07) tripped the
+alert channel twice. Neither trip was a real failure.
+
+- `forward-paper-trader-label-pool` answered 500 on the holiday (4 attempts). The
+  timing guard refused the open window, which is correct, but the endpoint reported
+  the refusal as an error.
+- `dbt-daily-build` failed the next morning on the `not_null` test for
+  `forward_paper_ledger.ticker`. The trader's holiday stand-down writes one
+  `MARKET_HOLIDAY` skip row with `ticker` NULL, and the next trading day replaces it.
+  The 06:30 ET build sees the row in between. The staleness test
+  `assert_opp_surface_labels_fresh` was not the cause (zero stuck rows).
+
+Fixes (same day): the cron path of `POST /label_enriched_pool` answers 200 with
+`skip_reason=MARKET_HOLIDAY` on a non-trading run day. An explicit `target_date`
+keeps the strict path. The source and mart `ticker` tests are scoped to trade rows
+with `where: "not coalesce(is_skipped, false)"`. The rule above still holds, with one
+addition: read the `dbt-runner` response body first, because it names the failing
+test, and the staleness test is only one of 122.

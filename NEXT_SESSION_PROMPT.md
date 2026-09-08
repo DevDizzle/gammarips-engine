@@ -68,6 +68,9 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   lx6bb stray docs call; Cursor listing v4; X pins/bio; Stripe MCP.
 
 ## Watch / dated checkpoints
+- **Next NYSE holiday 2026-11-26:** confirm neither `forward-paper-trader-label-pool`
+  (17:00 ET that day) nor `dbt-daily-build` (06:30 ET 11-27) pages. Both holiday-noise
+  fixes deployed 09-08 (dbt-runner-00011, trader-00054). [[market-holiday-cron-noise-two-chains]]
 - **Confirm `liquidity_rank`/`liquidity_score`/`listed_strikes` are non-NULL on a recent
   scan and the log says "liquid universe top-100".** They were NULL on 100/100 rows on
   08-25 (`_score_ticker` rebuilt the dict), making the enrichment liquid gate inoperative;

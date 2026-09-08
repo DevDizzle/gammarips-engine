@@ -3791,10 +3791,27 @@ def trigger_label_enriched_pool():
     the research table — never forward_paper_ledger or any live surface. Accepts
     an optional {"target_date": "YYYY-MM-DD"} for backfill; defaults to the
     canonical just-closed scan_date.
+
+    Market-holiday stand-down (2026-09-08): the cron fires on every weekday,
+    holidays included, and on a closed market the run_label_enriched_pool
+    timing guard refuses the still-open window. That refusal came back as a
+    500 and paged the operator four times on Labor Day 2026-09-07. A closed
+    market is a legitimate zero-work day, so the cron path (no explicit
+    target_date) answers 200 with skip_reason=MARKET_HOLIDAY. An explicit
+    target_date (backfill) keeps the strict path unchanged. Mirrors the
+    trader's own stand-down in run_forward_paper_trading.
     """
     try:
         req_data = request.get_json(silent=True) or {}
         target_date_str = req_data.get("target_date")
+        if not target_date_str:
+            run_day = datetime.now(est).date()
+            if not is_trading_day(run_day):
+                logger.info(f"label pool: market closed on {run_day} (NYSE holiday/weekend); "
+                            f"nothing to label, standing down.")
+                return jsonify({"status": "success", "skipped": True,
+                                "skip_reason": "MARKET_HOLIDAY",
+                                "run_day": run_day.isoformat()}), 200
         target_date = (datetime.strptime(target_date_str, "%Y-%m-%d").date()
                        if target_date_str else get_canonical_scan_date())
         success, result = run_label_enriched_pool(target_date)
