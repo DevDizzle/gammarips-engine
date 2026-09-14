@@ -51,6 +51,9 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   36370105 false positive: mark it.
 
 ## Owner queue
+- **Reply on awesome-mcp-servers #13396** once the Glama grade finalizes (claimed +
+  release v0.1.0 + glama.json all DONE 09-08, 4/9 tools graded A at 16:55 ET). Text in
+  Step 5 of `~/workspace/GAMMARIPS-GLAMA.txt`.
 - Secret migration (2 commands) + the 3-key authoritative-value answer. See START HERE.
 - **Merge webapp PR #34** — one-line `ai-catalog.json` 4.4.0 -> 4.5.0 sync. Merging deploys.
 - **Cancel the 08-28 test sub before Sep 4 18:26 UTC** — real card, converts to $39.
