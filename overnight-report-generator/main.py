@@ -48,7 +48,6 @@ app = Flask(__name__)
 
 PROJECT_ID = os.environ.get("PROJECT_ID", "profitscout-fida8")
 DATASET = os.environ.get("DATASET", "profit_scout")
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip() or None
 
 try:
     bq_client = bigquery.Client(project=PROJECT_ID)
