@@ -247,8 +247,8 @@ def _log_trace(
     Monitoring token counts (2026-08-17). Every ATTEMPT gets a row, retries
     included, because a retry bills like any other call.
 
-    Runs in a worker thread (the BQ insert is synchronous), so the bracket does
-    not block on it.
+    Runs in a worker thread (the BQ insert is synchronous). The caller waits at
+    most TRACE_WAIT_S for it (see `_trace`).
     """
     if _trace_logger is None or TraceRecord is None or ctx is None:
         return
@@ -291,6 +291,21 @@ def _log_trace(
         logger.warning(f"trace log skipped: {e!r}")
 
 
+# Upper bound (s) on how long one attempt waits for its trace row. The BQ
+# insert has no timeout and the client's default retry can run for minutes in a
+# streaming outage, which would hold the pick past signal-notifier's 480 s wait.
+# Past the bound the write finishes in its thread and the bracket moves on.
+TRACE_WAIT_S = 10.0
+
+
+async def _trace(ctx: _TraceCtx | None, **kw) -> None:
+    """Await `_log_trace` in a worker thread for at most TRACE_WAIT_S. NEVER raises."""
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_log_trace, ctx, **kw), TRACE_WAIT_S)
+    except Exception as e:  # noqa: BLE001 — cost accounting never breaks a pick
+        logger.warning(f"trace log wait abandoned: {e!r}")
+
+
 async def _judge_batch(
     client: genai.Client,
     report_md: str,
@@ -301,7 +316,14 @@ async def _judge_batch(
     """One bracket call over <=10 candidates -> ranked picks. Bounded retry.
     `quant_priors` is non-empty only on the final round (see _run_bracket).
     `ctx` names the call in the cost trace — None disables the row, never the call."""
-    cfg = genai_types.GenerateContentConfig(response_mime_type="application/json")
+    cfg = genai_types.GenerateContentConfig(
+        response_mime_type="application/json",
+        http_options=(
+            genai_types.HttpOptions(timeout=tools.JUDGE_CALL_TIMEOUT_S * 1000)
+            if tools.JUDGE_CALL_TIMEOUT_S > 0
+            else None
+        ),
+    )
     prompt = _build_prompt(report_md, batch, quant_priors)
     valid = {c.ticker for c in batch}
     for attempt in range(1, tools.JUDGE_MAX_ATTEMPTS + 1):
@@ -320,8 +342,8 @@ async def _judge_batch(
             picks = [p for p in picks if isinstance(p, str) and p in valid]
             if picks:
                 out = {"picks": picks, "why": str(d.get("why", ""))}
-                await asyncio.to_thread(
-                    _log_trace, ctx, attempt=attempt, batch=batch, prompt=prompt,
+                await _trace(
+                    ctx, attempt=attempt, batch=batch, prompt=prompt,
                     response=r, response_text=raw, parsed=out, status="ok",
                     latency_ms=int((time.monotonic() - t0) * 1000),
                 )
@@ -329,8 +351,8 @@ async def _judge_batch(
             raise ValueError("no in-batch picks")
         except Exception as e:  # parse / transport / empty
             logger.warning(f"judge_batch attempt {attempt}: {e!r}")
-            await asyncio.to_thread(
-                _log_trace, ctx, attempt=attempt, batch=batch, prompt=prompt,
+            await _trace(
+                ctx, attempt=attempt, batch=batch, prompt=prompt,
                 response=r, response_text=raw, parsed=None,
                 status="parse_error" if isinstance(e, ValueError) else "api_error",
                 latency_ms=int((time.monotonic() - t0) * 1000), error=repr(e)[:1000],

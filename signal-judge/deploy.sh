@@ -82,7 +82,7 @@ gcloud run deploy signal-judge \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=10,JUDGE_PROMPT_LABEL=tournament_v1_3,JUDGE_MAX_ATTEMPTS=3,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,TRACE_LOGGING_ENABLED=true,DRY_RUN=false"
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,JUDGE_MODEL=gemini-3.1-pro-preview,JUDGE_PROMPT_VERSION=10,JUDGE_PROMPT_LABEL=tournament_v1_3,JUDGE_MAX_ATTEMPTS=3,JUDGE_CALL_TIMEOUT_S=150,TOURNEY_BATCH=10,GOOGLE_CLOUD_LOCATION=global,TRACE_LOGGING_ENABLED=true,DRY_RUN=false"
 
 # Grant the default compute SA invoker permission so signal-notifier (and
 # operator-side smoke tests using ID tokens) can call /rank. Phase 3 also

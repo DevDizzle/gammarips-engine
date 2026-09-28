@@ -77,6 +77,12 @@ JUDGE_PROMPT_LABEL = os.getenv("JUDGE_PROMPT_LABEL", "tournament_v1_3")
 # longer forfeits the whole slate (replaces the gather+MIN_SCORER_SUCCESS_FRAC
 # partial-failure tolerance lost in the collapse).
 JUDGE_MAX_ATTEMPTS = int(os.getenv("JUDGE_MAX_ATTEMPTS", "3"))
+# Client-side timeout (s) per tournament LLM attempt; 0 disables it. The SDK
+# default has none, so one hung call could outlast signal-notifier's 480 s /rank
+# wait and fail the day closed (2026-09-28: a Vertex call in the report
+# generator hung 597 s). Sized so two timed-out attempts plus a normal retry
+# (~80 s) still land inside 480 s. Longest attempt seen 2026-09: 148 s (a 429).
+JUDGE_CALL_TIMEOUT_S = int(os.getenv("JUDGE_CALL_TIMEOUT_S", "150"))
 
 
 # Forbidden field-name fragments. Any candidate or ledger field whose key
