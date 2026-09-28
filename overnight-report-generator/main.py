@@ -33,6 +33,14 @@ PROMPT_VERSION = "report_v4_tldr_first"
 # prompt can evolve without re-cohorting the trading-relevant report eval.
 SEO_PROMPT_VERSION = "signal_seo_v1"
 
+# Client-side timeouts (ms) for the two Gemini calls. The SDK default has none:
+# on 2026-09-28 the SEO call hung 597 s before a Vertex 503, which overran the
+# 180 s scheduler attempt deadline and paged. Observed max 2026-07..09: report
+# 89 s, SEO 32 s. A timed-out SEO call degrades to the deterministic fallback;
+# a timed-out report call returns 500 and the scheduler retries.
+REPORT_LLM_TIMEOUT_MS = 180_000
+SEO_LLM_TIMEOUT_MS = 60_000
+
 try:
     from trace_logger import TraceLogger, TraceRecord
     _trace_logger = TraceLogger()
@@ -450,6 +458,7 @@ prompt_version: {SEO_PROMPT_VERSION}
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=PerSignalSeoResponse,
+                http_options=types.HttpOptions(timeout=SEO_LLM_TIMEOUT_MS),
             ),
         )
         parsed = response.parsed.model_dump() if response.parsed else json.loads(response.text)
@@ -719,6 +728,7 @@ CRITICAL FORMATTING:
                 # Gemini 3.x migration (2026-05-27): dropped temperature=0.7 —
                 # response_schema enforces structure. Thinking left at SDK/server
                 # default (explicit thinking_level needs google-genai >= 1.74; pinned 1.22).
+                http_options=types.HttpOptions(timeout=REPORT_LLM_TIMEOUT_MS),
             )
         )
     except Exception as e:
