@@ -7,7 +7,11 @@
 > Keep the section shape below: Active workstream · Owner queue · Watch/dated
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
-## START HERE (2026-09-15)
+## START HERE (2026-09-29)
+**09-28 changes:** tournament + paper cohort + eval RETIRED (5 jobs paused, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`,
+[[tournament-paper-cohort-eval-retired]]). gammarips-mcp rev 00054 answers `GET /mcp` with 405
+(bot streams were ~95% of the $47/30d Cloud Run bill). Report-gen rev 00023 has Gemini timeouts.
+Trader pool-freshness guard handed to the trader agent: `~/workspace/TRADER-POOL-FRESHNESS-PROMPT.txt`.
 **GTM state, measured 09-15:** 0 external subs, 0 external MCP clients, 0 harness stars,
 ~20 human sessions/15d. Show HN never fired. Trader went LIVE 09-15, first real entry
 09-16. **The plan of record is [[public-trace-export-is-the-gtm-asset]]:** daily
@@ -25,10 +29,8 @@ unless noted):
 3. Creator pitch + Stripe promo-code design (free Pro + rev share) -> `docs/GTM-CREATOR-PROGRAM.md`.
 4. Guide B2 ("How to trade options with Claude Code") + `scripts/blog/publish_guide.py`.
 
-**Secrets: DONE 09-17.** 12 console rows deleted, rollout succeeded, 12 secret refs live, leaked
-Gemini key deleted. Uncommitted follow-on: GOOGLE_API_KEY mounts stripped in enrichment-trigger,
-overnight-report-generator (+ main.py) and gammarips-mcp deploy configs; commit with the next
-change to each repo. Topic closed. The 08-28 $39 sub is KEPT, never mention it.
+**Secrets: DONE 09-17, topic closed.** Mount strip deployed for report-gen and gammarips-mcp
+(09-28). enrichment-trigger still mounts the dead key until its next deploy. The 08-28 $39 sub is KEPT, never mention it.
 
 **POSITIONING — DECIDED 2026-09-01, do not re-open.** AI-engineer content goes on the
 owner's PERSONAL X + LinkedIn, NOT on @gammarips ([[x-poster-is-not-acquisition]]).
@@ -58,7 +60,7 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   `~/workspace/GAMMARIPS-POSTS.txt` (personal X/LinkedIn today, Reddit x3 on the HN day).
 - **All GTM moved to Grok Bot 09-16** ([[social-strategy-moved-to-grok-bot]]): run the prompt in
   `~/workspace/GROKBOT-SETUP-PROMPT.txt` from a workspace-root session. **x-poster KILLED 09-16:**
-  all 9 scheduler jobs paused, service kept for rollback, do not unpause.
+  its scheduler jobs are gone, service kept for rollback.
 - Revoke + regenerate the 08-06 test MCP key (was pasted in chat).
 - Run-sheet items 7-10 and Q1 (Team/Enterprise claude.ai org) / Q3 — all now in
   `~/workspace/GAMMARIPS-HN-LAUNCH.txt`.
@@ -68,6 +70,8 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   The 08-31 newsletter + rubric fix rides on the same redeploy. x-poster is dead, skip it.
 
 ## Watch / dated checkpoints
+- **Billing export (from ~10-05):** Cloud Run weekly cost should drop well below $12.9/wk after the
+  09-28 MCP fix. Rollback env var `MCP_GET_STREAM_ENABLED=true`. [[vertex-cost-measurement-method]]
 - **Next NYSE holiday 2026-11-26:** confirm neither `forward-paper-trader-label-pool`
   (17:00 ET that day) nor `dbt-daily-build` (06:30 ET 11-27) pages. Both holiday-noise
   fixes deployed 09-08 (dbt-runner-00011, trader-00054). [[market-holiday-cron-noise-two-chains]]
@@ -78,13 +82,11 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   notes disagree on whether it shipped. Rollback = `LIQUID_UNIVERSE`/`ENRICH_LIQUID_ONLY`=false.
 
 ## Open engineering (small items archived to `docs/archive/` on demand; ask git log)
-- 🔴 Deploy the LLM cost-accounting fix `a2fb621` (signal-judge real change, then
-  enrichment-trigger + overnight-report-generator redeploy). Verify per
-  `docs/DECISIONS/2026-08-17-llm-cost-accounting-fix.md`.
+- `.claude/settings.json`: 15 older entries use `/home/user/...` paths (home is `/home/evan`), so
+  they match nothing, including the gammarips-mcp `deploy.sh` rule. Fix with the owner.
 - 🔴 No spread/depth measurement exists (Polygon NBBO entitlement, owner $ call).
-- VIX as-of mismatch FIXED `6a799fd`, **not deployed**. Residual: `get_regime_context`'s
-  own `lag_note` still does not mention the FRED publication difference (gammarips-mcp).
-- FALLBACK picks bypass the liquidity floor (`POLICY_GATE_FALLBACK` takes `df.iloc[0]`).
+- VIX as-of fix `6a799fd` is live (report-gen). Residual: the MCP `get_regime_context` `lag_note`
+  does not mention the FRED publication difference (gammarips-mcp).
 - `relaunch_email.py` mails Mailgun-suppressed addresses (14 of 30 failures on the 08-31
   send). Fix before any future send. [[dormant-list-is-dead]]
 - Least-privilege service accounts: 12/16 Cloud Run services run as the default compute
@@ -103,7 +105,7 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 - Selection research CLOSED (both 08-22 studies: pool = matched random). The one
   owner-approved exception RAN 08-31 and returned null (p=0.923, 0/12 specs); exception
   spent. `FINDINGS_LEDGER.md` §2026-08-31. NEVER re-open. [[selection-research-closed]]
-- V7.1 Tilted GIGO — `docs/TRADING-STRATEGY.md` + wiki `REGISTRY.md` + `CHEAT-SHEET.md`.
-  Cohort start: `LIVE_COHORT_START_DATE` in `signal-notifier/main.py` (never hardcode).
+- No engine execution policy since 09-28 (V7.1 RETIRED, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). The engine is a data pipeline
+  for the MCP and the VM trader. Keep `pool-liquidity-refresh` and all data jobs enabled.
 - Owner trades LIVE (Robinhood since 07-09). Daily crons run; MCP paywall ENFORCE.
 - Health: operator digest 07:15 ET weekdays; SEO auth via the `seo-auth` skill.

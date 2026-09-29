@@ -1,4 +1,4 @@
-Status: active
+Status: retired
 Type: policy
 Tag: policy-adopted
 Exit-context: n/a (a pick-time liquidity refresh, not an edge)
@@ -6,6 +6,8 @@ Source: docs/DECISIONS/2026-06-25-live-oi-liquidity-floor.md; docs/DECISIONS/202
 Date: 2026-08-12
 
 # The two-tier slate floor at the ~09:52 ET pick
+
+> **RETIRED 2026-09-28.** The engine no longer picks, paper-trades or evaluates. This note is a record. See `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
 
 `signal-notifier` re-fetches live liquidity per candidate at the pick moment and applies
 **two floors** before the tournament sees the slate:

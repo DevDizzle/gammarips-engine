@@ -5,15 +5,19 @@ One line per note: `[[slug]] — tag — one-line claim`. Schema + conventions:
 policy and why" — the live V7.1 surface is the Policy section, its evidence is in Findings.
 
 ## Policy (`policy/`) — live operating rules
-- [[v7-1-tilted-gigo-live-policy]] — policy-adopted — the live policy is V7.1 "Tilted GIGO" = V6 selection + V7 same-day exit + the momentum tilt (`policy_version='V7_1_TILTED_GIGO'`; cohort start lives in `signal-notifier/main.py`, 2026-08-21 as of the 08-20 reset)
-- [[bracket-tournament-selection]] — policy-adopted — one pick/day or none via a 3-bracket randomized tournament (consensus 3/3=high, no memory/rubric, fail-closed no fallback)
+
+> **2026-09-28:** the tournament, the paper cohort and eval are retired. Notes marked
+> RETIRED below are records, not live rules. See
+> `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
+- [[v7-1-tilted-gigo-live-policy]] — RETIRED 2026-09-28 — policy-adopted — the live policy is V7.1 "Tilted GIGO" = V6 selection + V7 same-day exit + the momentum tilt (`policy_version='V7_1_TILTED_GIGO'`; cohort start lives in `signal-notifier/main.py`, 2026-08-21 as of the 08-20 reset)
+- [[bracket-tournament-selection]] — RETIRED 2026-09-28 — policy-adopted — one pick/day or none via a 3-bracket randomized tournament (consensus 3/3=high, no memory/rubric, fail-closed no fallback)
 - [[bullish-only-hard-gate]] — policy-adopted — BULLISH-only is a HARD gate (env-toggleable, overrides the bearish-regime caveat for now)
 - [[tourney-pool-cap-edge-rank]] — policy-adopted — pool is soft-edge-ranked then capped to TOURNEY_POOL_CAP (live value 12, code default; fallback skips the edge-cap)
-- [[v7-gigo-same-day-exit]] — policy-adopted — live exit: 10:00 entry / +40% TP / −30% stop / flat 15:45 ET, no trail, no overnight; TIMEOUT>STOP>TARGET
-- [[live-oi-floor]] — policy-adopted — two-tier slate floor at ~09:52 ET (early prints `PRINT_FLOOR_MIN=25` since 08-20, then OI_FLOOR=1000); a dropped candidate never comes back
+- [[v7-gigo-same-day-exit]] — RETIRED 2026-09-28 — policy-adopted — live exit: 10:00 entry / +40% TP / −30% stop / flat 15:45 ET, no trail, no overnight; TIMEOUT>STOP>TARGET
+- [[live-oi-floor]] — RETIRED 2026-09-28 — policy-adopted — two-tier slate floor at ~09:52 ET (early prints `PRINT_FLOOR_MIN=25` since 08-20, then OI_FLOOR=1000); a dropped candidate never comes back
 - [[no-liquid-candidates-no-pick]] — policy-adopted — when nothing clears the liquidity floors the engine stands down instead of ranking the reject pile
-- [[earnings-exclusion-rail]] — policy-adopted — safety rail 1: no earnings in the hold/exclusion window (literature-anchored)
-- [[regime-rail-vix-term]] — policy-adopted — safety rail 2: fail closed when VIX > VIX3M
+- [[earnings-exclusion-rail]] — RETIRED 2026-09-28 — policy-adopted — safety rail 1: no earnings in the hold/exclusion window (literature-anchored)
+- [[regime-rail-vix-term]] — RETIRED 2026-09-28 — policy-adopted — safety rail 2: fail closed when VIX > VIX3M
 - [[entry-day-mark-and-limit]] — policy-adopted — published pick shows a date-validated entry-day mark + fair-value limit (display, not selection); the mark is a delayed day.close and prior-session prices are REFUSED (amended 08-14)
 - [[scorecard-life-distributions]] — policy-adopted — public Track Record shows full-life distributions, not ROI under a fixed exit
 - [[public-tracks-pool-not-pick]] — policy-adopted — public surfaces track the ~50-name pool; the daily pick is private

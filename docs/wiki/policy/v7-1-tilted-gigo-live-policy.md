@@ -1,4 +1,4 @@
-Status: active
+Status: retired
 Type: policy
 Tag: policy-adopted
 Exit-context: n/a (identity note; the exit it names is [[v7-gigo-same-day-exit]])
@@ -6,6 +6,8 @@ Source: CLAUDE.md "Current policy"; docs/DECISIONS/2026-06-22-v7-1-tilted-gigo-c
 Date: 2026-07-17
 
 # V7.1 "Tilted GIGO" is the live policy
+
+> **RETIRED 2026-09-28.** The engine no longer picks, paper-trades or evaluates. This note is a record. See `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
 
 The live trading policy is **V7.1 "Tilted GIGO"**: `policy_version='V7_1_TILTED_GIGO'`.
 The cohort start is the `LIVE_COHORT_START_DATE` constant in `signal-notifier/main.py`

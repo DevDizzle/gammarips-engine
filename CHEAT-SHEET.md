@@ -1,4 +1,12 @@
-# GammaRips Cheat Sheet — V7.1 "Tilted GIGO"
+# GammaRips Cheat Sheet — V7.1 "Tilted GIGO" (RETIRED 2026-09-28)
+
+> **RETIRED 2026-09-28. This routine no longer runs.** No pick email arrives at
+> 09:52 ET, and no paper trade is recorded. The engine is a data pipeline for
+> `gammarips-mcp` and the VM trader in `gammarips-trader`. The live flow is
+> `overnight-scanner (23:00 ET) → enrichment-trigger (05:30 ET) → report (07:00 ET)
+> → MCP get_pool → VM trader (10:00 ET)`. See
+> `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`. The text
+> below is the record of the retired routine.
 
 ## What this system does
 Scans overnight unusual options activity → a randomized bracket **tournament** over the enriched BULLISH pool picks one trade per day → emails you the pick (clickable card linking to `gammarips.com/signals/{ticker}` for rationale) → you execute from your phone at 10 AM using the **published limit price** → stop + target pre-set → **flat by 3:45 PM the SAME day** (no overnight, no trail). Public live-stats panel (`cohort_stats/current`) reflects the live cohort (`policy_version='V7_1_TILTED_GIGO'`, reset to 2026-08-21 for the print-floor-25 selection, see `docs/DECISIONS/2026-08-20-score-floor-accepted-print-floor-25-shipped.md`).

@@ -1,4 +1,4 @@
-Status: active
+Status: retired
 Type: policy
 Tag: policy-adopted
 Exit-context: any hold that spans a scheduled earnings print
@@ -6,6 +6,8 @@ Source: docs/DECISIONS/2026-05-06-earnings-overlap-exclusion.md; De Silva/Smith/
 Date: 2026-07-17
 
 # Safety rail 1 — no earnings in the hold/exclusion window
+
+> **RETIRED 2026-09-28.** The engine no longer picks, paper-trades or evaluates. This note is a record. See `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
 
 `signal-notifier` hard-excludes any candidate whose scheduled earnings date falls inside
 the hold/exclusion window `[scan_date, entry_day + 2 trading days]`. It walks the top-10

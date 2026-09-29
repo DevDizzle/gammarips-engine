@@ -1,4 +1,4 @@
-Status: active
+Status: retired
 Type: policy
 Tag: policy-adopted
 Exit-context: n/a (selection layer; exit is [[v7-gigo-same-day-exit]])
@@ -6,6 +6,8 @@ Source: docs/DECISIONS/2026-06-04-bracket-tournament.md; CLAUDE.md "Current poli
 Date: 2026-07-17
 
 # The daily pick is a randomized bracket tournament (one signal/day or none)
+
+> **RETIRED 2026-09-28.** The engine no longer picks, paper-trades or evaluates. This note is a record. See `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
 
 Selection is a **randomized bracket tournament** run at the `signal-judge` Cloud Run
 service (`tournament_v1`, version 7, `gemini-3.1-pro-preview`). It produces **one signal

@@ -5,9 +5,20 @@ History lives in `docs/DECISIONS/` (one dated note per change) and `docs/wiki/`.
 For the one-page operator view, see [`CHEAT-SHEET.md`](../CHEAT-SHEET.md).
 
 ## Status
-**V7.1 "TILTED GIGO" is the live policy.** `policy_version='V7_1_TILTED_GIGO'`.
-V7.1 = V6 bracket-tournament SELECTION + V7 same-day intraday EXIT + the ".1"
-60-day-momentum enrichment tilt (`docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md`).
+**RETIRED 2026-09-28. No engine execution policy is live.** The engine no longer
+selects a daily pick, paper-trades it, or evaluates LLM output. It runs as a data
+pipeline for `gammarips-mcp` and the VM trader in `gammarips-trader`. The trader
+chooses its own contracts and exits under that repo's `docs/RULES.md`. See
+`docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
+
+**The rest of this document describes V7.1 as it ran until 2026-09-28.** It is a
+record, not a live spec. One exception: the Scan and Enrichment parts of the
+"Signal filter stack" section are still live, because they build the pool. The
+notifier rails, liquidity floors and tournament in that section are retired.
+
+V7.1 "TILTED GIGO" (`policy_version='V7_1_TILTED_GIGO'`) = V6 bracket-tournament
+SELECTION + V7 same-day intraday EXIT + the ".1" 60-day-momentum enrichment tilt
+(`docs/DECISIONS/2026-06-19-momentum-60d-edge-tilt.md`).
 
 **Cohort:** the live value is `LIVE_COHORT_START_DATE` in `signal-notifier/main.py`
 (2026-08-25 as of the 2026-08-24 reset). Do not cache the date in docs. Reset

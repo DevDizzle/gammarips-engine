@@ -1,4 +1,4 @@
-Status: active
+Status: retired
 Type: policy
 Tag: policy-adopted
 Exit-context: THIS NOTE DEFINES the live exit — same-day GIGO bracket
@@ -6,6 +6,8 @@ Source: docs/DECISIONS/2026-06-17-v7-intraday-bracket.md; CLAUDE.md "Current pol
 Date: 2026-07-17
 
 # V7 GIGO exit — same-day get-in-get-out bracket
+
+> **RETIRED 2026-09-28.** The engine no longer picks, paper-trades or evaluates. This note is a record. See `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
 
 The live exit (V7, 2026-06-17) is a same-day intraday OCO bracket:
 - **Entry: 10:00 ET** on day-1 (see [[entry-1000-et]]).

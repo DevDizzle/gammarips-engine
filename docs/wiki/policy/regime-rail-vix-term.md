@@ -1,4 +1,4 @@
-Status: active
+Status: retired
 Type: policy
 Tag: policy-adopted
 Exit-context: n/a (a regime skip-day rail, not a selection edge)
@@ -6,6 +6,8 @@ Source: CLAUDE.md "Current policy"; docs/DECISIONS/2026-06-03-vix3m-fred-retry-a
 Date: 2026-07-17
 
 # Safety rail 2 — regime fail-closed when VIX > VIX3M
+
+> **RETIRED 2026-09-28.** The engine no longer picks, paper-trades or evaluates. This note is a record. See `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`.
 
 `signal-notifier` fails closed and takes no new position when the VIX term structure is in
 **backwardation (`VIX > VIX3M`)** — i.e. a position is only opened when `VIX <= VIX3M`.
