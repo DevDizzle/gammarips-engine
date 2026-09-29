@@ -82,8 +82,6 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   notes disagree on whether it shipped. Rollback = `LIQUID_UNIVERSE`/`ENRICH_LIQUID_ONLY`=false.
 
 ## Open engineering (small items archived to `docs/archive/` on demand; ask git log)
-- `.claude/settings.json`: 15 older entries use `/home/user/...` paths (home is `/home/evan`), so
-  they match nothing, including the gammarips-mcp `deploy.sh` rule. Fix with the owner.
 - 🔴 No spread/depth measurement exists (Polygon NBBO entitlement, owner $ call).
 - VIX as-of fix `6a799fd` is live (report-gen). Residual: the MCP `get_regime_context` `lag_note`
   does not mention the FRED publication difference (gammarips-mcp).
