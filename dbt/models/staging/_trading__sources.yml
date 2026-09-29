@@ -39,9 +39,8 @@ sources:
           the canonical PnL for this project (never the underlying).
         config:
           loaded_at_field: "CAST(exit_timestamp AS TIMESTAMP)"
-          freshness:
-            warn_after: {count: 72, period: hour}
-            error_after: {count: 120, period: hour}
+          # Freshness removed 2026-09-28: the writer is retired and the table is
+          # static history. See docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md.
         tests:
           - dbt_utils.unique_combination_of_columns:
               arguments:
@@ -67,9 +66,8 @@ sources:
           `unrealized_return_pct` is the live option PnL of the open position.
         config:
           loaded_at_field: "CAST(snapshot_ts AS TIMESTAMP)"
-          freshness:
-            warn_after: {count: 72, period: hour}
-            error_after: {count: 120, period: hour}
+          # Freshness removed 2026-09-28: the writer is retired and the table is
+          # static history. See docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md.
         tests:
           - dbt_utils.unique_combination_of_columns:
               arguments:
@@ -227,9 +225,8 @@ sources:
           Walled off from Scorecard/website.
         config:
           loaded_at_field: created_at
-          freshness:
-            warn_after: {count: 72, period: hour}
-            error_after: {count: 168, period: hour}
+          # Freshness removed 2026-09-28: the writer is retired and the table is
+          # static history. See docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md.
         tests:
           - dbt_utils.unique_combination_of_columns:
               config:
@@ -251,9 +248,8 @@ sources:
           per day; arm in {TOURNAMENT, TOP_SCORE}.
         config:
           loaded_at_field: created_at
-          freshness:
-            warn_after: {count: 72, period: hour}
-            error_after: {count: 168, period: hour}
+          # Freshness removed 2026-09-28: the writer is retired and the table is
+          # static history. See docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md.
         tests:
           - dbt_utils.unique_combination_of_columns:
               config:
@@ -305,9 +301,8 @@ sources:
           (service, evaluator). Grain = eval_id.
         config:
           loaded_at_field: created_at
-          freshness:
-            warn_after: {count: 72, period: hour}
-            error_after: {count: 168, period: hour}
+          # Freshness removed 2026-09-28: the writer is retired and the table is
+          # static history. See docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md.
         tests:
           - dbt_utils.unique_combination_of_columns:
               config:

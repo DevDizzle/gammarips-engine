@@ -58,11 +58,12 @@ _RANK = {OK: 0, ATTENTION: 1, UNKNOWN: 2}
 # (label, table, date column). The dbt freshness section already catches "this
 # table STOPPED"; this grid catches the other failure — a HOLE in the middle,
 # where collection resumed and nothing looks stale.
+# `ledger` (forward_paper_ledger) and `shadow` (paper_shadow_topscore) were
+# removed 2026-09-28: their writers are retired, so every new day would read as
+# a hole. See docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md.
 COVERAGE_TABLES = [
     ("scan",       "overnight_signals",           "scan_date"),
     ("enriched",   "overnight_signals_enriched",  "scan_date"),
-    ("ledger",     "forward_paper_ledger",        "scan_date"),
-    ("shadow",     "paper_shadow_topscore",       "scan_date"),
     ("outcomes",   "enriched_option_outcomes",    "entry_day"),
     ("minutepath", "option_minute_paths",         "entry_day"),
     ("iv",         "polygon_iv_history",          "as_of_date"),
