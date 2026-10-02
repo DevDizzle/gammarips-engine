@@ -50,7 +50,7 @@ SELECT
   MAX(IF(opp_status = 'OK' AND opp_peak_return IS NOT NULL, scan_date, NULL)) AS to_3d,
   {", ".join(f"COUNTIF(opp_status = 'OK' AND opp_peak_return >= {x}) AS k3d_{int(x * 100)}" for x in LEVELS)},
   COUNTIF(opp_status = 'OK' AND opp_peak_return IS NOT NULL AND opp_trough_return <= -0.30) AS k3d_stop30,
-  APPROX_QUANTILES(IF(opp_status = 'OK', opp_peak_return, NULL), 2)[OFFSET(1)] AS median_peak_3d,
+  APPROX_QUANTILES(IF(opp_status = 'OK', opp_peak_return, NULL), 100)[OFFSET(50)] AS median_peak_3d,
   -- whole life, expired contracts only
   COUNTIF(life_status = 'OK' AND life_peak_return IS NOT NULL) AS n_life,
   MIN(IF(life_status = 'OK' AND life_peak_return IS NOT NULL, scan_date, NULL)) AS from_life,
