@@ -53,7 +53,8 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   36370105 false positive: mark it.
 
 ## Owner queue
-- **Merge webapp PR #34** — one-line `ai-catalog.json` 4.4.0 -> 4.5.0 sync. Merging deploys.
+- Webapp revamp PR #36 SHIPPED 10-02 (merge `1deb327`, live ~9 min later). Open:
+  owner review of /disclosures #01 wording; new og-image; traces merge fills /scorecard.
 - Traces: branch `traces/2026-09` PUSHED 09-16 (09-14/15/16, timer live). PR -> main
   before the HN post, re-merge the morning of. `~/workspace/GAMMARIPS-TRACES.txt`.
 - Show HN + the 6c issue form: `~/workspace/GAMMARIPS-HN-LAUNCH.txt`. Posts drafted in
