@@ -74,6 +74,19 @@ Since 2026-08-07 it can also abort on a Polygon splits-enumeration failure
     --message-body='{}' \
     --attempt-deadline=600s
 
-NEVER paste `gcloud scheduler jobs describe` output for either job anywhere:
+Scheduler job for POST /refresh_site_stats (2026-10-02, owner call): the public
+gammarips.com pool numbers, written to Firestore site_stats/pool. 18:00 ET, after
+the 17:00 to 17:40 labelers. A failure leaves yesterday's doc in place, so the
+site never breaks. One retry, then go red.
+
+  gcloud scheduler jobs create http site-stats-refresh \
+    --project=profitscout-fida8 --location=us-central1 \
+    --schedule="0 18 * * 1-5" --time-zone="America/New_York" \
+    --uri="$RUN_URL/refresh_site_stats" --http-method=POST \
+    --headers="Content-Type=application/json,X-Refresh-Token=$TOKEN" \
+    --message-body='{}' \
+    --attempt-deadline=180s --max-retry-attempts=1
+
+NEVER paste `gcloud scheduler jobs describe` output for any of these jobs anywhere:
 --headers puts the shared token in argv and in the describe output.
 NOTE

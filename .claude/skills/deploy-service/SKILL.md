@@ -32,7 +32,9 @@ Never hand-edit that line down.
 - Routes: `POST /` (paper trading), `POST /cache_iv`, `POST /mark_to_market`,
   `POST /persist_minute_paths` (token-gated), `POST /label_life_surface`,
   `POST /label_enriched_pool`, `POST /fill_closed_windows` (token-gated, 2026-07-28),
-  `POST /load_underlying_bars` (settlement-bars cache, weekdays 17:05 ET).
+  `POST /load_underlying_bars` (settlement-bars cache, weekdays 17:05 ET),
+  `POST /refresh_site_stats` (token-gated, Firestore `site_stats/pool` for gammarips.com,
+  job `site-stats-refresh` weekdays 18:00 ET, 2026-10-02).
 - Secret mounts: `POLYGON_API_KEY`, `POOL_LIQ_REFRESH_TOKEN` (2026-07-07),
   `FILL_WINDOWS_TOKEN` (2026-07-28). **No FMP key, ever** — FMP was deliberately removed
   from this service 2026-04-08.

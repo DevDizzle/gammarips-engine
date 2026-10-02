@@ -3779,6 +3779,36 @@ def trigger_label_life_surface():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route("/refresh_site_stats", methods=["POST"])
+def trigger_refresh_site_stats():
+    """Daily public site stats (owner call 2026-10-02).
+
+    Recomputes the pool hit rates (3-day window and to expiry) and the
+    contract-quality numbers from BigQuery and writes Firestore
+    `site_stats/pool`, which gammarips.com reads. Hit by the daily
+    `site-stats-refresh` Cloud Scheduler cron at 18:00 ET, after the 17:00 to
+    17:40 labelers. Read-only against BigQuery. See site_stats.py.
+
+    Token-gated like /label_life_surface. Body (optional): {"dry_run": true}
+    returns the numbers without the write.
+    """
+    import hmac as _hmac
+    from site_stats import refresh_site_stats
+
+    expected_token = os.environ.get("POOL_LIQ_REFRESH_TOKEN", "").strip()
+    provided_token = request.headers.get("X-Refresh-Token", "")
+    if expected_token and not _hmac.compare_digest(provided_token, expected_token):
+        return jsonify({"status": "denied"}), 403
+
+    try:
+        req = request.get_json(silent=True) or {}
+        stats = refresh_site_stats(dry_run=bool(req.get("dry_run")))
+        return jsonify({"status": "success", "dry_run": bool(req.get("dry_run")), **stats}), 200
+    except Exception as e:
+        logger.error(f"Error in refresh_site_stats endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/label_enriched_pool", methods=["POST", "GET"])
 def trigger_label_enriched_pool():
     """RESEARCH-ONLY counterfactual labeling endpoint.
