@@ -60,7 +60,9 @@ floor passed the trader's 10% spread screen 81% of the time (204 of 253), the re
 of 159). B plus the spread pass plus one contract at or below the trader's $568 per-trade
 budget left 5 to 16 contracts a day on the old names. The dollar-volume universe
 (`2026-10-15-dollar-volume-universe-rank.md`) prices higher, so the affordable count on
-10-16 is the number to read first.
+10-16 is the number to read first. The budget is a fraction of equity, not a constant: the
+trader session reports about $360 for 10-16, and the owner is changing the trader's exit
+and sizing.
 
 ## Measurement
 

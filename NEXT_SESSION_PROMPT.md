@@ -10,7 +10,7 @@
 ## START HERE (2026-10-15)
 **10-15:** rule set B contract floor SHIPPED (scanner rev 00018-d42), the stock-move study
 ran, NOT PASS, and the universe rank moved to 20-session median DOLLAR volume (owner call,
-SHIPPED, scanner rev 00019-xc5), chooser OI saturation BUILT, deploy pending (all in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
+SHIPPED), chooser OI saturation SHIPPED (scanner rev 00020-l4b, carries all three; all in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
 jobs paused, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). gammarips-mcp
 rev 00054 answers `GET /mcp` with 405. Report-gen rev 00023 has Gemini timeouts. Trader
 pool-freshness guard: `~/workspace/TRADER-POOL-FRESHNESS-PROMPT.txt`.
@@ -58,16 +58,19 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   `docs/DECISIONS/2026-10-15-contract-premium-floor.md`. CHECK 10-16 AM: first scan log
   ("Contract floor" lines, pool about 40 names, no mid below $1.50), then the trader funnel
   on 10-16: spread-pass rate (trader pre-read: B rows pass 81% vs 35%) AND the count of
-  contracts at or below the trader's $568 budget (5 to 16/day on the old names; the
-  dollar-volume names cost more, so this can fall toward zero). Trader records: commit
+  contracts at or below the trader's budget OF THE DAY (a fraction of equity: $568 on the
+  measured days, about $360 on 10-16; 5 to 16/day on the old names at $568; the dollar-volume
+  names cost more, so this can fall toward zero). Owner is changing the trader's exit (same-day)
+  and sizing, trader session confirms when it ships. Trader records: commit
   3ca32ab, drift prereg addendum reads `rank_basis` from BQ. Rollback = three env vars to 0.
   [[trader-funnel-log-is-pool-quality-ground-truth]]
-- **Chooser OI saturation 3,000 -> 10,000: BUILT 10-15, NOT deployed** (`CONTRACT_OI_SATURATION`
-  in deploy.sh, `docs/DECISIONS/2026-10-15-contract-oi-saturation.md`, dry run: 26 of 91 picks
-  move to deeper strikes, OI>=10k 9%->26%, affordable count flat, median delta 0.39->0.35).
-  Deploy AFTER the 10-16 read, out of auto mode: command in `~/workspace/DEPLOY-SCANNER-DV.txt`.
-  Quality grounds (book passes 98% at OI 10k+ vs 88% at 3-10k), never a return claim.
-  [[contract-chooser-sets-dte-by-accident]]
+- **Chooser OI saturation 3,000 -> 10,000: SHIPPED 10-15** (scanner rev 00020-l4b, owner "get
+  everything deployed", `CONTRACT_OI_SATURATION=10000`, `docs/DECISIONS/2026-10-15-contract-oi-saturation.md`,
+  dry run: 26 of 91 picks move to deeper strikes, OI>=10k 9%->26%, affordable count flat, median
+  delta 0.39->0.35). CHECK 10-16 AM: BQ share of `recommended_oi >= 10000` on scan_date 10-15
+  (expect ~25%; query in `~/workspace/DEPLOY-SCANNER-DV.txt`). Rollback 3000 + redeploy. Quality
+  grounds (book passes 98% at OI 10k+ vs 88% at 3-10k), never a return claim. Trader cohort record
+  carries the fingerprint. [[contract-chooser-sets-dte-by-accident]]
 - Webapp revamp PR #36 SHIPPED 10-02 (merge `1deb327`, live ~9 min later). Open:
   owner review of /disclosures #01 wording; new og-image; traces merge fills /scorecard.
 - Traces branch `traces/2026-09` pushed 09-16 (timer live): PR -> main before the HN post

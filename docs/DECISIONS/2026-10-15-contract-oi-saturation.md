@@ -1,8 +1,9 @@
 # 2026-10-15: Chooser open-interest saturation point, 3,000 to 10,000
 
-**Status:** BUILT 2026-10-15 (owner call: "OK make your change"). NOT deployed. Deploy
-after the 2026-10-16 morning read of the first dollar-volume scan, one change at a time.
-Deploy command in `~/workspace/DEPLOY-SCANNER-DV.txt`.
+**Status:** SHIPPED 2026-10-15 (owner call: "OK make your change", then "get everything
+deployed"). Scanner revision `overnight-scanner-00020-l4b`, serving 100% from about 16:30
+ET. First real scan 2026-10-15 23:00 ET, so entry day 2026-10-16 carries it together with
+rule set B and the dollar-volume rank. Morning check in `~/workspace/DEPLOY-SCANNER-DV.txt`.
 
 ## Decision
 
@@ -71,6 +72,12 @@ The trader reads live delta as a sanity check, not a gate.
 10,000 is pinned because the measured pass rate flattens there (98%). 20,000 moves three
 more picks for no measured gain.
 
+The $568 column is the trader's budget on the measured days. That budget is a fraction of
+account equity and moves day to day: the trader session reports about $360 on 2026-10-16,
+at which more than half of these picks cost more than one contract allows. The owner is
+changing the trader's exit (same-day) and sizing. Read the affordable count against the
+budget of the day, never against a constant.
+
 ## Cost
 
 None. The chooser already has the chain. No extra API calls.
@@ -83,7 +90,7 @@ None. The chooser already has the chain. No extra API calls.
 
 ## Measurement
 
-- BigQuery, scan dates after the deploy: the share of pool rows with `recommended_oi` at or
+- BigQuery, scan_date 2026-10-15 on: the share of pool rows with `recommended_oi` at or
   above 10,000 (dry run says about 25%, the liquid era before was 9% to 17% by price band).
 - Trader funnel log from the next entry day: the 10% spread screen pass rate on rule set B
   rows, split by scan OI bucket. The rate at 3k to 10k is the control (88%).
