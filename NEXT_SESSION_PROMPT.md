@@ -59,7 +59,10 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 - **Pool contract floor SHIPPED 10-15 (rule set B: mid >= 1.50, delta <= 0.50, OI >= 500):**
   `docs/DECISIONS/2026-10-15-contract-premium-floor.md`. CHECK 10-16 AM: first scan log
   ("Contract floor" lines, pool about 40 names, no mid below $1.50), then the trader funnel
-  rejection rate from 10-16 on. Rollback = three env vars to 0 + redeploy.
+  on 10-16: spread-pass rate (trader pre-read: B rows pass 81% vs 35%) AND the count of
+  contracts at or below the trader's $568 budget (5 to 16/day on the old names; the
+  dollar-volume names cost more, so this can fall toward zero). Trader records: commit
+  3ca32ab, drift prereg addendum reads `rank_basis` from BQ. Rollback = three env vars to 0.
   [[trader-funnel-log-is-pool-quality-ground-truth]]
 - Webapp revamp PR #36 SHIPPED 10-02 (merge `1deb327`, live ~9 min later). Open:
   owner review of /disclosures #01 wording; new og-image; traces merge fills /scorecard.

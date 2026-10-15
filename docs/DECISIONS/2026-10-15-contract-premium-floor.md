@@ -54,6 +54,14 @@ greeks passed the cap. The OI floor exists because re-picks landed on OI 15 (WUL
   the pool. B cuts contracts the broker book rejects. It does not add a return edge.
 - No public copy states the contract price shape, so no site or MCP text changes.
 
+Trader-side check, same day (trader session, 10 entry days 10-01 to 10-15, 414 rows with a
+10:00 book, mid and delta only because OI is not in the funnel log): rows that pass the B
+floor passed the trader's 10% spread screen 81% of the time (204 of 253), the rest 35% (56
+of 159). B plus the spread pass plus one contract at or below the trader's $568 per-trade
+budget left 5 to 16 contracts a day on the old names. The dollar-volume universe
+(`2026-10-15-dollar-volume-universe-rank.md`) prices higher, so the affordable count on
+10-16 is the number to read first.
+
 ## Measurement
 
 - 2026-10-16 morning: read the first scan log. Expect "Contract floor" lines for
