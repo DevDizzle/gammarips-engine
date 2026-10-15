@@ -1776,3 +1776,132 @@ print is required and only 31.7% of name-days have one. No NBBO, so the anchor p
 no spread. `day_index` 1-3 is the harvest window, not the live V7.1 same-day exit, so
 a positive result here would not have transferred to the live policy without a
 separate same-day test ([[same-day-vs-3day-window-mismatch]]).
+
+## 2026-10-15 (stock-move study) PRE-REGISTRATION: which scan-time features predict a +1% stock move in 3 sessions
+
+**Status: PRE-REGISTERED. No result query has run.** The owner reopened selection research
+on 2026-10-15 for this one study. This section is the binding plan. Results go below it in a
+later commit. The script is `backtesting_and_research/2026-10-15_stock_move_study.py`
+(read-only against BigQuery, writes parquet into the gitignored cache only).
+
+### A. Question
+
+Which features, known at the 23:00 ET scan, predict the stock's return from the next open
+to the close of session 3? The threshold that matters is +1.0% raw. The median pool call
+loses 4.97% of premium a day at elasticity 15.4, so the stock must move about +1% in 3
+sessions to pay for 3 days of decay.
+
+### B. Target and universe
+
+- `scan_day` = `DATE(scan_timestamp, "America/New_York")`. Through 2026-03-06 the stored
+  `scan_date` ran one day late, and 2026-03-06 holds two scans. `scan_day` fixes both. Any
+  remaining duplicate (scan_day, ticker) keeps the latest `inserted_at`.
+- Session 1 = the first NYSE session after `scan_day`. Session 3 = two sessions later.
+- `r3` = close(session 3) / open(session 1) - 1, from Polygon grouped-daily ADJUSTED bars.
+- `r3w` = `r3` clipped to [-20%, +20%]. The mean-based metrics use `r3w`. The IC and the hit
+  rate use the raw rank, which the clip does not change.
+- Label `y` = (`r3` >= +1.0%).
+- Universe: every `overnight_signals` row, both directions, `scan_day` 2026-03-02 to
+  2026-08-21 (the last wide scan). About 2,300 names a day, about 120 days.
+- Row filters, each count logged: no bar on session 1 or 3, open <= 0, |r3| >= 1.
+- Bars: one grouped-daily call per NYSE session, 2025-02-03 to the last closed session.
+  Count tickers per date. A date with fewer than 7,000 tickers is an outage and the run
+  stops. No forward fill.
+
+### C. Candidate features (all computed from data dated <= scan_day)
+
+| # | Feature | Source | Definition |
+|---|---|---|---|
+| 1 | pc_dollar_share | scan row | put_dollar_volume / (call + put dollar volume) |
+| 2 | call_vol_oi_ratio | scan row | as stored |
+| 3 | put_vol_oi_ratio | scan row | as stored |
+| 4 | opt_to_stock | scan row | total_options_dollar_volume / (day_volume x underlying_price) |
+| 5 | call_uoa_depth | scan row | as stored |
+| 6 | put_uoa_depth | scan row | as stored |
+| 7 | call_active_strikes | scan row | as stored |
+| 8 | put_active_strikes | scan row | as stored |
+| 9 | price_change_pct | scan row | the scan-day return as the scanner saw it |
+| 10 | recommended_iv | scan row | IV of the chosen contract (null on about 40% of rows) |
+| 11 | cluster_size | scan row | as stored |
+| 12 | overnight_score | scan row | the scanner's own score (control) |
+| 13 | contract_score | scan row | the scanner's contract score (control) |
+| 14 | direction | scan row | BULLISH = 1, BEARISH = 0 |
+| 15 | in_pool | enriched table | 1 if (scan_date, ticker) is in `overnight_signals_enriched` (control) |
+| 16 | log_dollar_volume | scan row | log(day_volume x underlying_price) |
+| 17 | log_price | scan row | log(underlying_price) (control, F-051 price cluster) |
+| 18 | ret_1d_bar | bars | close(0) / close(-1) - 1 (alignment check against #9) |
+| 19 | ret_5d | bars | close(0) / close(-5) - 1 |
+| 20 | ret_20d | bars | close(0) / close(-20) - 1 |
+| 21 | overnight_gap | bars | open(0) / close(-1) - 1 |
+| 22 | intraday | bars | close(0) / open(0) - 1 |
+| 23 | rvol_20 | bars | std of the last 20 daily log returns, annualized |
+| 24 | vol_surprise | bars | volume(0) / mean volume(-20..-1) |
+| 25 | dist_20d_high | bars | close(0) / max high(-19..0) - 1 |
+| 26 | dist_52w_high | bars | close(0) / max high over the last 252 sessions - 1 |
+| 27 | range_pct | bars | (high(0) - low(0)) / close(0) |
+| 28 | atm_iv_30d | polygon_iv_history | latest row with as_of_date in [scan_day - 7, scan_day] |
+| 29 | iv_chg_5d | polygon_iv_history | atm_iv_30d(scan_day) - atm_iv_30d(5 sessions back) |
+| 30 | iv_minus_rvol | both | atm_iv_30d - rvol_20 |
+
+Day-level and categorical inputs enter the model pass only, never the single-feature
+table: VIX close and its 5-day change (FRED VIXCLS, date <= scan_day), and sector as
+one-hot (top 10 sectors, blank, other). `liquidity_rank` is null before 2026-08-24, so
+`in_pool` is the membership control in the wide era. No interaction terms.
+
+Rank-standardize each feature within each scan_day to [-0.5, +0.5]. In the model pass a
+missing value becomes 0 (the day median). The single-feature pass uses non-missing rows
+only and reports the coverage.
+
+### D. Folds and metrics
+
+- Walk-forward by calendar month. Fit on months <= m. Score month m + 1, for m + 1 = May,
+  Jun, Jul, Aug (Aug ends 08-21). Pool the four out-of-sample months (about 77 days).
+- Single features: the sign comes from the fit months (mean IC sign over months <= m).
+  The out-of-sample month is scored with that sign.
+- Per feature and per model, three metrics, each a mean over days with t over days:
+  1. Spearman rank IC with `r3` within the day.
+  2. Top-decile (within day) mean `r3w` minus the day's mean `r3w`, in points.
+  3. Hit rate of `y` in the top decile minus the day's hit rate, in points.
+  Secondary, labeled: the same for the top 50 names a day (the pool size).
+- Multiple testing: Benjamini-Hochberg at 10% across the 30 listed features, on the pooled
+  out-of-sample IC t. The three models are a separate BH family.
+- Alignment check, reported first: correlation and median absolute gap between #9 and #18.
+
+### E. Models (fixed before any result)
+
+| Model | Target | Settings |
+|---|---|---|
+| Ridge | r3w | alpha 10, all features, fit intercept |
+| Logistic L2 | y | C 1.0, lbfgs, max_iter 500 |
+| LightGBM | r3w | l2 objective, num_leaves 15, learning_rate 0.05, n_estimators 300, min_child_samples 200, subsample 0.8, bagging_freq 1, colsample_bytree 0.8, reg_lambda 1.0, seed 42, no early stop |
+
+The model score is rank-standardized within the day and scored with the same three metrics.
+No parameter search. No feature selection on out-of-sample data.
+
+### F. Verdict rules
+
+- **PASS** (wide era, pooled out-of-sample, >= 60 days): one listed feature or one model has
+  top-decile excess >= +1.0 pts per 3 sessions with t >= 2, AND mean IC t >= 3, AND the
+  live-universe holdout shows the same sign with top-decile excess >= +0.5 pts.
+- **KILL**: no listed feature and no model gets IC t >= 2 on the pooled out-of-sample
+  months. Write the null and stop.
+- Anything between is INCONCLUSIVE. It is written as such and ships nothing.
+- Null check on the best result: within-day shuffle of the score, 1,000 draws. Report where
+  the observed IC t sits in the shuffled distribution.
+- Live-universe holdout: scans with `scan_day` 2026-09-01 to 2026-10-13, 100 names a day.
+  The feature sign or the model weights come from a fit on the whole wide era (Mar to Aug).
+  Read ONCE, after the wide-era verdict is written into this ledger.
+
+### G. Secondary tables (labeled, never the verdict)
+
+- The same metrics with the universe cut to underlying_price >= $5.
+- A day-level split of mean `r3w` by VIX tercile.
+- Anything else is exploratory and carries that label in every table.
+
+### H. What this study does not do
+
+It writes nothing to BigQuery. It changes no service. It uses no LLM. It does not re-run
+any test in the 08-22 and 08-31 sections above, `paper_shadow_topscore`, `contract_score`
+cap-50, `mom_60`, or trader F-051, F-052, F-055 and F-059. If the verdict is PASS, the
+proposal is a shadow rank column next to the pool for the trader's fixed-N drift test. The
+owner decides any universe change.
