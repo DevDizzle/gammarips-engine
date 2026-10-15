@@ -98,6 +98,17 @@ LIQUID_DV_MIN_SESSIONS = 10
 CONTRACT_MIN_MID = float(__import__("os").environ.get("CONTRACT_MIN_MID", "0"))
 CONTRACT_MAX_DELTA = float(__import__("os").environ.get("CONTRACT_MAX_DELTA", "0"))
 CONTRACT_MIN_OI = int(__import__("os").environ.get("CONTRACT_MIN_OI", "0"))
+# CONTRACT_OI_SATURATION (2026-10-15) is the open interest where the chooser's
+# OI term stops rising. The 2026-07-28 log ramp saturated at 3,000 because the
+# entry-day ghost rate flattened there. On the liquid universe 80% of the picks
+# on $150+ names sit above 3,000, the volume term saturates for 97%, and the
+# spread term is NULL, so the strike inside the delta band falls to the small
+# gamma/theta residual. The trader's 10:00 book (rule set B rows with a book,
+# entry days 09-15..10-15, N=524) passes the 10% spread screen 98% at OI 10k+,
+# 88% at 3-10k, 72% at 1-3k. A higher saturation point prefers the deepest
+# strike in the band when one exists. Legacy value 3000 = unchanged behaviour.
+# See docs/DECISIONS/2026-10-15-contract-oi-saturation.md.
+CONTRACT_OI_SATURATION = float(__import__("os").environ.get("CONTRACT_OI_SATURATION", "3000"))
 # Cluster boost config
 CLUSTER_MIN_SIZE = 4         # Minimum qualifying tickers in same industry+direction
 CLUSTER_MIN_SCORE = 3        # Only count tickers scoring >= this toward cluster
@@ -671,17 +682,20 @@ def _uoa_depth(contracts: list[dict]) -> float:
 def _best_contract(
     contracts: list[dict], direction: str, underlying_price: float,
     min_mid: float | None = None, max_delta: float | None = None,
-    min_oi: int | None = None,
+    min_oi: int | None = None, oi_saturation: float | None = None,
 ) -> dict | None:
     """Find the single best contract to trade with full Greeks.
 
-    min_mid / max_delta / min_oi override CONTRACT_MIN_MID / CONTRACT_MAX_DELTA /
-    CONTRACT_MIN_OI (dry runs); None reads the env knob."""
+    min_mid / max_delta / min_oi / oi_saturation override CONTRACT_MIN_MID /
+    CONTRACT_MAX_DELTA / CONTRACT_MIN_OI / CONTRACT_OI_SATURATION (dry runs);
+    None reads the env knob."""
     candidates = []
     today = date.today()
     floor = CONTRACT_MIN_MID if min_mid is None else float(min_mid)
     cap = CONTRACT_MAX_DELTA if max_delta is None else float(max_delta)
     oi_floor = CONTRACT_MIN_OI if min_oi is None else int(min_oi)
+    # The OI log ramp's saturation point. Floor at 10 so log10 stays > 0.
+    sat = max(CONTRACT_OI_SATURATION if oi_saturation is None else float(oi_saturation), 10.0)
     floored = 0
 
     for c in contracts:
@@ -778,7 +792,7 @@ def _best_contract(
         # belt-and-suspenders layer.
         # See docs/DECISIONS/2026-06-04-contract-selection-liquidity.md.
         score = (
-            min(math.log10(oi + 1) / math.log10(3000.0), 1.0) * 5.0  # open interest — log ramp, saturates ~3000 (2026-07-28)
+            min(math.log10(oi + 1) / math.log10(sat), 1.0) * 5.0  # open interest — log ramp, saturates at CONTRACT_OI_SATURATION (3000 on 2026-07-28, env knob 2026-10-15)
             + min(vol / 200.0, 1.0) * 1.0              # volume — demoted (non-monotonic at the top, 2026-07-28)
             + ((1.0 - min(spread_pct, 1.0)) * 1.5 if spread_pct is not None else 0.0)  # tight spread — tertiary (NULL when unquoted)
             + (2.0 if 0.20 <= delta <= 0.46 else 0)    # delta bonus — validated band (0.46 CEILING, FINDINGS_LEDGER 2026-07-28)

@@ -2,6 +2,8 @@
 
 **Status:** IMPLEMENTED in the scanner (`_best_contract`). Deploy = overnight-scanner; takes effect next overnight scan.
 
+**Amended 2026-10-15:** the OI term's saturation point is the env knob `CONTRACT_OI_SATURATION` (legacy 3,000, deploy.sh pins 10,000). See `docs/DECISIONS/2026-10-15-contract-oi-saturation.md`. Rule set B (`2026-10-15-contract-premium-floor.md`) added the hard mid, delta and OI floors this note said it would not add. The universe no longer selects on sweeps.
+
 ## The bug
 `_best_contract` (`src/enrichment/core/pipelines/overnight_scanner.py`) scores every chain contract and picks the max. The old score **rewarded low open interest**:
 

@@ -10,7 +10,7 @@
 ## START HERE (2026-10-15)
 **10-15:** rule set B contract floor SHIPPED (scanner rev 00018-d42), the stock-move study
 ran, NOT PASS, and the universe rank moved to 20-session median DOLLAR volume (owner call,
-SHIPPED, scanner rev 00019-xc5; all three in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
+SHIPPED, scanner rev 00019-xc5), chooser OI saturation BUILT, deploy pending (all in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
 jobs paused, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). gammarips-mcp
 rev 00054 answers `GET /mcp` with 405. Report-gen rev 00023 has Gemini timeouts. Trader
 pool-freshness guard: `~/workspace/TRADER-POOL-FRESHNESS-PROMPT.txt`.
@@ -19,14 +19,12 @@ Trader LIVE since 09-15. Plan of record [[public-trace-export-is-the-gtm-asset]]
 redacted `traces/` files in the harness repo, then Show HN (`gammarips-harness/docs/HN-SUBMISSION.txt`,
 uncommitted). Needs >=3 live days in `traces/` and the branch merged first.
 
-NO-OWNER QUEUE (in order, drafts to `~/workspace/GAMMARIPS-POSTS.txt`): 1. Reddit posts
-(r/ClaudeAI, r/mcp, r/algotrading) + dev.to hooked on `traces/2026-09-15.md`. 2. Managed setup
-offer copy ($1,000 install of the open-source harness, paper-first, never "I build your bot";
-webapp copywriter + `/ship`). 3. Creator pitch + Stripe promo-code design ->
-`docs/GTM-CREATOR-PROGRAM.md`. 4. Guide B2 + `scripts/blog/publish_guide.py`.
+NO-OWNER QUEUE (in order, drafts to `~/workspace/GAMMARIPS-POSTS.txt`): 1. Reddit + dev.to posts
+hooked on `traces/2026-09-15.md`. 2. Managed setup offer copy ($1,000 install, paper-first, never
+"I build your bot"; copywriter + `/ship`). 3. Creator pitch + promo codes -> `docs/GTM-CREATOR-PROGRAM.md`.
+4. Guide B2 + `scripts/blog/publish_guide.py`.
 
-**Secrets: DONE 09-17, topic closed.** Mount strip deployed for report-gen + gammarips-mcp (09-28);
-enrichment-trigger mounts the dead key until its next deploy. The 08-28 $39 sub is KEPT, never mention it.
+**Secrets: DONE 09-17, closed.** enrichment-trigger mounts the dead key until its next deploy. The 08-28 $39 sub is KEPT, never mention it.
 
 **POSITIONING — DECIDED 2026-09-01, do not re-open.** AI-engineer content goes on the
 owner's PERSONAL X + LinkedIn, NOT on @gammarips ([[x-poster-is-not-acquisition]]).
@@ -64,6 +62,12 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   dollar-volume names cost more, so this can fall toward zero). Trader records: commit
   3ca32ab, drift prereg addendum reads `rank_basis` from BQ. Rollback = three env vars to 0.
   [[trader-funnel-log-is-pool-quality-ground-truth]]
+- **Chooser OI saturation 3,000 -> 10,000: BUILT 10-15, NOT deployed** (`CONTRACT_OI_SATURATION`
+  in deploy.sh, `docs/DECISIONS/2026-10-15-contract-oi-saturation.md`, dry run: 26 of 91 picks
+  move to deeper strikes, OI>=10k 9%->26%, affordable count flat, median delta 0.39->0.35).
+  Deploy AFTER the 10-16 read, out of auto mode: command in `~/workspace/DEPLOY-SCANNER-DV.txt`.
+  Quality grounds (book passes 98% at OI 10k+ vs 88% at 3-10k), never a return claim.
+  [[contract-chooser-sets-dte-by-accident]]
 - Webapp revamp PR #36 SHIPPED 10-02 (merge `1deb327`, live ~9 min later). Open:
   owner review of /disclosures #01 wording; new og-image; traces merge fills /scorecard.
 - Traces branch `traces/2026-09` pushed 09-16 (timer live): PR -> main before the HN post
