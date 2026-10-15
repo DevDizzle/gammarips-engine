@@ -29,7 +29,7 @@ gcloud run deploy overnight-scanner \
   --cpu=2 \
   --min-instances=0 \
   --max-instances=2 \
-  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,LIQUID_UNIVERSE=true,LIQUID_PRERANK_N=300,LIQUID_TOP_N=100,LIQUID_MIN_SHARE_VOLUME=3000000,LIQUID_MIN_STRIKES=25" \
+  --set-env-vars="PROJECT_ID=profitscout-fida8,DATASET=profit_scout,LIQUID_UNIVERSE=true,LIQUID_PRERANK_N=300,LIQUID_TOP_N=100,LIQUID_MIN_SHARE_VOLUME=3000000,LIQUID_MIN_STRIKES=25,CONTRACT_MIN_MID=1.5,CONTRACT_MAX_DELTA=0.5,CONTRACT_MIN_OI=500" \
   --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest"
 
 # Cleanup

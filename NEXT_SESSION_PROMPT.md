@@ -53,6 +53,12 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   36370105 false positive: mark it.
 
 ## Owner queue
+- **Stock-move research (10-15, owner REOPENED selection research for one study):** find scan-time features that predict a +1% stock move in 3 sessions on the full `overnight_signals` cross-section. Prompt + pre-registration shape: `~/workspace/STOCK-MOVE-RESEARCH.txt`. Trader F-059: pool stocks have zero drift. Drift test = monitor with fixed N, not a ship gate.
+- **Pool contract floor SHIPPED 10-15 (rule set B: mid >= 1.50, delta <= 0.50, OI >= 500):**
+  `docs/DECISIONS/2026-10-15-contract-premium-floor.md`. CHECK 10-16 AM: first scan log
+  ("Contract floor" lines, pool about 40 names, no mid below $1.50), then the trader funnel
+  rejection rate from 10-16 on. Rollback = three env vars to 0 + redeploy.
+  [[trader-funnel-log-is-pool-quality-ground-truth]]
 - Webapp revamp PR #36 SHIPPED 10-02 (merge `1deb327`, live ~9 min later). Open:
   owner review of /disclosures #01 wording; new og-image; traces merge fills /scorecard.
 - Traces: branch `traces/2026-09` PUSHED 09-16 (09-14/15/16, timer live). PR -> main

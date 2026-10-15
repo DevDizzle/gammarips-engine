@@ -20,3 +20,9 @@ liquidity saga in one function: unusual flow is the right signal for the NAME + 
 but using that same unusualness to pick the CONTRACT hands you the strike you can't trade.
 Complements [[oi-not-quality-signal]] (OI is a fillability signal, not a quality lever) and
 the fabricated-spread fix ([[pipeline-bug-hunt-2026-06-04]]).
+
+**2026-10-15 addendum (rule set B, `docs/DECISIONS/2026-10-15-contract-premium-floor.md`):**
+three hard filters now run before the score: mid >= $1.50 (`CONTRACT_MIN_MID`), |delta| <= 0.50
+with a missing delta excluded (`CONTRACT_MAX_DELTA`), OI >= 500 (`CONTRACT_MIN_OI`). A name
+with no eligible call leaves the pool that night. Evidence: 33% of pool rows failed the
+trader's 10% spread screen, monotone in contract price ([[trader-funnel-log-is-pool-quality-ground-truth]]).

@@ -7,6 +7,7 @@ Pure numeric scoring — zero LLM calls.
 
 import logging
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -52,6 +53,31 @@ LIQUID_MIN_SHARE_VOLUME = int(
     __import__("os").environ.get("LIQUID_MIN_SHARE_VOLUME", "3000000")
 )
 LIQUID_MIN_STRIKES = int(__import__("os").environ.get("LIQUID_MIN_STRIKES", "25"))
+
+# --- Contract premium floor (2026-10-15) ---
+# The trader's own 10%-of-mark spread gate drops a third of the pool, and the
+# drop rate falls monotonically with the scan mid price (<$0.50: 69%,
+# $1.50-2.49: 32%, >=$8: 8%; N=976 funnel rows, entry days 09-15..10-13).
+# This plan serves no options NBBO, so the scan mid is the only point-in-time
+# proxy for the minimum-tick spread. A contract under the floor is skipped and
+# the chooser moves up the strike/expiry ladder on the same name. A name with
+# nothing over the floor carries no contract and leaves the pool.
+# 0 = off (legacy behaviour). Rollback: CONTRACT_MIN_MID=0.
+# CONTRACT_MAX_DELTA is its companion: without it the floor walks a cheap name
+# (PFE, T, VZ on the 2026-10-15 dry run) onto a 0.7-delta in-the-money strike,
+# a stock proxy with no opportunity surface, once onto an OI-12 strike. With
+# the cap, a name with no tradeable call over the floor leaves the pool.
+# With the cap on, a contract Polygon serves no delta for is excluded too:
+# deep in-the-money strikes are the ones that come back without greeks, and
+# the cap cannot be evaluated on them (PFE 27C on the 10-09 replay).
+# CONTRACT_MIN_OI is the third knob: the floor and cap shrink the eligible
+# set, and on a thin chain the survivor can be an OI-15 strike (WULF, 10-09
+# replay). The 2026-06-04 "no hard OI floor" call protected fresh UOA sweeps
+# whose OI builds overnight; the liquid universe no longer selects on sweeps.
+# All three: 0 = off.
+CONTRACT_MIN_MID = float(__import__("os").environ.get("CONTRACT_MIN_MID", "0"))
+CONTRACT_MAX_DELTA = float(__import__("os").environ.get("CONTRACT_MAX_DELTA", "0"))
+CONTRACT_MIN_OI = int(__import__("os").environ.get("CONTRACT_MIN_OI", "0"))
 # Cluster boost config
 CLUSTER_MIN_SIZE = 4         # Minimum qualifying tickers in same industry+direction
 CLUSTER_MIN_SCORE = 3        # Only count tickers scoring >= this toward cluster
@@ -521,10 +547,21 @@ def _uoa_depth(contracts: list[dict]) -> float:
     return total
 
 
-def _best_contract(contracts: list[dict], direction: str, underlying_price: float) -> dict | None:
-    """Find the single best contract to trade with full Greeks."""
+def _best_contract(
+    contracts: list[dict], direction: str, underlying_price: float,
+    min_mid: float | None = None, max_delta: float | None = None,
+    min_oi: int | None = None,
+) -> dict | None:
+    """Find the single best contract to trade with full Greeks.
+
+    min_mid / max_delta / min_oi override CONTRACT_MIN_MID / CONTRACT_MAX_DELTA /
+    CONTRACT_MIN_OI (dry runs); None reads the env knob."""
     candidates = []
     today = date.today()
+    floor = CONTRACT_MIN_MID if min_mid is None else float(min_mid)
+    cap = CONTRACT_MAX_DELTA if max_delta is None else float(max_delta)
+    oi_floor = CONTRACT_MIN_OI if min_oi is None else int(min_oi)
+    floored = 0
 
     for c in contracts:
         strike = c.get("strike") or 0
@@ -559,6 +596,10 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
             spread_pct = None
         if mid <= 0:
             continue
+        # Contract premium floor (2026-10-15, see CONTRACT_MIN_MID above).
+        if floor > 0 and mid < floor:
+            floored += 1
+            continue
         if spread_pct is not None and spread_pct > 0.40:
             continue
         # Data-sanity floor, NOT a liquidity gate (re-framed 2026-07-28): a
@@ -569,6 +610,10 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
             continue
 
         oi = c.get("open_interest") or 0
+        # OI floor (2026-10-15, see CONTRACT_MIN_OI above).
+        if oi_floor > 0 and oi < oi_floor:
+            floored += 1
+            continue
 
         # Moneyness filter — widened for OTM institutional flow
         if underlying_price and underlying_price > 0:
@@ -582,6 +627,11 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
                     continue
 
         delta = abs(c.get("delta") or 0)
+        # Delta cap (2026-10-15, see CONTRACT_MAX_DELTA above). A missing
+        # delta cannot be checked against the cap, so it is excluded too.
+        if cap > 0 and (c.get("delta") is None or delta > cap):
+            floored += 1
+            continue
         gamma = c.get("gamma") or 0
         theta = c.get("theta") or 0
         iv = c.get("implied_volatility") or 0
@@ -637,6 +687,14 @@ def _best_contract(contracts: list[dict], direction: str, underlying_price: floa
         })
 
     if not candidates:
+        if floored:
+            sym = str((contracts[0] if contracts else {}).get("contract_symbol") or "")
+            m = re.match(r"O:([A-Z.]+?)\d{6}[CP]", sym)
+            logger.info(
+                "Contract floor $%.2f / delta cap %.2f / OI floor %d: %s has no "
+                "eligible %s contract (%d excluded).",
+                floor, cap, oi_floor, m.group(1) if m else sym or "?", direction, floored,
+            )
         return None
     return max(candidates, key=lambda x: x["contract_score"])
 
