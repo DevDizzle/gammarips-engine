@@ -1905,3 +1905,83 @@ any test in the 08-22 and 08-31 sections above, `paper_shadow_topscore`, `contra
 cap-50, `mom_60`, or trader F-051, F-052, F-055 and F-059. If the verdict is PASS, the
 proposal is a shadow rank column next to the pool for the trader's fixed-N drift test. The
 owner decides any universe change.
+
+### I. Results, wide era (run 2026-10-15, script `2026-10-15_stock_move_study.py`)
+
+**Verdict by the pre-registered rule: INCONCLUSIVE. In plain terms it is a null.** One feature
+reaches IC t >= 2 (log price, t 2.5), so the KILL rule does not fire. Nothing comes near
+PASS: no feature survives Benjamini-Hochberg at 10%, and the best top-decile excess of all 30
+features and 3 models is +0.14 pts per 3 sessions against the +1.0 pts required.
+
+Data after the pre-registered filters:
+
+| Item | Count |
+|---|---|
+| Scan rows, scan_day 03-02 to 08-21 | 277,018 on 120 days |
+| Rows with the late label (scan_date != scan_day), kept under scan_day | 9,444 |
+| Tickers dropped for duplicate rows per date in the grouped feed (BCPC, TPC) | 2 |
+| Rows with no bar on day 0 | 127 |
+| Rows with no session-1 open or session-3 close (delisted or halted inside the window) | 200 |
+| Rows with abs(r3) >= 1 | 33 |
+| Final rows | 276,658 |
+| Mean r3, hit rate of r3 >= +1% | +0.25%, 41.6% |
+| Pooled out-of-sample days (May to Aug 21) | 77 |
+
+Alignment check (#9 vs #18): correlation 0.787, median gap 0.004 pts, 62% of rows within
+0.1 pt. The other 16% of rows differ by more than 1 pt, and that gap does not correlate with
+the intraday, overnight or prior-day return. The scanner reads `price_change_pct` from the
+Polygon snapshot, which serves a stale day bar on names with no prints
+([[polygon-snapshot-never-zero-day-bar]]). The two versions score the same (IC -0.027 each),
+so the verdict does not depend on it.
+
+Single features, walk-forward, pooled out-of-sample, sign fixed on the prior months. The
+full 30-row table is in `backtesting_and_research/cache/stockmove/results_wide.md` (gitignored,
+reproducible from the script). The rows that matter:
+
+| Feature | Days | Coverage | IC | IC t | BH 10% | Top-decile excess, pts | t | Hit lift, pts | t |
+|---|---|---|---|---|---|---|---|---|---|
+| log_price | 77 | 1.00 | +0.034 | 2.54 | no | -0.08 | -0.7 | -1.5 | -1.9 |
+| iv_minus_rvol | 77 | 0.15 | +0.024 | 1.97 | no | -0.28 | -1.7 | +1.1 | 1.0 |
+| log_dollar_volume | 77 | 1.00 | +0.015 | 1.85 | no | -0.08 | -0.7 | -0.9 | -1.3 |
+| call_vol_oi_ratio | 77 | 1.00 | +0.012 | 1.80 | no | +0.10 | 0.9 | +0.1 | 0.1 |
+| put_vol_oi_ratio | 77 | 1.00 | +0.011 | 1.78 | no | +0.13 | 1.5 | 0.0 | 0.0 |
+| vol_surprise | 77 | 1.00 | +0.011 | 1.69 | no | -0.11 | -1.6 | +0.6 | 1.1 |
+| price_change_pct (sign flips by fold) | 77 | 1.00 | -0.027 | -1.27 | no | -0.49 | -2.2 | -1.2 | -0.9 |
+| overnight_score (control) | 77 | 1.00 | +0.005 | 0.58 | no | +0.05 | 0.4 | +1.1 | 1.4 |
+| in_pool (control) | 76 | 1.00 | -0.001 | -0.28 | no | -0.01 | -0.2 | -0.1 | -0.6 |
+| contract_score (control) | 76 | 0.63 | -0.006 | -0.46 | no | -0.17 | -1.3 | -2.3 | -2.6 |
+| direction (BULLISH = 1) | 77 | 1.00 | +0.012 | 0.70 | no | -0.02 | -0.2 | +0.4 | 0.4 |
+
+The other 19 features have IC t between -1.5 and +1.2. Twelve of the 30 flip sign across the
+four folds. The scan-day return (#9, #18) reads negative out of sample (reversal), with a
+top-decile excess of -0.49 pts: the names that moved most on the scan day do worse over the
+next 3 sessions. That is the opposite of what a momentum pool needs.
+
+Models, walk-forward, pooled out-of-sample:
+
+| Model | Days | IC | IC t | Top-decile excess, pts | t | Top-50 excess, pts | t |
+|---|---|---|---|---|---|---|---|
+| Ridge | 77 | -0.024 | -1.72 | -0.29 | -1.1 | -0.45 | -1.0 |
+| Logistic | 77 | -0.038 | -2.12 | -0.42 | -1.6 | -0.48 | -1.1 |
+| LightGBM | 77 | +0.026 | 1.62 | +0.14 | 0.6 | +0.29 | 0.8 |
+
+The two linear models are anti-predictive out of sample. They fit the March to April regime
+(mean r3 -0.3% then +1.2%) and carry the wrong weights forward. LightGBM reads +0.14 pts at
+t 0.6.
+
+Null check on the best IC t (log price): the observed t 2.54 sits at the 99.2nd percentile of
+1,000 within-day shuffles. The rank effect is real and small: higher-priced names rank a
+little better on r3 across the whole cross-section, and the top decile of price does not
+beat its day (-0.08 pts). It is not tradeable information.
+
+Secondary tables (labeled, not the verdict): with underlying_price >= $5 (222,444 rows) the
+picture is the same, best IC t 2.06 (iv_minus_rvol, coverage 19%), best model LightGBM IC t
+1.43. Day-level mean r3w by VIX tercile: low -0.12 pts, mid +0.23, high +0.36 (40 days each,
+exploratory, no t).
+
+Power. Per-day top-decile excess has SD about 1.0 pt across the 77 days, so the test sees a
++0.25 pt effect at t 2. The PASS bar is +1.0 pts. Nothing is within a quarter of it.
+
+What this does not cover: one regime (Mar to Aug 2026). IV-history features cover 15% of
+rows (pool-adjacent names only). No per-strike chain history. The live-universe holdout is
+read once, below, after this section.
