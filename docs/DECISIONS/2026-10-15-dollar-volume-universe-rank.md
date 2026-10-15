@@ -1,9 +1,8 @@
 # 2026-10-15: Liquid-universe rank on 20-session median dollar volume
 
-**Status:** BUILT 2026-10-15 (owner call: "Do it"). Dry run passed on live data. Deploy
-pending: the session's auto mode blocked `bash deploy.sh`, so the owner runs it
-(`~/workspace/DEPLOY-SCANNER-DV.txt`). Update this line with the scanner revision after
-the first real scan.
+**Status:** SHIPPED 2026-10-15 (owner call: "Do it", then "deploy the scanner"). Scanner
+revision `overnight-scanner-00019-xc5`, serving 100% from about 16:00 ET. First real scan
+2026-10-15 23:00 ET.
 
 ## Decision
 

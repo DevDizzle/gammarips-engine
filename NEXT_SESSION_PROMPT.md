@@ -10,8 +10,7 @@
 ## START HERE (2026-10-15)
 **10-15:** rule set B contract floor SHIPPED (scanner rev 00018-d42), the stock-move study
 ran, NOT PASS, and the universe rank moved to 20-session median DOLLAR volume (owner call,
-BUILT, **deploy PENDING**: auto mode blocked it, owner runs `~/workspace/DEPLOY-SCANNER-DV.txt`;
-all three in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
+SHIPPED, scanner rev 00019-xc5; all three in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
 jobs paused, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). gammarips-mcp
 rev 00054 answers `GET /mcp` with 405. Report-gen rev 00023 has Gemini timeouts. Trader
 pool-freshness guard: `~/workspace/TRADER-POOL-FRESHNESS-PROMPT.txt`.
@@ -48,12 +47,11 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   36370105 false positive: mark it.
 
 ## Owner queue
-- **Universe rank = 20-session median dollar volume, BUILT 10-15, DEPLOY PENDING** (owner
-  call "Do it", `docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`, quality grounds,
-  NOT a return claim). Owner runs `~/workspace/DEPLOY-SCANNER-DV.txt` (or Shift+Tab out of
-  auto mode and say "deploy the scanner"). Then put the revision in the DECISIONS status line.
-  CHECK the first scan log after: "Pass 1: rank basis dollar_volume_20d, 20 sessions", "Liquid
-  rank (dollar_volume_20d)" median price near $180, BQ `rank_basis` populated. Rollback
+- **Universe rank = 20-session median dollar volume, SHIPPED 10-15** (scanner rev 00019-xc5,
+  owner call "Do it", `docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`, quality
+  grounds, NOT a return claim). CHECK 10-16 AM in the scan log (commands in
+  `~/workspace/DEPLOY-SCANNER-DV.txt`): "Pass 1: rank basis dollar_volume_20d, 20 sessions",
+  "Liquid rank (dollar_volume_20d)" median price near $180, BQ `rank_basis` populated. Rollback
   `LIQUID_RANK_BASIS=share_volume` + redeploy. STALE PUBLIC COPY (webapp + MCP playbooks say
   "share volume"; file:line list in the DECISIONS note; webapp via copywriter + `/ship`).
 - **Stock-move study DONE 10-15, NOT PASS** (`FINDINGS_LEDGER.md` §2026-10-15): wide era null,
