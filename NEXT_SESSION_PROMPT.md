@@ -8,8 +8,10 @@
 > checkpoints · Open engineering · Live posture. Pointers over prose.
 
 ## START HERE (2026-10-15)
-**10-15:** rule set B contract floor SHIPPED (scanner rev 00018-d42) and the stock-move study
-ran, NOT PASS (both in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
+**10-15:** rule set B contract floor SHIPPED (scanner rev 00018-d42), the stock-move study
+ran, NOT PASS, and the universe rank moved to 20-session median DOLLAR volume (owner call,
+BUILT, **deploy PENDING**: auto mode blocked it, owner runs `~/workspace/DEPLOY-SCANNER-DV.txt`;
+all three in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
 jobs paused, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). gammarips-mcp
 rev 00054 answers `GET /mcp` with 405. Report-gen rev 00023 has Gemini timeouts. Trader
 pool-freshness guard: `~/workspace/TRADER-POOL-FRESHNESS-PROMPT.txt`.
@@ -24,8 +26,8 @@ offer copy ($1,000 install of the open-source harness, paper-first, never "I bui
 webapp copywriter + `/ship`). 3. Creator pitch + Stripe promo-code design ->
 `docs/GTM-CREATOR-PROGRAM.md`. 4. Guide B2 + `scripts/blog/publish_guide.py`.
 
-**Secrets: DONE 09-17, topic closed.** Mount strip deployed for report-gen and gammarips-mcp
-(09-28). enrichment-trigger still mounts the dead key until its next deploy. The 08-28 $39 sub is KEPT, never mention it.
+**Secrets: DONE 09-17, topic closed.** Mount strip deployed for report-gen + gammarips-mcp (09-28);
+enrichment-trigger mounts the dead key until its next deploy. The 08-28 $39 sub is KEPT, never mention it.
 
 **POSITIONING — DECIDED 2026-09-01, do not re-open.** AI-engineer content goes on the
 owner's PERSONAL X + LinkedIn, NOT on @gammarips ([[x-poster-is-not-acquisition]]).
@@ -40,19 +42,22 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 - REMAINING: **Show HN** (window moved to 09-23/24, lead is the trace export, text in the
   harness repo; listings steps in `~/workspace/GAMMARIPS-HN-LAUNCH.txt`), 6c
   awesome-claude-code issue form (human only), plugin directory form, Connectors Directory.
-- Measure by referral sessions + human MCP initializes (claude-code / cursor / codex UAs,
-  non-cloud IPs), NEVER link count. Still zero external clients ever as of 09-01: every
-  agent-client IP is owner infra (`gr-trader-vm` 8.234.242.149) or a Claude Code session.
+- Measure by referral sessions + human MCP initializes (agent UAs, non-cloud IPs), NEVER link
+  count. Zero external clients ever as of 09-01: every agent IP is owner infra or a Claude session.
 - OAuth AS + `/pro` LIVE since 08-19 ([[oauth-as-built-2026-08-19]]). GitGuardian
   36370105 false positive: mark it.
 
 ## Owner queue
-- **Stock-move study DONE 10-15, NOT PASS** (`FINDINGS_LEDGER.md` §2026-10-15 stock-move study,
-  brief top block). Wide era null (best IC t 2.5, 0/30 pass BH, best excess +0.14 pts vs +1.0).
-  Holdout = six-week mega-cap regime (same 10 names in the top decile daily), not a feature.
-  Selection research CLOSED again. ONE owner decision open: shadow rank column (log dollar
-  volume within the liquid 100) read by the trader's fixed-N drift test, or nothing. Never a
-  universe change on a six-week read.
+- **Universe rank = 20-session median dollar volume, BUILT 10-15, DEPLOY PENDING** (owner
+  call "Do it", `docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`, quality grounds,
+  NOT a return claim). Owner runs `~/workspace/DEPLOY-SCANNER-DV.txt` (or Shift+Tab out of
+  auto mode and say "deploy the scanner"). Then put the revision in the DECISIONS status line.
+  CHECK the first scan log after: "Pass 1: rank basis dollar_volume_20d, 20 sessions", "Liquid
+  rank (dollar_volume_20d)" median price near $180, BQ `rank_basis` populated. Rollback
+  `LIQUID_RANK_BASIS=share_volume` + redeploy. STALE PUBLIC COPY (webapp + MCP playbooks say
+  "share volume"; file:line list in the DECISIONS note; webapp via copywriter + `/ship`).
+- **Stock-move study DONE 10-15, NOT PASS** (`FINDINGS_LEDGER.md` §2026-10-15): wide era null,
+  holdout = six-week regime. Selection research CLOSED again. Its owner decision is the item above.
 - **Pool contract floor SHIPPED 10-15 (rule set B: mid >= 1.50, delta <= 0.50, OI >= 500):**
   `docs/DECISIONS/2026-10-15-contract-premium-floor.md`. CHECK 10-16 AM: first scan log
   ("Contract floor" lines, pool about 40 names, no mid below $1.50), then the trader funnel
@@ -66,8 +71,8 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 - **All GTM moved to Grok Bot 09-16** ([[social-strategy-moved-to-grok-bot]]): prompt in
   `~/workspace/GROKBOT-SETUP-PROMPT.txt`, workspace-root session. x-poster KILLED 09-16.
 - Revoke + regenerate the 08-06 test MCP key (pasted in chat). Record the 08-17 zero-trials
-  gate disposition ([[mcp-monetization-killswitch]]); the 10-05 gate stands.
-- win-tracker (`d44a272`) + blog-generator redeploy for the 08-25 cohort pin + newsletter fix.
+  gate disposition ([[mcp-monetization-killswitch]]); the 10-05 gate stands. win-tracker
+  (`d44a272`) + blog-generator redeploy for the 08-25 cohort pin + newsletter fix.
 
 ## Watch / dated checkpoints
 - **Billing export (from ~10-05):** Cloud Run weekly cost should drop well below $12.9/wk after the
@@ -91,8 +96,9 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
 ## Live posture
 - LIQUID-UNIVERSE FUNNEL LIVE 2026-08-24 (`docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`):
   100 most liquid names, not movers; $500K UOA floor gone. Ships on FILLS (no-fill 40.5%
-  -> 6.1%), NEVER on edge — that framing is a forbidden claim. Cohort 08-25. Revs
-  scanner-00016-rs5 / enrichment-00050-q54 / notifier-00064-prb.
+  -> 6.1%), NEVER on edge — that framing is a forbidden claim. Cohort 08-25. Stock rank
+  term = 20-session median dollar volume since 10-15 (`rank_basis` column). Revs
+  enrichment-00050-q54 / notifier-00064-prb; scanner rev in the DECISIONS note.
 - Selection research CLOSED (08-22: pool = matched random; 08-31 exception null; 10-15
   owner-reopened stock-move study NOT PASS). [[selection-research-closed]]. Do not re-open.
 - No engine execution policy since 09-28 (V7.1 RETIRED, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). The engine is a data pipeline

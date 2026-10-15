@@ -1,8 +1,8 @@
-Status: active
+Status: active (amended 2026-10-15: stock term is 20-session median dollar volume)
 Type: architecture
 Tag: funnel
 Exit-context: n/a (selection-universe change, exit mechanics unchanged)
-Source: docs/DECISIONS/2026-08-24-liquid-universe-funnel.md
+Source: docs/DECISIONS/2026-08-24-liquid-universe-funnel.md, docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md
 Date: 2026-08-24
 
 # The scan universe is liquidity-first, not movers
@@ -27,3 +27,15 @@ heavy flow, so it only thinned the pool, 44 BULLISH names to 30 on a 2026-08-24 
 screen. Pool depth now floats with the market and a down day gives a smaller pool by
 design. Cohort reset to 2026-08-25, `policy_version` unchanged. Kill switches:
 `LIQUID_UNIVERSE`, `ENRICH_LIQUID_ONLY`, `ENRICH_UOA_FLOOR`.
+
+**Amended 2026-10-15 (owner call): the stock term is dollar volume, not share volume.**
+The pre-rank and the liquidity rank use the 20-session median of close x volume
+(`dollar_volume_20d`, grouped-daily bars plus the session T snapshot). The 3M share
+floor and the 25-strike floor stay. Share volume admitted cheap names (pool median
+price $63, 22 names below $15, MARA / ONDS / SMR / RKT every day) whose contracts the
+trader's spread gate rejects most. Dollar volume ranks the same liquidity in the unit
+the book trades in and the pool median price goes to about $200. The 20-session median
+cuts daily churn from 16 names to 5. This is a contract-quality change, the same axis
+the funnel shipped on. It is not a return claim: the 2026-10-15 stock-move study found
+dollar volume predicts nothing in the wide era and the holdout read was a six-week
+regime. Rollback `LIQUID_RANK_BASIS=share_volume`. Rows carry `rank_basis`.

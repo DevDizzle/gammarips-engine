@@ -8,6 +8,7 @@ Pure numeric scoring — zero LLM calls.
 import logging
 import math
 import re
+import statistics
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -53,6 +54,25 @@ LIQUID_MIN_SHARE_VOLUME = int(
     __import__("os").environ.get("LIQUID_MIN_SHARE_VOLUME", "3000000")
 )
 LIQUID_MIN_STRIKES = int(__import__("os").environ.get("LIQUID_MIN_STRIKES", "25"))
+
+# --- Universe rank basis: dollar volume (2026-10-15, owner call) ---
+# The stock-side term of the pre-rank and of the liquidity rank is the median
+# of close x volume across the last LIQUID_DV_SESSIONS sessions (grouped-daily
+# adjusted bars for the prior sessions, the snapshot for session T). Share
+# volume admitted cheap names (pool median price $63, 22 names below $15)
+# whose contracts the trader's spread gate rejects most. Dollar volume ranks
+# the same liquidity in the unit the book trades in. The 3M share floor and
+# the 25-strike floor stay. The 20-session median cuts daily pool churn from
+# 16 names to 5. Evidence and the pool it produces:
+# docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md.
+# Rollback: LIQUID_RANK_BASIS=share_volume restores the 2026-08-24 rank.
+LIQUID_RANK_BASIS = (
+    __import__("os").environ.get("LIQUID_RANK_BASIS", "dollar_volume_20d").strip().lower()
+)
+LIQUID_DV_SESSIONS = int(__import__("os").environ.get("LIQUID_DV_SESSIONS", "20"))
+# Below this many answered sessions the median is not a median. The rank then
+# uses session T dollar volume alone and the rows say so in `rank_basis`.
+LIQUID_DV_MIN_SESSIONS = 10
 
 # --- Contract premium floor (2026-10-15) ---
 # The trader's own 10%-of-mark spread gate drops a third of the pool, and the
@@ -394,12 +414,73 @@ def _snapshot_session_date(item: dict) -> str | None:
     return None
 
 
+def _dollar_volume_history(
+    poly: PolygonClient, observed_session: str | None, tickers: set[str],
+) -> tuple[dict[str, list[float]], int]:
+    """
+    Close x volume per ticker for the sessions before the observed one.
+
+    Walks back one calendar day at a time from the day before the observed
+    session, one grouped-daily call per day. A weekend or a holiday answers
+    with no bars and costs one call. Stops after LIQUID_DV_SESSIONS - 1
+    answered sessions or 45 calendar days. Returns the per-ticker values and
+    the count of sessions that answered, so the caller can refuse a thin
+    history instead of trusting it.
+    """
+    want = max(LIQUID_DV_SESSIONS - 1, 0)
+    history: dict[str, list[float]] = {}
+    if want == 0:
+        return history, 0
+    try:
+        start = date.fromisoformat(observed_session) if observed_session else None
+    except ValueError:
+        start = None
+    if start is None:
+        start = datetime.now(ZoneInfo("America/New_York")).date()
+    got = 0
+    for back in range(1, 46):
+        day = (start - timedelta(days=back)).isoformat()
+        bars = poly.fetch_grouped_daily(day)
+        # An answered session carries thousands of names. A weekend answers
+        # with none. Never count a thin answer as a session.
+        if len(bars) < 1000:
+            if bars:
+                logger.warning("Grouped daily %s: only %d bars, skipped.", day, len(bars))
+            continue
+        seen: set[str] = set()
+        dup: set[str] = set()
+        day_vals: dict[str, float] = {}
+        for b in bars:
+            t = b.get("T")
+            if t not in tickers:
+                continue
+            if t in seen:
+                dup.add(t)
+                continue
+            seen.add(t)
+            c, v = b.get("c") or 0, b.get("v") or 0
+            if c > 0 and v > 0:
+                day_vals[t] = float(c) * float(v)
+        # The grouped feed returns a few symbols twice per date with different
+        # prices (BCPC, TPC on 2026-10-15). Neither row is trusted.
+        for t in dup:
+            day_vals.pop(t, None)
+        for t, dv in day_vals.items():
+            history.setdefault(t, []).append(dv)
+        got += 1
+        if got >= want:
+            break
+    return history, got
+
+
 def _pass1_stock_snapshots(poly: PolygonClient, universe: set[str]) -> list[dict]:
     """
     Fetch the all-tickers snapshot (one call) and choose the pass-2 candidates.
 
     LIQUID_UNIVERSE=true (default): keep the most liquid universe names by
-    session share volume. LIQUID_UNIVERSE=false: the legacy mover funnel.
+    LIQUID_RANK_BASIS (20-session median dollar volume, or share volume on
+    rollback) above the share-volume floor. LIQUID_UNIVERSE=false: the legacy
+    mover funnel.
     """
     logger.info("Pass 1: Fetching all-tickers snapshot...")
     snapshot = poly.fetch_all_tickers_snapshot()
@@ -492,14 +573,54 @@ def _pass1_stock_snapshots(poly: PolygonClient, universe: set[str]) -> list[dict
         )
         fresh = rows
 
+    # Stock-side rank basis. Session T dollar volume comes from the snapshot
+    # itself. The prior sessions come from grouped-daily bars, and the median
+    # of all of them is the value the rank uses. `rank_basis` records which
+    # of the three outcomes each row got, so a thin night is visible in BQ.
+    basis = "share_volume"
+    short = 0
+    for r in fresh:
+        r["dollar_volume_20d"] = None
+        r["rank_basis"] = basis
+    if LIQUID_RANK_BASIS == "dollar_volume_20d":
+        history, got = _dollar_volume_history(
+            poly, observed_session, {r["ticker"] for r in fresh},
+        )
+        if got < LIQUID_DV_MIN_SESSIONS:
+            basis = "dollar_volume_T_only"
+            logger.error(
+                "Pass 1: dollar-volume history answered %d sessions (min %d). "
+                "Ranking on session T dollar volume alone tonight.",
+                got, LIQUID_DV_MIN_SESSIONS,
+            )
+        else:
+            basis = "dollar_volume_20d"
+        for r in fresh:
+            today_dv = float(r["underlying_price"]) * float(r["day_volume"])
+            vals = history.get(r["ticker"], []) + [today_dv] if basis == "dollar_volume_20d" else [today_dv]
+            if basis == "dollar_volume_20d" and len(vals) < LIQUID_DV_MIN_SESSIONS:
+                # A new listing has no history to take a median of. Session T
+                # stands for it, and the row says so.
+                short += 1
+                r["dollar_volume_20d"] = today_dv
+                r["rank_basis"] = "dollar_volume_T_only"
+                continue
+            r["dollar_volume_20d"] = statistics.median(vals)
+            r["rank_basis"] = basis
+        logger.info(
+            "Pass 1: rank basis %s, %d sessions in the median (%d short-history "
+            "names on session T).", basis, got + 1 if basis == "dollar_volume_20d" else 1, short,
+        )
+
     liquid = [r for r in fresh if r["day_volume"] >= LIQUID_MIN_SHARE_VOLUME]
-    liquid.sort(key=lambda r: (-r["day_volume"], r["ticker"]))
+    sort_key = "dollar_volume_20d" if basis != "share_volume" else "day_volume"
+    liquid.sort(key=lambda r: (-(r.get(sort_key) or 0), r["ticker"]))
     candidates = liquid[:LIQUID_PRERANK_N]
 
     logger.info(
-        "Pass 1 (liquid universe): %d universe tickers -> %d current -> "
+        "Pass 1 (liquid universe, %s): %d universe tickers -> %d current -> "
         "%d over %s shares -> pre-rank top %d (stale=%d, undated=%d).",
-        len(rows), len(fresh), len(liquid), f"{LIQUID_MIN_SHARE_VOLUME:,}",
+        basis, len(rows), len(fresh), len(liquid), f"{LIQUID_MIN_SHARE_VOLUME:,}",
         len(candidates), stale, undated,
     )
     return candidates
@@ -804,10 +925,13 @@ def _rank_liquid_universe(enriched: list[dict]) -> list[dict]:
     """
     Cut the pre-ranked candidates to the top LIQUID_TOP_N liquid names.
 
-    Rank = z_cross(log1p(chain dollar volume)) + z_cross(log1p(share volume)),
-    both on session T, exactly the definition the 2026-08-22 study measured.
-    Chain depth floor: LIQUID_MIN_STRIKES listed strikes. Ties go to the
-    higher share volume, then to the alphabetically first ticker.
+    Rank = z_cross(log1p(chain dollar volume)) + z_cross(log1p(stock term)).
+    The stock term is the 20-session median dollar volume since 2026-10-15
+    (`dollar_volume_20d`, set in pass 1), or session T share volume when
+    LIQUID_RANK_BASIS=share_volume (the 2026-08-24 definition the 2026-08-22
+    study measured). Chain dollar volume is session T. Chain depth floor:
+    LIQUID_MIN_STRIKES listed strikes. Ties go to the higher stock term, then
+    to the alphabetically first ticker.
 
     Open interest is NOT a rank input. Polygon aggregates carry no OI history
     and the only OI read is a current-state snapshot, so ranking on it would
@@ -835,25 +959,29 @@ def _rank_liquid_universe(enriched: list[dict]) -> list[dict]:
         math.log1p(max((d.get("call_dollar_vol") or 0) + (d.get("put_dollar_vol") or 0), 0))
         for d in eligible
     ]
-    share_vol = [math.log1p(max(d.get("day_volume") or 0, 0)) for d in eligible]
+    use_dv = any(d.get("rank_basis", "share_volume") != "share_volume" for d in eligible)
+    stock_key = "dollar_volume_20d" if use_dv else "day_volume"
+    stock_term = [math.log1p(max(d.get(stock_key) or 0, 0)) for d in eligible]
     z_chain = _z_cross(chain_dv)
-    z_share = _z_cross(share_vol)
+    z_stock = _z_cross(stock_term)
 
-    for d, zc, zs in zip(eligible, z_chain, z_share):
+    for d, zc, zs in zip(eligible, z_chain, z_stock):
         d["liquidity_score"] = zc + zs
 
     eligible.sort(
-        key=lambda d: (-d["liquidity_score"], -(d.get("day_volume") or 0), d["ticker"])
+        key=lambda d: (-d["liquidity_score"], -(d.get(stock_key) or 0), d["ticker"])
     )
     top = eligible[:LIQUID_TOP_N]
     for i, d in enumerate(top, start=1):
         d["liquidity_rank"] = i
 
     logger.info(
-        "Liquid rank: %d chains priced -> %d passed the %d-strike floor "
-        "(%d thin) -> top %d kept. Median share volume %s.",
-        len(enriched), len(eligible), LIQUID_MIN_STRIKES, thin, len(top),
-        f"{sorted(d.get('day_volume') or 0 for d in top)[len(top) // 2]:,}" if top else "n/a",
+        "Liquid rank (%s): %d chains priced -> %d passed the %d-strike floor "
+        "(%d thin) -> top %d kept. Median %s %s, median price $%s.",
+        stock_key, len(enriched), len(eligible), LIQUID_MIN_STRIKES, thin, len(top),
+        stock_key,
+        f"{sorted(d.get(stock_key) or 0 for d in top)[len(top) // 2]:,.0f}" if top else "n/a",
+        f"{sorted(d.get('underlying_price') or 0 for d in top)[len(top) // 2]:,.2f}" if top else "n/a",
     )
     return top
 
@@ -1032,6 +1160,10 @@ def _ensure_table(bq: bigquery.Client):
         bigquery.SchemaField("liquidity_score", "FLOAT"),
         bigquery.SchemaField("listed_strikes", "INTEGER"),
         bigquery.SchemaField("universe_mode", "STRING"),
+        # 2026-10-15: the stock term the liquidity rank used, and which basis
+        # the row got (dollar_volume_20d, dollar_volume_T_only, share_volume).
+        bigquery.SchemaField("dollar_volume_20d", "FLOAT"),
+        bigquery.SchemaField("rank_basis", "STRING"),
     ]
     table = bigquery.Table(table_id, schema=schema)
     table.time_partitioning = bigquery.TimePartitioning(
@@ -1129,6 +1261,8 @@ def _write_results(bq: bigquery.Client, scored: list[dict]):
             "liquidity_score": s.get("liquidity_score"),
             "listed_strikes": s.get("listed_strikes"),
             "universe_mode": "LIQUID_TOP_N" if LIQUID_UNIVERSE else "MOVERS",
+            "dollar_volume_20d": s.get("dollar_volume_20d"),
+            "rank_basis": s.get("rank_basis"),
         })
 
     errors = bq.insert_rows_json(config.OVERNIGHT_SIGNALS_TABLE, rows)
@@ -1217,6 +1351,8 @@ def run_pipeline():
         scored_row["liquidity_rank"] = ranked_row.get("liquidity_rank")
         scored_row["liquidity_score"] = ranked_row.get("liquidity_score")
         scored_row["listed_strikes"] = ranked_row.get("listed_strikes")
+        scored_row["dollar_volume_20d"] = ranked_row.get("dollar_volume_20d")
+        scored_row["rank_basis"] = ranked_row.get("rank_basis")
 
     # Step 6: Apply industry cluster boost
     scored = _apply_cluster_boost(scored, metadata)

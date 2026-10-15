@@ -163,6 +163,23 @@ class PolygonClient:
             logging.error("All-tickers snapshot failed: %s", e)
             return []
 
+    def fetch_grouped_daily(self, day: str, adjusted: bool = True) -> list[dict]:
+        """
+        Get one OHLCV bar for every US stock on one session, in one call.
+        /v2/aggs/grouped/locale/us/market/stocks/{day}
+
+        A weekend or a holiday answers with no results. An error answers with
+        an empty list too, after the retries, so a caller must count the
+        sessions that answered and never assume one did.
+        """
+        url = f"{self.BASE}/v2/aggs/grouped/locale/us/market/stocks/{day}"
+        try:
+            res = self._get(url, {"adjusted": "true" if adjusted else "false"})
+            return res.get("results") or []
+        except Exception as e:
+            logging.error("Grouped daily %s failed: %s", day, e)
+            return []
+
     def fetch_underlying_price(self, ticker: str) -> float | None:
         """
         Fetch current/latest price for a ticker (for backfilling options data).

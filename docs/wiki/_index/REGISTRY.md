@@ -29,7 +29,7 @@ policy and why" — the live V7.1 surface is the Policy section, its evidence is
 
 ## Architecture (`architecture/`) — pipeline / data-contract facts
 - [[selection-gates-removed]] — architecture-fact — all selection gates removed 2026-06-04; all enriched signals reach the tournament
-- [[liquid-universe-funnel]] — architecture-fact — the scan universe is liquidity-first since 2026-08-24 (top-100 by chain-$ + share-volume z, 25-strike floor); ships on fills (UNFILLABLE 40.5% -> 6.1%), NOT on edge
+- [[liquid-universe-funnel]] — architecture-fact — the scan universe is liquidity-first since 2026-08-24 (top-100 by chain-$ z + stock z, 25-strike floor; stock term = 20-session median dollar volume since 2026-10-15, share volume before); ships on fills (UNFILLABLE 40.5% -> 6.1%), NOT on edge
 - [[enrichment-definition]] — architecture-fact — "enriched" = overnight_score ≥ 1 (floor accepted at 1 on 08-20, cosmetic; EV inverts ≥7) + the liquid-universe gate; the $500K UOA floor was DROPPED 2026-08-24
 - [[spread-gate-retired]] — architecture-fact — no Polygon NBBO quotes; spread permanently NULL; prices off last-trade/day-close
 - [[assert-no-leakage-gate]] — architecture-fact — every candidate is assert_no_leakage-checked before the LLM (the one non-negotiable)

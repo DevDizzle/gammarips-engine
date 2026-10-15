@@ -2064,6 +2064,17 @@ volume within the liquid 100) written next to the pool and read by the trader's 
 drift test on its own entry days. Rule set B (mid >= $1.50) already overlaps the cheap-stock
 end from the contract side. Nothing ships from this section without an owner decision.
 
+**Owner decision, same day (2026-10-15, "Do it").** The owner asked which demand signals are
+smart. The answer from this study: `vol_surprise` (volume over the prior 20-session mean) is
+dead at 3 sessions (wide IC 0.011, top-decile excess -0.11 pts, holdout IC -0.02), the
+scan-day return reverses (-0.49 pts, t -2.2), and the only demand feature with the same sign
+in both eras is `call_vol_oi_ratio` (wide exc +0.10, holdout exc +0.28), below the bar.
+Every volume number in the scanner is unsigned, so signed options flow (premium bought at
+the ask) is the one demand measure never tested. The owner then changed the universe rank's
+stock term to the 20-session median dollar volume on contract-quality grounds, not as a
+return claim: `docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`. Rollback
+`LIQUID_RANK_BASIS=share_volume`.
+
 **Status.** The study is spent. Selection research returns to CLOSED. Scripts:
 `backtesting_and_research/2026-10-15_fetch_grouped_bars.py`, `2026-10-15_extract_bq.py`,
 `2026-10-15_stock_move_study.py` (the `--holdout` branch refuses a second read).

@@ -36,10 +36,14 @@ price IC +0.07 in April, -0.15 in August). Verdict NOT PASS: the wide-era leg fa
 random draw from the liquid 100 on this measure (`in_pool` IC -0.002), which agrees with
 trader F-059.
 
-**Owner decision on the table (not built).** The liquid universe ranks by share volume and
-admits cheap speculative names. The dollar-volume rank question was already open. The honest
-instrument is a shadow rank column read by the trader's fixed-N drift test, never a universe
-change on a six-week read. Full tables: `FINDINGS_LEDGER.md` §2026-10-15 (stock-move study).
+**Owner decision, DECIDED the same day.** The universe rank's stock term is the 20-session
+median dollar volume since the 2026-10-15 scan, on contract-quality grounds (the trader's
+spread gate rejects cheap names most), not as a return claim. Pool median price goes from
+about $63 to about $200. `docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`,
+rollback `LIQUID_RANK_BASIS=share_volume`. Demand signals the owner asked about: volume over
+average volume is dead at 3 sessions, the scan-day move reverses, and signed options flow is
+the one demand measure never tested. Full tables: `FINDINGS_LEDGER.md` §2026-10-15
+(stock-move study).
 
 
 ## 2026-08-31 update — Trader report-feature ask (F1/F3) is NULL. The "report features" are enriched-substrate columns, `catalyst_type` carries no 3-day information (permutation p=0.923, 0/12 specs), and F1 is `overnight_score` rank which already loses in the live shadow

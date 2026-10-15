@@ -76,13 +76,18 @@ Order: scan → enrichment → notifier rails → BULLISH gate + cap → liquidi
 floors → tournament. Each item cites its decision note.
 
 **Scan (`overnight-scanner`) defines the universe — liquidity first (2026-08-24):**
-- Pass 1 keeps the most liquid universe names by session share volume, NOT
-  price movers. Floor `LIQUID_MIN_SHARE_VOLUME` (3M shares), pre-rank top
+- Pass 1 keeps the most liquid universe names by 20-session median dollar
+  volume (close x volume, since 2026-10-15), NOT price movers. Floor
+  `LIQUID_MIN_SHARE_VOLUME` (3M shares, session T), pre-rank top
   `LIQUID_PRERANK_N` (300). The `|price change| >= 1%` mover gate is retired.
 - Pass 2 prices those chains, then the rank cuts to `LIQUID_TOP_N` (100):
-  `z_cross(log1p(chain dollar volume)) + z_cross(log1p(share volume))`, session
-  T, with a 25-listed-strike chain-depth floor. OI is NOT an input (no history
-  exists, so a snapshot read would be lookahead).
+  `z_cross(log1p(chain dollar volume)) + z_cross(log1p(dollar_volume_20d))`,
+  chain term on session T, with a 25-listed-strike chain-depth floor. OI is
+  NOT an input (no history exists, so a snapshot read would be lookahead).
+  `LIQUID_RANK_BASIS=share_volume` restores the 2026-08-24 share-volume term
+  (`docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`). The rows carry
+  `dollar_volume_20d` and `rank_basis` (`dollar_volume_20d`,
+  `dollar_volume_T_only` on a thin history, `share_volume` on rollback).
 - Ships on executability alone: the old funnel left 40.5% of pool legs
   unfillable at 10:00 ET against 6.1% for the liquid universe. It is NOT an
   edge claim — the selection signal on top of liquidity is null.
