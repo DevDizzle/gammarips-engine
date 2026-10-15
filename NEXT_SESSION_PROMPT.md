@@ -102,6 +102,10 @@ remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
   is liquidity-selected. [[entry-mark-is-a-delayed-day-close]]
 
 ## Live posture
+- **FREEZE to 2026-12-31 (owner call 10-15, relayed by the trader session):** no engine pool,
+  universe or contract change until then unless the owner asks. A change inside the window
+  cannot be read apart from the trader results. Rollback of a broken scan is not a change.
+  Trader budget = 0.30 x equity per name, 2 names (about $360, about $660 after his deposit).
 - LIQUID-UNIVERSE FUNNEL LIVE 2026-08-24 (`docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`):
   100 most liquid names, not movers; $500K UOA floor gone. Ships on FILLS (no-fill 40.5%
   -> 6.1%), NEVER on edge — that framing is a forbidden claim. Cohort 08-25. Stock rank
