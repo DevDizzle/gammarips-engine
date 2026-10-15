@@ -103,9 +103,11 @@ def main() -> int:
     ap.add_argument("--sats", default="3000,10000,20000", help="saturation points, first = baseline")
     ap.add_argument("--extra", default="", help="comma list of tickers to append")
     ap.add_argument("--bullish-only", action="store_true", help="only the scan's BULLISH names")
+    ap.add_argument("--budgets", default="568,360", help="per-trade budgets in dollars, one column each")
     ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
     sats = [float(x) for x in args.sats.split(",")]
+    budgets = [float(x) for x in args.budgets.split(",")]
 
     rows = _latest_universe(args.scan_date, args.bullish_only)
     if not rows:
@@ -120,8 +122,9 @@ def main() -> int:
           f"{' (BULLISH only)' if args.bullish_only else ''} + {len(extra)} extra")
     print(f"chains read {now_et:%Y-%m-%d %H:%M} ET -- "
           f"{'PARTIAL session volume, shape not number' if now_et.hour < 16 or (now_et.hour == 16 and now_et.minute < 5) else 'session complete'}")
-    print(f"rule set B fixed at {RULE_SET_B}; <=$568 counts picks whose mid x 100 is at or below "
-          "the trader's per-trade budget (the ask runs a little higher)")
+    print(f"rule set B fixed at {RULE_SET_B}; a <=$N column counts picks whose mid x 100 is at or "
+          "below that per-trade budget (the ask runs a little higher). The trader's budget is a "
+          "fraction of equity and moves day to day.")
 
     poly = PolygonClient(_polygon_key())
     results, failed = [], []
@@ -138,7 +141,8 @@ def main() -> int:
     base = sats[0]
     print()
     print(f"{'sat':>6} | {'names':>5} | {'changed':>7} | {'new exp':>7} | {'med oi':>6} | {'oi>=10k':>7} | "
-          f"{'med mid':>7} | {'<=$568':>6} | {'med delta':>9} | {'med dte':>7} | {'dte<=13':>7}")
+          f"{'med mid':>7} | " + " | ".join(f"{'<=$' + str(int(b)):>6}" for b in budgets)
+          + f" | {'med delta':>9} | {'med dte':>7} | {'dte<=13':>7}")
     for s in sats:
         picks = [(r, r["picks"][s]) for r in results]
         have_p = [(r, p) for r, p in picks if p]
@@ -150,7 +154,7 @@ def main() -> int:
               f"{_med([p['open_interest'] for _, p in have_p]):>6} | "
               f"{(100 * sum(1 for _, p in have_p if (p['open_interest'] or 0) >= 10000) / n) if n else 0:>6.0f}% | "
               f"{_med([p['mid_price'] for _, p in have_p]):>7} | "
-              f"{sum(1 for _, p in have_p if p['mid_price'] * 100 <= 568):>6} | "
+              + " | ".join(f"{sum(1 for _, p in have_p if p['mid_price'] * 100 <= b):>6}" for b in budgets) + " | "
               f"{_med([abs(p['delta'] or 0) for _, p in have_p]):>9} | "
               f"{_med([p['dte'] for _, p in have_p]):>7} | "
               f"{(100 * sum(1 for _, p in have_p if p['dte'] <= 13) / n) if n else 0:>6.0f}%")
