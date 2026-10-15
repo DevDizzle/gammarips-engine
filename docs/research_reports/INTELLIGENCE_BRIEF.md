@@ -11,6 +11,37 @@
 
 
 
+## 2026-10-15 update — Stock-move study (pre-registered, owner-reopened for one study): NOT PASS. 30 scan-time features and 3 models on the full scan cross-section read null in the wide era, and the liquid-universe holdout shows a six-week mega-cap regime, not a feature
+
+**The question.** Which features known at the 23:00 ET scan predict the stock's return from
+the next open to the close of session 3? The bar is +1.0 pt per 3 sessions in the top decile,
+because the median pool call loses 4.97% of premium a day at elasticity 15.4.
+
+**Wide era (2026-03-02 to 08-21, 276,658 rows, 120 days, walk-forward May to Aug, 77
+out-of-sample days).** Best IC t 2.5 (log price), zero of 30 features pass BH 10%, best
+top-decile excess +0.14 pts. The two linear models are anti-predictive out of sample. With an
+autocorrelation-robust t no feature or model reaches 2. The scan-day return reverses
+(top-decile excess -0.49 pts). The controls (`overnight_score`, `in_pool`, `contract_score`,
+direction) are flat. By the pre-registered rule this is INCONCLUSIVE. In substance it is a null.
+
+**Holdout (liquid universe, 09-01 to 10-13, 2,794 rows, 28 days, read once).** Log price and
+log dollar volume rank 3-session returns at IC 0.19 (t 7.9 and 7.6) with top-decile excess
++1.17 and +0.99 pts. The top decile is the same ten names every day (TSLA, MSFT, META, MU,
+AMD, AVGO, SNDK, DELL, GOOGL, WDC) and the bottom decile the same speculative names (ONDS,
+SMR, MARA, SOUN). It is one basket read 28 times through a six-week tape in which the liquid
+universe fell 0.56% per 3 sessions. In the wide era the same cut flips sign by month (log
+price IC +0.07 in April, -0.15 in August). Verdict NOT PASS: the wide-era leg failed first.
+
+**Doctrine.** The study is spent. [[selection-research-closed]] holds again. The pool is a
+random draw from the liquid 100 on this measure (`in_pool` IC -0.002), which agrees with
+trader F-059.
+
+**Owner decision on the table (not built).** The liquid universe ranks by share volume and
+admits cheap speculative names. The dollar-volume rank question was already open. The honest
+instrument is a shadow rank column read by the trader's fixed-N drift test, never a universe
+change on a six-week read. Full tables: `FINDINGS_LEDGER.md` §2026-10-15 (stock-move study).
+
+
 ## 2026-08-31 update — Trader report-feature ask (F1/F3) is NULL. The "report features" are enriched-substrate columns, `catalyst_type` carries no 3-day information (permutation p=0.923, 0/12 specs), and F1 is `overnight_score` rank which already loses in the live shadow
 
 **Owner approved the ask 2026-08-28 as a narrow exception to [[selection-research-closed]]. It returned null and the exception is spent.**

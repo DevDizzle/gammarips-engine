@@ -1928,11 +1928,12 @@ Data after the pre-registered filters:
 | Pooled out-of-sample days (May to Aug 21) | 77 |
 
 Alignment check (#9 vs #18): correlation 0.787, median gap 0.004 pts, 62% of rows within
-0.1 pt. The other 16% of rows differ by more than 1 pt, and that gap does not correlate with
-the intraday, overnight or prior-day return. The scanner reads `price_change_pct` from the
-Polygon snapshot, which serves a stale day bar on names with no prints
-([[polygon-snapshot-never-zero-day-bar]]). The two versions score the same (IC -0.027 each),
-so the verdict does not depend on it.
+0.1 pt. The other 16% of rows differ by more than 1 pt. That gap does not correlate with the
+prior-day return (r -0.005), so it is not the stale day bar of
+[[polygon-snapshot-never-zero-day-bar]], and it does not correlate with the overnight gap or
+the intraday move either. The cause is not established. The two versions score the same
+(IC -0.027 each), so the verdict does not depend on it. Any future return feature must come
+from the adjusted bars, not from `price_change_pct`.
 
 Single features, walk-forward, pooled out-of-sample, sign fixed on the prior months. The
 full 30-row table is in `backtesting_and_research/cache/stockmove/results_wide.md` (gitignored,
@@ -1985,3 +1986,84 @@ Power. Per-day top-decile excess has SD about 1.0 pt across the 77 days, so the 
 What this does not cover: one regime (Mar to Aug 2026). IV-history features cover 15% of
 rows (pool-adjacent names only). No per-strike chain history. The live-universe holdout is
 read once, below, after this section.
+
+Independent leakage review (read-only subagent, same day): no feature reaches past day 0,
+the target shifts are exact on a pivot index verified against the NYSE calendar, the folds
+and the holdout fit are clean. Nine items, all fixed or declared before the holdout read:
+the holdout sector one-hot now uses the wide-era sector list, `in_pool` is missing (not 0)
+on the 28 days before the enriched table starts (65,187 rows), the top-set size `k_top` is
+shown because a tie block is the whole block (direction's "top decile" is every BULLISH
+name, 1,072 a day, and `in_pool`'s is the whole day), the 60-day rule applies to PASS only,
+the holdout branch refuses a second read, and the three IV features cover pool alumni only
+(the IV cache watchlist is the trailing-30-day enriched pool). The re-run after the fixes
+reproduces every number above.
+
+Robustness the plan did not account for: consecutive scan days share 2 of 3 sessions, so
+the daily series is autocorrelated and the plain t over days is overstated. With a
+Newey-West t (2 lags) the best IC t falls from 2.54 to 1.76 (log price), and no feature or
+model reaches 2. Under that correction the KILL rule would fire. The pre-registered t is
+the plain one, so the verdict stays INCONCLUSIVE by rule and null in substance.
+
+### J. Holdout, liquid universe (read ONCE on 2026-10-15, after section I was committed as 30836c8)
+
+**Final verdict: NOT PASS.** The pre-registered rule needs the wide-era leg first (top-decile
+excess >= +1.0 pts at t >= 2 and IC t >= 3), and the wide era failed it for every feature and
+model. The holdout cannot promote a feature on its own. That is what the rule is for.
+
+Data: scans 2026-09-01 to 2026-10-13, 100 names a day, 3,000 rows. 206 rows had no
+complete 3-session window (the last two scan days). Final 2,794 rows on 28 days. Mean r3
+-0.56%, hit rate 34.1%. Signs, model weights and the sector list all come from the full wide
+era. No fit touched the holdout.
+
+| Name | Days | Top set | IC | IC t | NW t | Top-decile excess, pts | t | Hit lift, pts | Same sign as wide, excess >= +0.5 |
+|---|---|---|---|---|---|---|---|---|---|
+| log_price | 28 | 10 | +0.186 | 7.9 | 6.4 | +1.17 | 4.7 | +8.4 | yes |
+| log_dollar_volume | 28 | 10 | +0.190 | 7.6 | 6.0 | +0.99 | 2.9 | +9.8 | yes |
+| contract_score (wide sign -) | 28 | 10 | +0.139 | 6.4 | 4.9 | +0.30 | 1.0 | +4.8 | no |
+| put_uoa_depth | 28 | 10 | +0.149 | 6.3 | 4.5 | +1.14 | 4.1 | +9.8 | no (wide sign -) |
+| call_uoa_depth | 28 | 10 | +0.133 | 5.5 | 4.6 | +0.78 | 3.5 | +6.9 | yes |
+| put_active_strikes (sign -) | 28 | 12 | -0.129 | -4.5 | -3.2 | -0.85 | -2.9 | -6.3 | no |
+| call_active_strikes (sign -) | 28 | 11 | -0.125 | -3.7 | -2.6 | -0.78 | -2.1 | -8.0 | no |
+| overnight_score (control) | 28 | 20 | +0.056 | 2.2 | 1.9 | +0.22 | 0.7 | +1.4 | no |
+| in_pool (control) | 28 | 54 | -0.002 | -0.1 | 0.0 | +0.11 | 0.6 | +0.8 | no |
+| direction (control) | 28 | 45 | -0.004 | -0.1 | -0.2 | -0.02 | -0.2 | -0.1 | no |
+| Ridge (wide fit) | 28 | 10 | +0.070 | 2.7 | 2.3 | +0.95 | 2.9 | +6.9 | no (0.95) |
+| Logistic (wide fit) | 28 | 10 | -0.053 | -0.9 | -0.7 | +0.01 | 0.0 | +4.1 | no |
+| LightGBM (wide fit) | 28 | 10 | +0.072 | 2.8 | 2.9 | +1.21 | 2.5 | +4.8 | yes |
+
+Nine of 30 features pass BH 10% on the holdout. The full table is in
+`backtesting_and_research/cache/stockmove/results_holdout.md`.
+
+**What the holdout is.** The top decile by price is the same ten names on every one of the 28
+days: TSLA, MSFT, META, MU, AMD, AVGO, SNDK, DELL, GOOGL, WDC (median price $498). The bottom
+decile is the same speculative names: ONDS, SMR, AGNC, MARA, QXO, AUR, RKT, SOUN (median
+price $48 for the rest of the universe). r3 by decile: bottom -1.75%, universe -0.56%, top
++0.59%. So the 28 days are 28 overlapping reads of one basket: long the mega-cap and
+memory-semis names, short the speculative small caps, through six weeks in which the liquid
+universe fell. The daily IC is positive on 25 of 28 days, on up days (IC 0.14) and down days
+(0.21) alike. September reads IC 0.20 and +1.44 pts. The seven October days read 0.14 and
++0.36 pts.
+
+**Why it is not a feature.** In the wide era, the same cut (the 100 largest dollar-volume
+names each day) gives log price IC +0.004 (t 0.3) and top-decile excess -0.07 pts, with the
+monthly IC at +0.07 in April and June and -0.15 in August. Log dollar volume on that cut
+reads IC +0.013 (t 0.8) and swings from +0.13 (April) to -0.10 (August). A size and theme
+factor that flips sign by month is a regime, and September 2026 was a strong month for it.
+Nothing in the pre-registration, and nothing in the data before September, picks that month.
+
+**What it agrees with.** Trader F-051 found a price cluster on the unscreened pool under the
+3-session exit, and F-059 found zero pool drift against the alumni benchmark. Here `in_pool`
+reads IC -0.002: the pool is a random draw from the liquid 100 on this measure. Both agree.
+
+**The one decision this puts on the owner's table (not built).** The liquid universe ranks by
+share volume, which admits cheap speculative names (the bottom decile above). The owner
+already holds the dollar-volume rank question. This holdout says the cheap end of the liquid
+100 lost 1.2 pts per 3 sessions more than the universe over six weeks, and the wide era says
+that gap flips sign by month. The honest instrument is a shadow rank column (log dollar
+volume within the liquid 100) written next to the pool and read by the trader's fixed-N
+drift test on its own entry days. Rule set B (mid >= $1.50) already overlaps the cheap-stock
+end from the contract side. Nothing ships from this section without an owner decision.
+
+**Status.** The study is spent. Selection research returns to CLOSED. Scripts:
+`backtesting_and_research/2026-10-15_fetch_grouped_bars.py`, `2026-10-15_extract_bq.py`,
+`2026-10-15_stock_move_study.py` (the `--holdout` branch refuses a second read).
