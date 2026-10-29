@@ -15,32 +15,26 @@ It is a record, not a queue. Every item in it is dead.
 - The 2026-10-15 freeze to 2026-12-31 is superseded. No engine work is planned.
 - The trader session stopped gr-trader-vm on 10-29 (`gammarips-trader/docs/DECISIONS/2026-10-29-wind-down.md`).
 
-## State (2026-10-29)
+## State (2026-10-29, about 14:10 ET): ALL ENGINE STEPS DONE
 
-- DONE: step 1 inventory, step 2 pause. All 26 scheduler jobs in profitscout-fida8 are PAUSED.
-  Config saved: `~/workspace/projects/_index/fida8-scheduler-jobs-enabled-2026-10-29.json`.
-- DONE: Stripe measured. 0 active subscriptions, 0 trials. No subscriber note.
-- Last data: the 10-29 scan, enrichment, and report. The 10-28 outcome labels.
-- Still deployed and idle: 13 GammaRips Cloud Run services, including gammarips-mcp (it serves
-  stale data until the delete).
+- Pause, Stripe archive, and the step 5 delete (owner "go") are DONE. Massive and FMP canceled by
+  Evan. X API is usage-based. Log: `docs/SHUTDOWN-2026-10-29.md`.
+- fida8 now holds: gammarips-webapp, evanparra-ai-site, irw-app (not GammaRips), 18 secrets for the
+  webapp, Firestore, buckets, and the BigQuery datasets. 0 scheduler jobs, 0 functions.
+- Deleted-item config (no secret values): `~/workspace/projects/_index/fida8-deleted-config-2026-10-29.json`.
 
-## Owner queue (his acts, details in the owner steps file)
+## Next: the story page (a gammarips-webapp session)
 
-1. Stripe: DONE 10-29 (all sale objects archived, verified). Left: disable the webhook after
-   the story page ships. The Stripe CLI default login is a different account (Nat Chat sandbox).
-2. Massive: cancel fully.
-3. X API tier and FMP plan: check, cancel a paid one. Not measured.
-4. Say "go" for step 5. Then remove the `mcp` CNAME in Squarespace DNS after the MCP delete.
-5. His calls: profitscout-lx6bb (unused, $3.84 a month), irw-app, the stale fida8 copy of
+Brief: `~/workspace/GAMMARIPS-STORY-PAGE-PROMPT.txt`. Owner decisions: real numbers, redirect every
+old page, an end-to-end timeline for clients and employers. After it ships: delete the secrets the
+site no longer uses (4 are dead now: FMP_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY,
+WHATSAPP_GROUP_INVITE_URL), disable the Stripe webhook, and Evan removes mg.gammarips.com.
+
+## Owner queue
+
+1. Remove the `mcp` CNAME in Squarespace DNS (the mapping is deleted).
+2. His calls: profitscout-lx6bb (unused, $3.84 a month), irw-app, the stale fida8 copy of
    evanparra-ai-site, the MCP listings, the GammaRips Grok Bot.
-
-## Step 5, after "go" (this session's act)
-
-Delete the items marked "Delete" in the Step 5 columns of `docs/SHUTDOWN-2026-10-29.md`. Check each
-item against DO NOT TOUCH first. Keep: gammarips-webapp, its 14 secrets, Firestore, the BigQuery
-datasets, the shared repo `cloud-run-source-deploy`, the shared build buckets, the default compute
-service account, evanparra-ai-site, irw-app, tt-staging-evidence, billing_export, the `texttimeline`
-AR repo. After the delete, update the shutdown doc and this file.
 
 ## Watch
 
