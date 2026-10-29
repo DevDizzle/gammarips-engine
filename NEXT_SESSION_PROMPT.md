@@ -26,8 +26,8 @@ It is a record, not a queue. Every item in it is dead.
 
 ## Owner queue (his acts, details in the owner steps file)
 
-1. Stripe: deactivate the payment link and the promotion code. Archive 6 prices and the product.
-   Keep the webhook until the story page ships.
+1. Stripe: DONE 10-29 (all sale objects archived, verified). Left: disable the webhook after
+   the story page ships. The Stripe CLI default login is a different account (Nat Chat sandbox).
 2. Massive: cancel fully.
 3. X API tier and FMP plan: check, cancel a paid one. Not measured.
 4. Say "go" for step 5. Then remove the `mcp` CNAME in Squarespace DNS after the MCP delete.
