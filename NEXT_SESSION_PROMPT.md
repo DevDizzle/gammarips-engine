@@ -1,119 +1,49 @@
 # Next Session Prompt
 
 > **Contract (owner call 2026-07-17):** this file is the CURRENT STATE for the next
-> session, not a log. REFRESH in place — replace stale content, never append dated
-> blocks. Hard cap ~100 lines. Durable facts graduate to auto-memory; policy changes
-> to `docs/DECISIONS/`; research to the findings ledger. Rules in `CLAUDE.md`.
-> Keep the section shape below: Active workstream · Owner queue · Watch/dated
-> checkpoints · Open engineering · Live posture. Pointers over prose.
+> session, not a log. REFRESH in place, never append dated blocks. Hard cap ~100 lines.
+> Rules in `CLAUDE.md`.
 
-## START HERE (2026-10-15)
-**10-15:** rule set B contract floor SHIPPED (scanner rev 00018-d42), the stock-move study
-ran, NOT PASS, and the universe rank moved to 20-session median DOLLAR volume (owner call,
-SHIPPED), chooser OI saturation SHIPPED (scanner rev 00020-l4b, carries all three; all in Owner queue). **09-28:** tournament + paper cohort + eval RETIRED (5
-jobs paused, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). gammarips-mcp
-rev 00054 answers `GET /mcp` with 405. Report-gen rev 00023 has Gemini timeouts. Trader
-pool-freshness guard: `~/workspace/TRADER-POOL-FRESHNESS-PROMPT.txt`.
-**GTM, measured 09-15:** 0 external subs, 0 external MCP clients, ~20 human sessions/15d.
-Trader LIVE since 09-15. Plan of record [[public-trace-export-is-the-gtm-asset]]: daily
-redacted `traces/` files in the harness repo, then Show HN (`gammarips-harness/docs/HN-SUBMISSION.txt`,
-uncommitted). Needs >=3 live days in `traces/` and the branch merged first.
+## START HERE: GammaRips is SHUT DOWN (owner call 2026-10-29)
 
-NO-OWNER QUEUE (in order, drafts to `~/workspace/GAMMARIPS-POSTS.txt`): 1. Reddit + dev.to posts
-hooked on `traces/2026-09-15.md`. 2. Managed setup offer copy ($1,000 install, paper-first, never
-"I build your bot"; copywriter + `/ship`). 3. Creator pitch + promo codes -> `docs/GTM-CREATOR-PROGRAM.md`.
-4. Guide B2 + `scripts/blog/publish_guide.py`.
+Decision: `docs/DECISIONS/2026-10-29-shutdown.md`. Inventory, costs, and the delete list:
+`docs/SHUTDOWN-2026-10-29.md`. Owner acts: `~/workspace/GAMMARIPS-SHUTDOWN-OWNER-STEPS.txt`.
+The pre-shutdown handoff is archived at `docs/archive/NEXT_SESSION_PROMPT-pre-shutdown-2026-10-29.md`.
+It is a record, not a queue. Every item in it is dead.
 
-**Secrets: DONE 09-17, closed.** enrichment-trigger mounts the dead key until its next deploy. The 08-28 $39 sub is KEPT, never mention it.
+- **Do not resume a job, redeploy a service, or "fix" a stale table.** Stale data is correct now.
+- The 2026-10-15 freeze to 2026-12-31 is superseded. No engine work is planned.
+- The trader session stopped gr-trader-vm on 10-29 (`gammarips-trader/docs/DECISIONS/2026-10-29-wind-down.md`).
 
-**POSITIONING — DECIDED 2026-09-01, do not re-open.** AI-engineer content goes on the
-owner's PERSONAL X + LinkedIn, NOT on @gammarips ([[x-poster-is-not-acquisition]]).
-The agreed line is "a hard live domain for your agent, with next-day ground truth".
+## State (2026-10-29)
 
-## Active workstream — the 08-22 go plan (subs before 10-05)
-Decision `docs/DECISIONS/2026-08-22-go-plan-outbound-plugin-founding-offer.md`. Owner
-steps `~/workspace/GAMMARIPS-HN-LAUNCH.txt` (the old GO-RUNSHEET is archived; its
-remaining items 7-10 + Q1/Q3 were folded in). Memory [[go-plan-2026-08-22]].
-- DONE: plugin PR #3, founding offer PR #29, GA4 attribution (08-31), relaunch email
-  (zero, list closed), placements 6a/6b (09-01).
-- REMAINING: **Show HN** (window moved to 09-23/24, lead is the trace export, text in the
-  harness repo; listings steps in `~/workspace/GAMMARIPS-HN-LAUNCH.txt`), 6c
-  awesome-claude-code issue form (human only), plugin directory form, Connectors Directory.
-- Measure by referral sessions + human MCP initializes (agent UAs, non-cloud IPs), NEVER link
-  count. Zero external clients ever as of 09-01: every agent IP is owner infra or a Claude session.
-- OAuth AS + `/pro` LIVE since 08-19 ([[oauth-as-built-2026-08-19]]). GitGuardian
-  36370105 false positive: mark it.
+- DONE: step 1 inventory, step 2 pause. All 26 scheduler jobs in profitscout-fida8 are PAUSED.
+  Config saved: `~/workspace/projects/_index/fida8-scheduler-jobs-enabled-2026-10-29.json`.
+- DONE: Stripe measured. 0 active subscriptions, 0 trials. No subscriber note.
+- Last data: the 10-29 scan, enrichment, and report. The 10-28 outcome labels.
+- Still deployed and idle: 13 GammaRips Cloud Run services, including gammarips-mcp (it serves
+  stale data until the delete).
 
-## Owner queue
-- **Universe rank = 20-session median dollar volume, SHIPPED 10-15** (scanner rev 00019-xc5,
-  owner call "Do it", `docs/DECISIONS/2026-10-15-dollar-volume-universe-rank.md`, quality
-  grounds, NOT a return claim). CHECK 10-16 AM in the scan log (commands in
-  `~/workspace/DEPLOY-SCANNER-DV.txt`): "Pass 1: rank basis dollar_volume_20d, 20 sessions",
-  "Liquid rank (dollar_volume_20d)" median price near $180, BQ `rank_basis` populated. Rollback
-  `LIQUID_RANK_BASIS=share_volume` + redeploy. STALE PUBLIC COPY (webapp + MCP playbooks say
-  "share volume"; file:line list in the DECISIONS note; webapp via copywriter + `/ship`).
-- **Stock-move study DONE 10-15, NOT PASS** (`FINDINGS_LEDGER.md` §2026-10-15): wide era null,
-  holdout = six-week regime. Selection research CLOSED again. Its owner decision is the item above.
-- **Pool contract floor SHIPPED 10-15 (rule set B: mid >= 1.50, delta <= 0.50, OI >= 500):**
-  `docs/DECISIONS/2026-10-15-contract-premium-floor.md`. CHECK 10-16 AM: first scan log
-  ("Contract floor" lines, pool about 40 names, no mid below $1.50), then the trader funnel
-  on 10-16: spread-pass rate (trader pre-read: B rows pass 81% vs 35%) AND the count of
-  contracts at or below the trader's budget OF THE DAY (a fraction of equity: $568 on the
-  measured days, about $360 on 10-16; 5 to 16/day on the old names at $568; the dollar-volume
-  names cost more, so this can fall toward zero). Owner is changing the trader's exit (same-day)
-  and sizing, trader session confirms when it ships. Trader records: commit
-  3ca32ab, drift prereg addendum reads `rank_basis` from BQ. Rollback = three env vars to 0.
-  [[trader-funnel-log-is-pool-quality-ground-truth]]
-- **Chooser OI saturation 3,000 -> 10,000: SHIPPED 10-15** (scanner rev 00020-l4b, owner "get
-  everything deployed", `CONTRACT_OI_SATURATION=10000`, `docs/DECISIONS/2026-10-15-contract-oi-saturation.md`,
-  dry run: 26 of 91 picks move to deeper strikes, OI>=10k 9%->26%, affordable count flat, median
-  delta 0.39->0.35). CHECK 10-16 AM: BQ share of `recommended_oi >= 10000` on scan_date 10-15
-  (expect ~25%; query in `~/workspace/DEPLOY-SCANNER-DV.txt`). Rollback 3000 + redeploy. Quality
-  grounds (book passes 98% at OI 10k+ vs 88% at 3-10k), never a return claim. Trader cohort record
-  carries the fingerprint. [[contract-chooser-sets-dte-by-accident]]
-- Webapp revamp PR #36 SHIPPED 10-02 (merge `1deb327`, live ~9 min later). Open:
-  owner review of /disclosures #01 wording; new og-image; traces merge fills /scorecard.
-- Traces branch `traces/2026-09` pushed 09-16 (timer live): PR -> main before the HN post
-  (`~/workspace/GAMMARIPS-TRACES.txt`). Show HN + 6c form: `~/workspace/GAMMARIPS-HN-LAUNCH.txt`
-  (also run-sheet 7-10, Q1, Q3). Posts: `~/workspace/GAMMARIPS-POSTS.txt`.
-- **All GTM moved to Grok Bot 09-16** ([[social-strategy-moved-to-grok-bot]]): prompt in
-  `~/workspace/GROKBOT-SETUP-PROMPT.txt`, workspace-root session. x-poster KILLED 09-16.
-- Revoke + regenerate the 08-06 test MCP key (pasted in chat). Record the 08-17 zero-trials
-  gate disposition ([[mcp-monetization-killswitch]]); the 10-05 gate stands. win-tracker
-  (`d44a272`) + blog-generator redeploy for the 08-25 cohort pin + newsletter fix.
+## Owner queue (his acts, details in the owner steps file)
 
-## Watch / dated checkpoints
-- **Billing export (from ~10-05):** Cloud Run weekly cost should drop well below $12.9/wk after the
-  09-28 MCP fix. Rollback env var `MCP_GET_STREAM_ENABLED=true`. [[vertex-cost-measurement-method]]
-- **Next NYSE holiday 2026-11-26:** confirm neither `forward-paper-trader-label-pool`
-  (17:00 ET that day) nor `dbt-daily-build` (06:30 ET 11-27) pages. Both holiday-noise
-  fixes deployed 09-08 (dbt-runner-00011, trader-00054). [[market-holiday-cron-noise-two-chains]]
+1. Stripe: deactivate the payment link and the promotion code. Archive 6 prices and the product.
+   Keep the webhook until the story page ships.
+2. Massive: cancel fully.
+3. X API tier and FMP plan: check, cancel a paid one. Not measured.
+4. Say "go" for step 5. Then remove the `mcp` CNAME in Squarespace DNS after the MCP delete.
+5. His calls: profitscout-lx6bb (unused, $3.84 a month), irw-app, the stale fida8 copy of
+   evanparra-ai-site, the MCP listings, the GammaRips Grok Bot.
 
-## Open engineering (small items archived to `docs/archive/` on demand; ask git log)
-- 🔴 No spread/depth measurement exists (Polygon NBBO entitlement, owner $ call).
-- MCP `get_regime_context` `lag_note` does not mention the FRED publication difference.
-- `relaunch_email.py` mails Mailgun-suppressed addresses (14 of 30 failures on the 08-31
-  send). Fix before any future send. [[dormant-list-is-dead]]
-- Least-privilege service accounts: 12/16 Cloud Run services run as the default compute
-  SA with `roles/editor`. Plan + order in [[least-privilege-service-accounts-plan]].
-- `content-blast-mon-0530` PAUSED since 07-05; unpause only after the blog-generator redeploy.
-- P1 live 10:00 anchor pass — ACCEPTED, not built, owner $ (Polygon cost). Sized 08-31:
-  only 31.7% of name-days have a real print at 10:00-10:04, so every opportunity sample
-  is liquidity-selected. [[entry-mark-is-a-delayed-day-close]]
+## Step 5, after "go" (this session's act)
 
-## Live posture
-- **FREEZE to 2026-12-31 (owner call 10-15, relayed by the trader session):** no engine pool,
-  universe or contract change until then unless the owner asks. A change inside the window
-  cannot be read apart from the trader results. Rollback of a broken scan is not a change.
-  Trader budget = 0.30 x equity per name, 2 names (about $360, about $660 after his deposit).
-- LIQUID-UNIVERSE FUNNEL LIVE 2026-08-24 (`docs/DECISIONS/2026-08-24-liquid-universe-funnel.md`):
-  100 most liquid names, not movers; $500K UOA floor gone. Ships on FILLS (no-fill 40.5%
-  -> 6.1%), NEVER on edge — that framing is a forbidden claim. Cohort 08-25. Stock rank
-  term = 20-session median dollar volume since 10-15 (`rank_basis` column). Revs
-  enrichment-00050-q54 / notifier-00064-prb; scanner rev in the DECISIONS note.
-- Selection research CLOSED (08-22: pool = matched random; 08-31 exception null; 10-15
-  owner-reopened stock-move study NOT PASS). [[selection-research-closed]]. Do not re-open.
-- No engine execution policy since 09-28 (V7.1 RETIRED, `docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md`). The engine is a data pipeline
-  for the MCP and the VM trader. Keep `pool-liquidity-refresh` and all data jobs enabled.
-- Owner trades LIVE (Robinhood since 07-09). Daily crons run; MCP paywall ENFORCE.
-- Health: operator digest 07:15 ET weekdays; SEO auth via the `seo-auth` skill.
+Delete the items marked "Delete" in the Step 5 columns of `docs/SHUTDOWN-2026-10-29.md`. Check each
+item against DO NOT TOUCH first. Keep: gammarips-webapp, its 14 secrets, Firestore, the BigQuery
+datasets, the shared repo `cloud-run-source-deploy`, the shared build buckets, the default compute
+service account, evanparra-ai-site, irw-app, tt-staging-evidence, billing_export, the `texttimeline`
+AR repo. After the delete, update the shutdown doc and this file.
+
+## Watch
+
+- `profit_scout.llm_traces_v1` drops partitions after 180 days. Remove the expiry if the story
+  needs the LLM traces.
+- gammarips.com renews 2026-12-02 at Squarespace. The story page needs it.

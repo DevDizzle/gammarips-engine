@@ -5,6 +5,9 @@ History lives in `docs/DECISIONS/` (one dated note per change) and `docs/wiki/`.
 For the one-page operator view, see [`CHEAT-SHEET.md`](../CHEAT-SHEET.md).
 
 ## Status
+**SHUT DOWN 2026-10-29.** All engine scheduler jobs are paused and the pipeline does not run.
+See `docs/DECISIONS/2026-10-29-shutdown.md`. The text below is the record.
+
 **RETIRED 2026-09-28. No engine execution policy is live.** The engine no longer
 selects a daily pick, paper-trades it, or evaluates LLM output. It runs as a data
 pipeline for `gammarips-mcp` and the VM trader in `gammarips-trader`. The trader
