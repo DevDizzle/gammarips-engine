@@ -107,8 +107,8 @@ ENRICH_THINKING_BUDGET = int(os.getenv("ENRICH_THINKING_BUDGET", "0"))
 # notifier so one env var governs both. See 2026-06-11-edge-rank-pool-cap.md.
 ENRICH_BULLISH_ONLY = os.getenv("BULLISH_ONLY", "true").strip().lower() in ("1", "true", "yes")
 # Tradeable delta band (confirmed Q19 trap-escape lever): |delta| 0.20-0.46.
-EDGE_DELTA_LO = float(os.getenv("EDGE_DELTA_LO", "0.20"))
-EDGE_DELTA_HI = float(os.getenv("EDGE_DELTA_HI", "0.46"))
+EDGE_DELTA_LO = float(os.getenv("EDGE_DELTA_LO", "0.22"))
+EDGE_DELTA_HI = float(os.getenv("EDGE_DELTA_HI", "0.48"))
 
 # 60-day underlying-momentum SOFT pre-rank tilt (2026-06-19). A SECOND soft lever
 # alongside the delta band: BULLISH names that are "ripping" (mom_60 >= MOM_THRESHOLD)
