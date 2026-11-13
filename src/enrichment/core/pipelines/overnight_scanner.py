@@ -95,9 +95,9 @@ LIQUID_DV_MIN_SESSIONS = 10
 # replay). The 2026-06-04 "no hard OI floor" call protected fresh UOA sweeps
 # whose OI builds overnight; the liquid universe no longer selects on sweeps.
 # All three: 0 = off.
-CONTRACT_MIN_MID = float(__import__("os").environ.get("CONTRACT_MIN_MID", "0"))
-CONTRACT_MAX_DELTA = float(__import__("os").environ.get("CONTRACT_MAX_DELTA", "0"))
-CONTRACT_MIN_OI = int(__import__("os").environ.get("CONTRACT_MIN_OI", "0"))
+CONTRACT_MIN_MID = float(__import__("os").environ.get("CONTRACT_MIN_MID", "1.0"))
+CONTRACT_MAX_DELTA = float(__import__("os").environ.get("CONTRACT_MAX_DELTA", "0.48"))
+CONTRACT_MIN_OI = int(__import__("os").environ.get("CONTRACT_MIN_OI", "500"))
 # CONTRACT_OI_SATURATION (2026-10-15) is the open interest where the chooser's
 # OI term stops rising. The 2026-07-28 log ramp saturated at 3,000 because the
 # entry-day ghost rate flattened there. On the liquid universe 80% of the picks
@@ -108,7 +108,7 @@ CONTRACT_MIN_OI = int(__import__("os").environ.get("CONTRACT_MIN_OI", "0"))
 # 88% at 3-10k, 72% at 1-3k. A higher saturation point prefers the deepest
 # strike in the band when one exists. Legacy value 3000 = unchanged behaviour.
 # See docs/DECISIONS/2026-10-15-contract-oi-saturation.md.
-CONTRACT_OI_SATURATION = float(__import__("os").environ.get("CONTRACT_OI_SATURATION", "3000"))
+CONTRACT_OI_SATURATION = float(__import__("os").environ.get("CONTRACT_OI_SATURATION", "5000"))
 # Cluster boost config
 CLUSTER_MIN_SIZE = 4         # Minimum qualifying tickers in same industry+direction
 CLUSTER_MIN_SCORE = 3        # Only count tickers scoring >= this toward cluster
