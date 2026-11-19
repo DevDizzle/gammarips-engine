@@ -1,7 +1,8 @@
 # GammaRips — Responsive Search Ad copy (drop-in for the Google Ads UI)
+# UPDATED 2026-11-18 for Combo A Dataset + $29/mo Founding Offer + 30-Day Trial + OAuth 2.1.
 # COMPLIANCE: describes DATA + TOOLS + WORKFLOW only. Never a return, win rate,
-# profit, "signal", or advice. Char counts verified against Google limits.
-# All copy must PASS gammarips-review before launch (see README.md).
+# profit, "signal", or advice. Zero /scorecard references. Char counts verified
+# against Google limits (Headlines <=30, Descriptions <=90, Sitelinks <=25 / <=35, Callouts <=25).
 #
 # ==============================================================================
 # RSA #1  ->  AG1 (MCP category) + AG2 (options-data-for-builders)
@@ -12,52 +13,52 @@ FINAL URL:
 https://gammarips.com/developers
 
 HEADLINES (15, <=30 chars):
-1.  Options Flow Data for Agents
-2.  Anti-Firehose Options Data
-3.  MCP Access for AI Traders
-4.  Point-in-Time, Leakage-Safe
-5.  Realized MFE/MAE Surfaces
-6.  One Curated Pool, Not Noise
-7.  Built for Claude Code & Cursor
-8.  Free Keyless Tier to Try
-9.  No Pick Endpoint
-10. Not Advice. Just Data.
-11. Options Data via MCP
-12. Wire Your Agent to Real Data
-13. Curated Daily Options Pool
-14. For BYO-Agent Traders
-15. Unusual Options Flow, Curated
+1.  Options Dataset for AI Agents
+2.  MCP Server for Options Data
+3.  $29/mo · 30-Day Free Trial
+4.  Claude, ChatGPT, Cursor, Codex
+5.  Nightly Combo A Options Pool
+6.  10-Min Intraday Liquidity
+7.  3-Day MFE/MAE Outcome History
+8.  Mid >= $1 · Open Interest 500+
+9.  Free 3-Contract MCP Preview
+10. OAuth 2.1 or Bearer API Key
+11. Point-in-Time, Leakage-Safe
+12. No Pick Endpoint — Pure Data
+13. RV/IV & Grounded Catalysts
+14. Open-Source Agent Harness
+15. Educational Data, Not Advice
 
 DESCRIPTIONS (4, <=90 chars):
-1. Anti-firehose options-flow data for your trading agent. Curated daily pool, not noise.
-2. Point-in-time features and realized MFE/MAE outcome surfaces via MCP. Not advice.
-3. Free keyless tier to try. No pick endpoint. Built for Claude Code, Cursor and MCP.
-4. Options-flow data and tools your agent reasons over to its own trade. Not a signal.
+1. Nightly US options dataset (Mid >= $1, OI >= 500, RV/IV) served to your AI over MCP.
+2. Connect Claude, ChatGPT, Cursor or Codex via OAuth 2.1. 30-day free trial, then $29/mo.
+3. 10-min morning liquidity snapshots & 3-day excursion surfaces. Data only, not advice.
+4. Try today's 3-contract preview free on /mcp. No card, no API key. 9 read-only MCP tools.
 
 DISPLAY PATH (<=15 each):
-Path 1: options-data
-Path 2: for-agents
+Path 1: options-dataset
+Path 2: mcp-agents
 
 BUSINESS NAME:
 GammaRips
 
 SITELINKS (6; unique text <=25, unique final URL, 2 desc lines <=35):
-1. Developer Docs   | https://gammarips.com/developers    | Keyless try-now with examples   | Wire your agent in minutes
-2. Pricing          | https://gammarips.com/pricing       | $39/mo, 7-day free trial        | Free anon tier to start
-3. How It Works     | https://gammarips.com/how-it-works  | Curation, gates, methodology    | Data, not advice
-4. Methodology      | https://gammarips.com/methodology   | Point-in-time, leakage-safe     | Realized MFE/MAE surfaces
-5. The Lab          | https://gammarips.com/lab           | Pool-level experiments          | Honest, cohort-shaped stats
-6. Paper Scorecard  | https://gammarips.com/scorecard     | Pool-level, cohort-shaped       | Paper basis, losers included
+1. Start 30-Day Free Trial | https://gammarips.com/pricing       | $29/mo founding price ($299/yr) | Full Pro MCP from minute one
+2. MCP & API Reference     | https://gammarips.com/developers    | Connect Claude, ChatGPT, Cursor | 9 read-only tools over HTTP
+3. 3-Contract Pool Preview | https://gammarips.com/signals       | Browse today's free preview     | No account or API key needed
+4. How the Pipeline Works  | https://gammarips.com/how-it-works  | 23:00 ET scan to 10-min checks  | Educational data, not advice
+5. Combo A Methodology     | https://gammarips.com/methodology   | Mid >= $1, OI >= 500, RV/IV     | Point-in-time leakage wall
+6. Catalyst Lab Research   | https://gammarips.com/lab           | Walk-forward N=5,575 audit      | Hypotheses & published tests
 
 CALLOUTS (8, <=25 chars):
-1. Anti-Firehose Curation
-2. Free Keyless Tier
-3. No Pick Endpoint
-4. Point-in-Time Data
-5. Leakage-Safe
-6. Realized MFE/MAE Data
-7. Built for BYO Agents
-8. Not Advice, Just Data
+1. 30-Day Free Trial
+2. $29/mo Founding Price
+3. Free 3-Contract Preview
+4. OAuth 2.1 & API Keys
+5. 10-Min Liquidity Checks
+6. 3-Day Excursion Surfaces
+7. No Shared Pick Endpoint
+8. Data Only, Not Advice
 
 # ==============================================================================
 # RSA #2  ->  AG3 (brand)
@@ -69,12 +70,12 @@ FINAL URL:
 https://gammarips.com/
 
 HEADLINES (brand-forward; reuse others from RSA #1 to fill 15):
-1.  GammaRips Options Flow
-2.  GammaRips MCP Data Layer
-3.  Options Data for Your Agent
-4.  Anti-Firehose. Not Advice.
-5.  Free Keyless Tier to Try
+1.  GammaRips Options Dataset
+2.  GammaRips MCP for AI Agents
+3.  $29/mo · 30-Day Free Trial
+4.  Claude, ChatGPT & Cursor MCP
+5.  Free 3-Contract Pool Preview
 
 DESCRIPTIONS (<=90):
-1. GammaRips: anti-firehose options-flow data for AI agents. Curated pool, not advice.
-2. Point-in-time features and realized outcome surfaces via MCP. Free keyless tier.
+1. GammaRips nightly Combo A options dataset and 3-day excursion history for AI agents.
+2. Connect Claude, ChatGPT, Cursor or Codex over MCP. 30-day free trial, $29/mo founding.

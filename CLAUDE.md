@@ -1,8 +1,10 @@
 # CLAUDE.md — GammaRips Engine
 
-> **SHUT DOWN 2026-10-29 (owner call).** All scheduler jobs are paused. The services wait for
-> the owner's "go" to delete. Do not resume, redeploy, or fix stale data. The text below is the
-> record of what ran. Start at `NEXT_SESSION_PROMPT.md` and `docs/DECISIONS/2026-10-29-shutdown.md`.
+> **RESTORED IN PART 2026-10-29 evening (owner "go").** The same-day shutdown deleted the
+> services. The data pipeline is redeployed. The story page is canceled. **All 18 jobs are PAUSED
+> since 2026-11-04 (owner call, no Massive plan).** Do not resume them until Massive is back. Do
+> not delete what the restore brought back. Start at `NEXT_SESSION_PROMPT.md`, then
+> `docs/DECISIONS/2026-10-29-shutdown.md` (see its "Reversal" section).
 
 ## Mission
 GammaRips is an overnight options-flow **intelligence engine**. It scans the US options market for unusual activity, curates *hard* (anti-firehose) down to a tiny high-signal BULLISH pool, and surfaces each candidate's **opportunity surface** (realized MFE/MAE excursions) — profit *potential*, with the exit left as a free variable. This repo is the backend + research workspace behind that.

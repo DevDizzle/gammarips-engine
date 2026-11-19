@@ -20,7 +20,7 @@ Source of truth for what's in the account. If you edit in the Google Ads UI, rec
 - **AG2 — options-data/flow API for builders (Phrase) -> /developers.** Where the budget actually finds clicks. The technical data-buyer is the closest real match to the MCP buyer. Still MCP-direct (dev landing), not the retail web UI.
 - **AG3 — brand (Exact+Phrase) -> /.** Cheap defense.
 
-Landing pages verified live (200) on 2026-07-09: `/developers`, `/pricing`, `/how-it-works`, `/methodology`, `/lab`, `/scorecard`, `/`.
+Landing pages verified live (200) on 2026-11-18: `/developers`, `/pricing`, `/signals`, `/how-it-works`, `/methodology`, `/lab`, `/`. (Never use retired `/scorecard`.)
 
 ## Compliance posture (READ before launch)
 - **Certification is very likely NOT required.** You're a data/software vendor, not a broker or adviser. Verified 2026-07-09 against Google's "Complex speculative financial products" and "Financial products and services" policies — both target *providers* of the instruments / money-managers, not analytics vendors.
@@ -31,12 +31,12 @@ Landing pages verified live (200) on 2026-07-09: `/developers`, `/pricing`, `/ho
 > ✅ **`gammarips-review` SIGN-OFF — 2026-07-09: SHIP.** First pass returned FIX (track-record sitelink optics, premature self-certification, "Claude" vs claude.ai-web overreach, missing named negatives); all four fixed; clean re-review confirmed no new issues and all char limits/factual claims accurate. Assets are compliance-cleared. A re-review after copy, keyword, or landing-page changes is optional and owner-invoked (2026-08-19).
 
 ## Measurement (for reading the test, NOT for bidding)
-- Import a **trial-start / signup** conversion from GA4 (`G-ZF0DQVQEKJ`) + Stripe.
-- Watch `mcp_analytics` `subscription_required` touches (paywall hits) and `/developers` sessions.
+- Import **`trial_start`** (emitted server-side by the Stripe webhook with `$29.00` / `$299.00` plan value on 30-day free trial starts) and **`sign_up`** from GA4 (`G-ZF0DQVQEKJ`) into Google Ads (`AW-17603675875`).
+- Watch `mcp_analytics` `subscription_required` touches (paywall hits), `begin_checkout`, and `/developers` + `/pricing` sessions.
 - Negatives cadence: strong list day one; **scrub the Search Terms report on day 3-4 and day 10** (at $20/day you spend real money before the first scrub).
 
 ## The honest CAC math (what this probe can and can't prove)
-At a ~$3.50 CPC, $20/day ≈ **5-6 clicks/day ≈ ~170 clicks/mo**. At a generous 2% click->paid rate that's ~3 trials -> maybe **1 paying sub/mo at a CAC near $600** for a $39/mo ($468/yr) product. **That does not pencil as ROI month one, and it isn't supposed to.** The probe's real job: find out whether the "agentic/MCP trading data" category has *any* searchers yet. Read AG1's impression volume as that answer.
+At a ~$3.50 CPC, $20/day ≈ **5-6 clicks/day ≈ ~170 clicks/mo**. With the 30-day free trial and seamless 1-click Google/Email -> Stripe checkout on `/pricing`, track **click -> `trial_start` rate** first (target >= 3–5% on exact MCP queries like `[best mcp servers for trading]` and `[top mcps for hedge funds]`, which already show 250+ organic impressions/mo in GSC). Founding pricing is `$29/mo` (`$348/yr`) or `$299/yr` upfront.
 
 ## Kill metric (tie to the GTM gate)
 - **Day 14:** if AG1 (exact category) has **< ~20 impressions**, the category has no search volume yet — that's the finding. Shift the budget to AG2 adjacency, or reopen the free-surface fork (fork A) you passed on.
